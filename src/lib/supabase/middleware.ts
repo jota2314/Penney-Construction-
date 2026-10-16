@@ -25,6 +25,7 @@ const OFFICE_PREFIXES = [
   "/meetings",
   "/hiring",
   "/guides",
+  "/portal-preview",
 ];
 
 const CREW_PREFIXES = ["/crew/", "/crew"];

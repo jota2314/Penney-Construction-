@@ -10,10 +10,10 @@ import {
   Eye,
   Loader2,
   Power,
-  ExternalLink,
   ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { PortalContentManager } from "./portal-content-manager";
 
 interface PortalRow {
   id: string;
@@ -180,6 +180,9 @@ export function ProjectPortalTab({
             Create portal link
           </Button>
         </div>
+        <div className="mt-4">
+          <PortalContentManager projectId={projectId} userId={userId} />
+        </div>
       </div>
     );
   }
@@ -225,11 +228,6 @@ export function ProjectPortalTab({
               <Mail className="h-3.5 w-3.5" /> Email to client
             </Button>
           </a>
-          <a href={link} target="_blank" rel="noreferrer">
-            <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground">
-              <ExternalLink className="h-3.5 w-3.5" /> Preview
-            </Button>
-          </a>
         </div>
       </div>
 
@@ -269,6 +267,8 @@ export function ProjectPortalTab({
           {portal.enabled ? "Turn off" : "Turn on"}
         </Button>
       </div>
+
+      <PortalContentManager projectId={projectId} userId={userId} />
     </div>
   );
 }

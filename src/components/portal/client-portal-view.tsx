@@ -1,0 +1,785 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { formatMoney } from "@/lib/money";
+import type {
+  PortalData,
+  PortalDecision,
+  PortalDocument,
+  PortalDocumentGroup,
+  PortalPhoto,
+  PortalSelectionItem,
+  PortalSelectionSheet,
+  SelectionItemStatus,
+} from "@/lib/portal/types";
+import { portalFont } from "./portal-font";
+
+const CONTACT_EMAIL = "jbetancur@penneyconstructioninc.com";
+const CONTACT_PHONE = "978-621-4387";
+
+// Light, phone-first portal in the same palette as the client packages
+// (selection sheets, design presentations): warm paper, dark ink, terracotta.
+// Content is visible immediately — no reveal-on-scroll or fade-in effects.
+const STATUS: Record<SelectionItemStatus, { label: string; color: string }> = {
+  selected: { label: "Selected", color: "#2F6B4F" },
+  proposed: { label: "Proposed", color: "#606B65" },
+  pending: { label: "Pending", color: "#B4471F" },
+  reused: { label: "Reused", color: "#2F5D7C" },
+  ordered: { label: "Ordered", color: "#7A5A1E" },
+  installed: { label: "Installed", color: "#2F6B4F" },
+};
+
+const DOC_GROUPS: { key: PortalDocumentGroup; label: string }[] = [
+  { key: "design", label: "Design" },
+  { key: "selections", label: "Selections" },
+  { key: "contract", label: "Contract" },
+  { key: "change_order", label: "Change orders" },
+  { key: "invoice", label: "Invoices" },
+  { key: "permit", label: "Permits" },
+  { key: "other", label: "Other" },
+];
+
+type Tab = "home" | "schedule" | "selections" | "documents" | "payments" | "photos";
+const TABS: [Tab, string][] = [
+  ["home", "Home"],
+  ["schedule", "Schedule"],
+  ["selections", "Selections"],
+  ["documents", "Documents"],
+  ["payments", "Payments"],
+  ["photos", "Photos"],
+];
+
+// Always to the cent — these figures mirror the PDFs and invoices.
+const fmt = (v: number) => formatMoney(v, { cents: "always" });
+const parseDay = (d: string) => new Date(d + (d.length === 10 ? "T00:00:00" : ""));
+const fmtDate = (d: string | null) =>
+  d ? parseDay(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "TBD";
+const fmtShort = (d: string | null) =>
+  d ? parseDay(d).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBD";
+// Estimated phases get "week of" granularity, snapped to Monday.
+const weekOf = (d: string | null) => {
+  if (!d) return "Date to be set";
+  const dt = parseDay(d);
+  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+  return `Week of ${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+};
+
+const STATUS_WORDS: Record<string, string> = {
+  lead: "Planning",
+  estimating: "Planning",
+  proposal_sent: "Planning",
+  contracted: "Getting ready",
+  in_progress: "Under construction",
+  audit: "Wrapping up",
+  completed: "Complete",
+};
+
+export interface ClientPortalViewProps {
+  data: PortalData;
+  /** Client mode: the portal token (enables picking). Absent in preview. */
+  token?: string;
+  onReload?: () => void;
+}
+
+export function ClientPortalView({ data, token, onReload }: ClientPortalViewProps) {
+  const preview = data.mode === "preview";
+  const [tab, setTab] = useState<Tab>("home");
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  // Deep links: /portal/<token>#selections opens that tab.
+  useEffect(() => {
+    const fromHash = () => {
+      const h = window.location.hash.replace("#", "") as Tab;
+      if (TABS.some(([k]) => k === h)) setTab(h);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
+  function go(t: Tab) {
+    setTab(t);
+    try { history.replaceState(null, "", `#${t}`); } catch { /* ignore */ }
+    window.scrollTo({ top: 0 });
+  }
+
+  const subject = encodeURIComponent(`${data.project.project_number} — ${data.project.name}`);
+  const mailto = `mailto:${CONTACT_EMAIL}?subject=${subject}`;
+
+  const total = data.schedule.length;
+  const done = data.schedule.filter((p) => p.status === "completed").length;
+  const current = data.schedule.find((p) => p.status === "in_progress");
+  const pct = total ? Math.round(((done + (current ? 0.5 : 0)) / total) * 100) : 0;
+  const statusWord = STATUS_WORDS[data.project.status] ?? "In progress";
+
+  const visibleDecisions = data.selections.filter((s) => s.client_visible !== false);
+  const pendingDecisions = visibleDecisions.filter((s) => s.status === "pending").length;
+
+  return (
+    <div className={`pc-portal ${portalFont.className} min-h-screen`}>
+      <style>{`
+        .pc-portal { --paper:#F7F5F1; --card:#FFFFFF; --ink:#252D2B; --muted:#606B65; --line:#E4E0D8; --accent:#C66638; --accent-dark:#9E4E28; background:var(--paper); color:var(--ink); -webkit-text-size-adjust:100%; }
+        .pc-portal .card { background:var(--card); border:1px solid var(--line); border-radius:16px; }
+        .pc-portal .label { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+        .pc-portal .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:0 18px; border-radius:12px; font-weight:700; font-size:15px; }
+        .pc-portal .btn-primary { background:var(--accent); color:#fff; }
+        .pc-portal .btn-primary:active { background:var(--accent-dark); }
+        .pc-portal .btn-ghost { background:#fff; color:var(--ink); border:1px solid var(--line); }
+        .pc-portal .tabs::-webkit-scrollbar { display:none; }
+        .pc-portal .clamp3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+      `}</style>
+
+      {preview && <PreviewBanner data={data} />}
+
+      {/* ---------------- HEADER ---------------- */}
+      <div className="h-1 bg-[var(--accent)]" />
+      <header className="bg-[var(--ink)] text-white">
+        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
+          <span className="flex h-11 w-[68px] shrink-0 items-center justify-center rounded-lg bg-white px-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-email.jpg" alt="Penney Construction" className="max-h-9 w-auto" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold text-white/70">Penney Construction</p>
+            <p className="text-[15px] font-bold leading-tight">Your project portal</p>
+          </div>
+        </div>
+      </header>
+
+      <section className="mx-auto max-w-2xl px-4 pb-5 pt-6">
+        <h1 className="text-[26px] font-extrabold leading-[1.1] tracking-[-0.01em]">{data.project.name}</h1>
+        <p className="mt-1.5 text-[15px] text-[var(--muted)]">{data.project.address || data.project.project_number}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-[var(--ink)] px-3 py-1 text-[13px] font-bold text-white">{statusWord}</span>
+          {data.client_name && <span className="text-[14px] text-[var(--muted)]">for {data.client_name}</span>}
+        </div>
+        {total > 0 && (
+          <div className="mt-4">
+            <div className="mb-1.5 flex items-baseline justify-between text-[14px]">
+              <span className="font-semibold">{current ? current.name : pct === 100 ? "Complete" : "Schedule"}</span>
+              <span className="font-bold">{pct}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-[var(--line)]">
+              <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ---------------- TABS ---------------- */}
+      <nav className="sticky top-0 z-20 border-y border-[var(--line)] bg-[var(--paper)]/95 backdrop-blur">
+        <div className="tabs mx-auto flex max-w-2xl gap-1.5 overflow-x-auto px-3 py-2" style={{ scrollbarWidth: "none" }}>
+          {TABS.map(([key, label]) => {
+            const badge = key === "home" ? data.needed.length : key === "selections" ? pendingDecisions : 0;
+            const active = tab === key;
+            return (
+              <button key={key} onClick={() => go(key)}
+                className={`flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full px-4 text-[15px] font-bold ${active ? "bg-[var(--ink)] text-white" : "text-[var(--muted)]"}`}>
+                {label}
+                {badge > 0 && (
+                  <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[12px] ${active ? "bg-white text-[var(--ink)]" : "bg-[var(--accent)] text-white"}`}>{badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
+        {tab === "home" && <HomeTab data={data} go={go} />}
+        {tab === "schedule" && <ScheduleTab data={data} />}
+        {tab === "selections" && (
+          <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} />
+        )}
+        {tab === "documents" && <DocumentsTab docs={data.documents} />}
+        {tab === "payments" && <PaymentsTab data={data} mailto={mailto} />}
+        {tab === "photos" && <PhotosTab photos={data.photos} onOpen={setLightbox} />}
+      </main>
+
+      {lightbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4" onClick={() => setLightbox(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Progress photo" className="max-h-full max-w-full rounded-lg" />
+          <button className="btn absolute right-3 top-3 text-white" onClick={() => setLightbox(null)}>Close</button>
+        </div>
+      )}
+
+      <footer className="mx-auto max-w-2xl px-4 pb-12 pt-4 text-center">
+        <a href={mailto} className="btn btn-primary w-full max-w-sm">Email Penney Construction</a>
+        <p className="mt-4 text-[14px] text-[var(--muted)]">
+          <a href={`tel:${CONTACT_PHONE.replace(/-/g, "")}`} className="font-semibold text-[var(--ink)]">{CONTACT_PHONE}</a> · North Shore, MA
+        </p>
+      </footer>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Preview banner
+function PreviewBanner({ data }: { data: PortalData }) {
+  const p = data.portal;
+  const linkState = !p?.exists
+    ? "No portal link yet"
+    : !p.enabled
+      ? "Link turned off"
+      : `Link live · ${p.view_count} client view${p.view_count === 1 ? "" : "s"}${p.link_sent_at ? ` · sent ${fmtShort(p.link_sent_at.slice(0, 10))}` : " · not sent"}`;
+  return (
+    <div className="bg-[#7A2E12] px-4 py-2.5 text-white">
+      <div className="mx-auto max-w-2xl">
+        <p className="text-[14px] font-extrabold">Staff preview</p>
+        <p className="text-[13px] leading-snug text-white/85">
+          This is the client&apos;s view. Anything marked DRAFT or Hidden is not visible to them. {linkState}.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Draft({ children = "Draft · not visible to client" }: { children?: React.ReactNode }) {
+  return <span className="inline-block rounded-md bg-[#7A2E12] px-2 py-0.5 text-[12px] font-bold text-white">{children}</span>;
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="card p-6 text-center text-[15px] text-[var(--muted)]">{children}</div>;
+}
+
+// ─────────────────────────────── Home
+function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
+  const t = data.today_on_site;
+  const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
+  const upcoming = data.schedule.filter((p) => p.status !== "completed").slice(0, 3);
+  const sheet = data.selection_sheet;
+  const f = data.financials;
+  const counts = sheet ? countStatuses(sheet.items) : null;
+
+  return (
+    <>
+      <section className="card p-4">
+        <p className="label">Needed from you</p>
+        {data.needed.length === 0 ? (
+          <p className="mt-2 text-[16px] font-semibold">Nothing right now. We&apos;ll email you when we need something.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-[var(--line)]">
+            {data.needed.map((n, i) => (
+              <li key={i} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-[16px] font-bold">{n.title}</p>
+                  {n.detail && <p className="clamp3 mt-0.5 text-[14px] text-[var(--muted)]">{n.detail}</p>}
+                </div>
+                {n.url ? (
+                  <a href={n.url} target="_blank" rel="noreferrer" className="btn btn-primary shrink-0">Open</a>
+                ) : n.tab ? (
+                  <button onClick={() => go(n.tab!)} className="btn btn-primary shrink-0">Choose</button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {showToday && t && (
+        <section className="card border-l-4 border-l-[var(--accent)] p-4">
+          <div className="flex items-center justify-between gap-2">
+            <p className="label">Today at your home</p>
+            {t.live_count > 0 && <span className="text-[13px] font-bold text-[#2F6B4F]">● On site now</span>}
+          </div>
+          <p className="mt-1.5 text-[19px] font-extrabold">
+            {t.live_count > 0
+              ? `${t.live_count} crew member${t.live_count === 1 ? "" : "s"} at your home`
+              : t.planned_count > 0
+                ? `${t.planned_count} crew member${t.planned_count === 1 ? "" : "s"} scheduled today`
+                : "Today's plan"}
+          </p>
+          {t.tasks.length > 0 && (
+            <ul className="mt-2 space-y-2">
+              {t.tasks.map((task, i) => (
+                <li key={i}>
+                  <p className="text-[16px] font-semibold">{task.name}</p>
+                  {task.description && <p className="text-[14px] text-[var(--muted)]">{task.description}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {(t.tomorrow?.tasks.length ?? 0) > 0 && (
+            <div className="mt-3 border-t border-[var(--line)] pt-3">
+              <p className="label">Tomorrow</p>
+              <ul className="mt-1.5 space-y-1.5">
+                {t.tomorrow!.tasks.map((task, i) => (
+                  <li key={i} className="text-[15px] font-semibold">{task.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="card p-4">
+        <div className="flex items-center justify-between">
+          <p className="label">Up next</p>
+          {data.schedule.length > 0 && <button onClick={() => go("schedule")} className="text-[14px] font-bold text-[var(--accent-dark)]">Full schedule</button>}
+        </div>
+        {upcoming.length === 0 ? (
+          <p className="mt-2 text-[15px] text-[var(--muted)]">Your schedule will appear here once your start date is set.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-[var(--line)]">
+            {upcoming.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="text-[16px] font-semibold">{p.name}</span>
+                <span className="shrink-0 text-[14px] text-[var(--muted)]">
+                  {p.status === "in_progress" ? "In progress" : p.firm ? fmtShort(p.start_date) : weekOf(p.start_date)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Shortcut onClick={() => go("selections")} title="Selections"
+          line={sheet ? [sheet.title.replace(/^Fixture \+ Finish /, ""), sheet.revision].filter(Boolean).join(" ") : `${data.selections.length} item${data.selections.length === 1 ? "" : "s"}`}
+          sub={counts ? `${counts.selected} selected · ${counts.pending} pending` : undefined} draft={sheet?.staged} />
+        <Shortcut onClick={() => go("documents")} title="Documents" line={`${data.documents.length} file${data.documents.length === 1 ? "" : "s"}`} />
+        <Shortcut onClick={() => go("payments")} title="Payments"
+          line={f ? `${fmt(f.total_payments_received)} paid` : "—"} sub={f ? `of ${fmt(f.adjusted_contract)}` : undefined} />
+        <Shortcut onClick={() => go("photos")} title="Photos" line={`${data.photos.length} photo${data.photos.length === 1 ? "" : "s"}`} />
+      </div>
+    </>
+  );
+}
+
+function Shortcut({ title, line, sub, onClick, draft }: { title: string; line: string; sub?: string; onClick: () => void; draft?: boolean }) {
+  return (
+    <button onClick={onClick} className="card flex min-h-[92px] flex-col items-start justify-start p-3.5 text-left">
+      <p className="label">{title}</p>
+      <p className="mt-1 text-[16px] font-extrabold leading-tight">{line}</p>
+      {sub && <p className="mt-0.5 text-[13px] text-[var(--muted)]">{sub}</p>}
+      {draft && <p className="mt-1.5"><Draft>Draft</Draft></p>}
+    </button>
+  );
+}
+
+// ─────────────────────────────── Schedule
+function ScheduleTab({ data }: { data: PortalData }) {
+  if (data.schedule.length === 0) return <Empty>Your project timeline will appear here once it&apos;s scheduled.</Empty>;
+  return (
+    <>
+      <p className="px-1 text-[14px] leading-relaxed text-[var(--muted)]">
+        <b className="text-[var(--ink)]">Confirmed</b> dates are locked with our trades. <b className="text-[var(--ink)]">Estimated</b> dates firm up as work gets closer.
+      </p>
+      <ol className="card divide-y divide-[var(--line)]">
+        {data.schedule.map((p) => {
+          const isDone = p.status === "completed";
+          const isNow = p.status === "in_progress";
+          const isInspection = p.event_type === "inspection";
+          const chip = isDone ? ["Done", "#2F6B4F"] : isNow ? ["In progress", "#C66638"] : p.firm ? ["Confirmed", "#252D2B"] : ["Estimated", "#8A918C"];
+          return (
+            <li key={p.id} className={`flex gap-3 p-4 ${isNow ? "bg-[#FBF1EB]" : ""}`}>
+              <span className={`mt-1 h-3.5 w-3.5 shrink-0 ${isInspection ? "rotate-45 rounded-[3px]" : "rounded-full"}`}
+                style={{ background: isDone || isNow ? chip[1] : "transparent", border: `2px solid ${chip[1]}` }} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p className={`text-[16px] font-bold ${isDone ? "text-[var(--muted)]" : ""}`}>{p.name}</p>
+                  <span className="shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-bold text-white" style={{ background: chip[1] }}>{chip[0]}</span>
+                </div>
+                {p.description && <p className="mt-0.5 text-[14px] text-[var(--muted)]">{p.description}</p>}
+                <p className="mt-1 text-[14px] font-semibold text-[var(--muted)]">
+                  {p.firm || isDone || isNow ? `${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}` : weekOf(p.start_date)}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </>
+  );
+}
+
+// ─────────────────────────────── Selections
+function countStatuses(items: PortalSelectionItem[]) {
+  const c = { selected: 0, proposed: 0, pending: 0, reused: 0, ordered: 0, installed: 0 };
+  for (const i of items) c[i.status] += 1;
+  return c;
+}
+
+function SelectionsTab({ data, decisions, token, onReload }: { data: PortalData; decisions: PortalDecision[]; token?: string; onReload?: () => void }) {
+  const sheet = data.selection_sheet;
+  if (!sheet && decisions.length === 0) {
+    return <Empty>No selections yet. We&apos;ll email you when there&apos;s something to choose.</Empty>;
+  }
+  return (
+    <>
+      {sheet && <SheetView sheet={sheet} />}
+      {decisions.length > 0 && <Decisions decisions={decisions} token={token} onReload={onReload} preview={data.mode === "preview"} />}
+    </>
+  );
+}
+
+function SheetView({ sheet }: { sheet: PortalSelectionSheet }) {
+  const counts = countStatuses(sheet.items);
+  const sections: { name: string; items: PortalSelectionItem[] }[] = [];
+  for (const it of sheet.items) {
+    const name = it.section || "Selections";
+    const last = sections[sections.length - 1];
+    if (last && last.name === name) last.items.push(it);
+    else sections.push({ name, items: [it] });
+  }
+  return (
+    <>
+      <section className="card p-4">
+        {sheet.staged && <p className="mb-2"><Draft /></p>}
+        <p className="label">{sheet.sheet_date ? `Updated ${fmtDate(sheet.sheet_date)}` : "Selections"}</p>
+        <h2 className="mt-1 text-[22px] font-extrabold leading-tight">{[sheet.title, sheet.revision].filter(Boolean).join(" ")}</h2>
+        {sheet.intro && <p className="mt-1.5 text-[15px] leading-relaxed text-[var(--muted)]">{sheet.intro}</p>}
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {(Object.keys(STATUS) as SelectionItemStatus[]).filter((k) => counts[k] > 0).map((k) => (
+            <span key={k} className="rounded-full px-2.5 py-1 text-[13px] font-bold text-white" style={{ background: STATUS[k].color }}>
+              {counts[k]} {STATUS[k].label.toLowerCase()}
+            </span>
+          ))}
+        </div>
+        {sheet.pdf_url && (
+          <a href={sheet.pdf_url} target="_blank" rel="noreferrer" className="btn btn-primary mt-4 w-full">Open the full selection sheet (PDF)</a>
+        )}
+      </section>
+
+      {sections.map((s) => (
+        <section key={s.name} className="space-y-3">
+          <h3 className="px-1 pt-2 text-[18px] font-extrabold">{s.name}</h3>
+          {s.items.map((it) => <ItemCard key={it.id} item={it} showPrices={sheet.show_prices} />)}
+        </section>
+      ))}
+
+      {sheet.allowances.length > 0 && (
+        <section className="card p-4">
+          <p className="label">Allowance check</p>
+          <ul className="mt-2 divide-y divide-[var(--line)]">
+            {sheet.allowances.map((a, i) => (
+              <li key={i} className="py-3">
+                <p className="text-[16px] font-bold">{a.name}</p>
+                <div className="mt-1 flex flex-wrap gap-x-4 text-[14px]">
+                  <span>Allowance <b>{fmt(a.allowance)}</b></span>
+                  <span>Selected so far <b className={a.selected == null ? "text-[#B4471F]" : ""}>{a.selected == null ? "Pending" : fmt(a.selected)}</b></span>
+                </div>
+                {a.status && <p className="mt-1 text-[14px] text-[var(--muted)]">{a.status}</p>}
+              </li>
+            ))}
+          </ul>
+          {sheet.allowance_note && <p className="mt-2 text-[13px] leading-relaxed text-[var(--muted)]">{sheet.allowance_note}</p>}
+        </section>
+      )}
+
+      {sheet.notes.map((n, i) => (
+        <section key={i} className="card p-4">
+          <p className="text-[16px] font-extrabold text-[var(--accent-dark)]">{n.title}</p>
+          <p className="mt-1 text-[15px] leading-relaxed">{n.body}</p>
+        </section>
+      ))}
+    </>
+  );
+}
+
+function ItemCard({ item, showPrices }: { item: PortalSelectionItem; showPrices: boolean }) {
+  const [open, setOpen] = useState(false);
+  const st = STATUS[item.status] ?? STATUS.pending;
+  const hasPrice = showPrices && (item.ext_price != null || item.unit_price);
+  return (
+    <article className="card overflow-hidden">
+      <div className="flex gap-3 p-3.5">
+        <div className="flex h-[92px] w-[92px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--line)] bg-white">
+          {item.image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.image_url} alt={item.name} className="h-full w-full object-contain p-1" loading="lazy" />
+          ) : <span className="text-[12px] text-[var(--muted)]">No photo</span>}
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="inline-block rounded-md px-2 py-0.5 text-[12px] font-bold text-white" style={{ background: st.color }}>
+            {item.status_label || st.label}
+          </span>
+          <p className="mt-1 text-[16px] font-bold leading-snug">{item.name}</p>
+          {item.brand_model && <p className="mt-0.5 text-[14px] text-[var(--muted)]">{item.brand_model}</p>}
+        </div>
+      </div>
+      {(item.quantity || hasPrice) && (
+        <div className="flex items-baseline justify-between gap-3 border-t border-[var(--line)] px-3.5 py-2.5 text-[14px]">
+          <span className="text-[var(--muted)]">
+            {item.quantity && <>Qty <b className="text-[var(--ink)]">{item.quantity}</b></>}
+            {showPrices && item.unit_price && <> · {item.unit_price}</>}
+          </span>
+          {showPrices && (
+            <span className="shrink-0 text-[17px] font-extrabold">
+              {item.ext_price != null ? fmt(item.ext_price) : <span className="text-[#B4471F]">Price pending</span>}
+            </span>
+          )}
+        </div>
+      )}
+      {(item.details || item.price_note || item.product_url) && (
+        <div className="border-t border-[var(--line)] px-3.5 py-2.5">
+          {item.details && (
+            <p className={`whitespace-pre-line text-[14px] leading-relaxed text-[var(--ink)] ${open ? "" : "clamp3"}`}>{item.details}</p>
+          )}
+          {item.price_note && open && <p className="mt-1.5 text-[13px] text-[var(--muted)]">{item.price_note}</p>}
+          <div className="mt-1 flex flex-wrap items-center gap-x-5">
+            {(item.details?.length ?? 0) > 120 || item.price_note ? (
+              <button onClick={() => setOpen(!open)} className="min-h-[36px] text-[14px] font-bold text-[var(--accent-dark)]">{open ? "Less" : "More details"}</button>
+            ) : null}
+            {item.product_url && (
+              <a href={item.product_url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center text-[14px] font-bold text-[var(--accent-dark)]">
+                {item.link_label || "View product"} →
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+// Decision rows from client_selections — option picker or owner-supplied text.
+function Decisions({ decisions, token, onReload, preview }: { decisions: PortalDecision[]; token?: string; onReload?: () => void; preview: boolean }) {
+  const [picking, setPicking] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const canPick = !!token && !preview;
+  // Preview: rows hidden from the client stay folded so the page reads the
+  // way the client will see it.
+  const hiddenCount = decisions.filter((s) => s.client_visible === false).length;
+  const shown = decisions.filter((s) => s.client_visible !== false || showHidden);
+
+  async function send(body: Record<string, string>, key: string) {
+    if (!canPick) return;
+    setPicking(key);
+    const res = await fetch("/api/portal/select", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, ...body }),
+    });
+    const d = await res.json();
+    setPicking(null);
+    if (d.success) { setEditing(null); onReload?.(); }
+    else alert(d.error || "Could not save. Please try again.");
+  }
+
+  return (
+    <>
+      {shown.some((s) => s.client_visible !== false) && <h3 className="px-1 pt-2 text-[18px] font-extrabold">Decisions</h3>}
+      {hiddenCount > 0 && (
+        <button onClick={() => setShowHidden(!showHidden)} className="card w-full p-3 text-left text-[14px] font-bold text-[#7A2E12]">
+          {showHidden ? "Fold" : "Show"} {hiddenCount} decision row{hiddenCount === 1 ? "" : "s"} hidden from the client (staff only)
+        </button>
+      )}
+      {shown.map((s) => {
+        const hidden = s.client_visible === false;
+        return (
+          <section key={s.id} className={`card p-4 ${hidden ? "opacity-60" : ""}`}>
+            {hidden && <p className="mb-2"><Draft>Hidden from client</Draft></p>}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[17px] font-extrabold">{s.category}</p>
+                {s.description && <p className="mt-0.5 text-[14px] text-[var(--muted)]">{s.description}</p>}
+              </div>
+              <span className="shrink-0 rounded-md px-2 py-0.5 text-[12px] font-bold text-white"
+                style={{ background: s.status === "selected" ? STATUS.selected.color : STATUS.pending.color }}>
+                {s.status === "selected" ? "Selected" : "Your choice"}
+              </span>
+            </div>
+            {s.allowance_amount != null && <p className="mt-1.5 text-[14px] text-[var(--muted)]">Allowance {fmt(s.allowance_amount)}</p>}
+
+            {s.status === "selected" && editing !== s.id ? (
+              <div className="mt-3 flex items-start gap-3 rounded-xl bg-[#EEF5F0] p-3">
+                <p className="min-w-0 flex-1 whitespace-pre-line text-[15px] font-semibold">{s.selected_value}</p>
+                {s.options.length === 0 && canPick && (
+                  <button onClick={() => { setEditing(s.id); setDrafts((d) => ({ ...d, [s.id]: s.selected_value || "" })); }}
+                    className="shrink-0 text-[14px] font-bold text-[var(--accent-dark)]">Edit</button>
+                )}
+              </div>
+            ) : s.options.length === 0 ? (
+              <div className="mt-3 space-y-2">
+                <p className="text-[14px] text-[var(--muted)]">Tell us what you picked or already own: model, finish, color, where it&apos;s stored.</p>
+                <textarea value={drafts[s.id] ?? ""} disabled={!canPick} rows={3} maxLength={600}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
+                  placeholder="e.g. Delta Trinsic faucet 9159-AR-DST, boxes in the garage"
+                  className="w-full resize-none rounded-xl border border-[var(--line)] bg-white p-3 text-[16px] focus:border-[var(--accent)] focus:outline-none" />
+                <div className="flex justify-end gap-2">
+                  {editing === s.id && <button onClick={() => setEditing(null)} className="btn btn-ghost">Cancel</button>}
+                  <button disabled={!canPick || !!picking || !(drafts[s.id] ?? "").trim()}
+                    onClick={() => send({ selectionId: s.id, ownerValue: drafts[s.id] ?? "" }, s.id + "owner")}
+                    className="btn btn-primary disabled:opacity-40">{picking === s.id + "owner" ? "Saving…" : "Save"}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-2">
+                {s.options.map((opt) => (
+                  <button key={opt.id} disabled={!canPick || !!picking}
+                    onClick={() => send({ selectionId: s.id, optionId: opt.id }, s.id + opt.id)}
+                    className="flex min-h-[56px] items-center gap-3 rounded-xl border border-[var(--line)] bg-white p-3 text-left disabled:opacity-60">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--paper)]">
+                      {opt.image_url
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={opt.image_url} alt={opt.label} className="h-full w-full object-cover" />
+                        : <span className="text-[18px] font-bold text-[var(--muted)]">{opt.label.charAt(0)}</span>}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-bold">{opt.label}</span>
+                      {opt.description && <span className="block text-[13px] text-[var(--muted)]">{opt.description}</span>}
+                    </span>
+                    <span className="shrink-0 text-right">
+                      {opt.price_delta != null && opt.price_delta !== 0 && (
+                        <span className="block text-[14px] font-bold">{opt.price_delta > 0 ? "+" : "−"}{fmt(Math.abs(opt.price_delta))}</span>
+                      )}
+                      <span className="text-[14px] font-bold text-[var(--accent-dark)]">{picking === s.id + opt.id ? "Saving…" : "Choose"}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+// ─────────────────────────────── Documents
+function DocumentsTab({ docs }: { docs: PortalDocument[] }) {
+  const groups = useMemo(
+    () => DOC_GROUPS.map((g) => ({ ...g, docs: docs.filter((d) => (d.group === "drawing" ? "design" : d.group) === g.key) })).filter((g) => g.docs.length > 0),
+    [docs],
+  );
+  if (docs.length === 0) return <Empty>Your design, selections, contract and invoices will appear here.</Empty>;
+  return (
+    <>
+      {groups.map((g) => (
+        <section key={g.key}>
+          <h3 className="px-1 pb-2 pt-1 text-[18px] font-extrabold">{g.label}</h3>
+          <ul className="card divide-y divide-[var(--line)]">
+            {g.docs.map((d) => (
+              <li key={d.id}>
+                <a href={d.url} target="_blank" rel="noreferrer" className="flex min-h-[60px] items-center gap-3 px-4 py-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--paper)] text-[11px] font-extrabold text-[var(--accent-dark)]">PDF</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[16px] font-bold leading-snug">{d.title}</span>
+                    <span className="block text-[13px] text-[var(--muted)]">{[d.subtitle, d.date ? fmtDate(d.date) : null].filter(Boolean).join(" · ")}</span>
+                    {d.staged && <span className="mt-1 block"><Draft /></span>}
+                  </span>
+                  <span className="shrink-0 text-[20px] text-[var(--muted)]">›</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </>
+  );
+}
+
+// ─────────────────────────────── Payments
+function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
+  const f = data.financials;
+  if (!f) return <Empty>Payment details will appear here shortly.</Empty>;
+  const paidPct = f.adjusted_contract > 0 ? Math.min(100, Math.round((f.total_payments_received / f.adjusted_contract) * 100)) : 0;
+  return (
+    <>
+      <section className="card p-4">
+        <p className="label">Contract total</p>
+        <p className="mt-1 text-[30px] font-extrabold leading-none">{fmt(f.adjusted_contract || f.contract_value)}</p>
+        {f.change_order_revenue !== 0 && (
+          <p className="mt-1.5 text-[14px] text-[var(--muted)]">Includes {fmt(f.change_order_revenue)} in approved changes ({f.change_order_count})</p>
+        )}
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--line)]">
+          <div className="h-full rounded-full bg-[#2F6B4F]" style={{ width: `${paidPct}%` }} />
+        </div>
+        <div className="mt-3 flex justify-between">
+          <div>
+            <p className="label">Paid to date</p>
+            <p className="text-[18px] font-extrabold text-[#2F6B4F]">{fmt(f.total_payments_received)}</p>
+          </div>
+          <div className="text-right">
+            <p className="label">Balance</p>
+            <p className="text-[18px] font-extrabold">{fmt(f.outstanding_receivable)}</p>
+          </div>
+        </div>
+      </section>
+
+      {data.invoices.length > 0 && (
+        <section className="card p-4">
+          <p className="label">Invoices</p>
+          <ul className="mt-1 divide-y divide-[var(--line)]">
+            {data.invoices.map((inv) => (
+              <li key={inv.id}>
+                <a href={inv.url} target="_blank" rel="noreferrer" className="flex min-h-[56px] items-center justify-between gap-3 py-2.5">
+                  <span className="min-w-0">
+                    <span className="block text-[16px] font-bold">Invoice {inv.invoice_number}{inv.title ? ` · ${inv.title}` : ""}</span>
+                    <span className="block text-[13px] text-[var(--muted)]">{fmtDate(inv.date)} · Open PDF</span>
+                  </span>
+                  <span className="shrink-0 text-[16px] font-extrabold">{fmt(inv.amount)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="card p-4">
+        <p className="label">Payments received</p>
+        {data.payments.length === 0 ? <p className="mt-2 text-[15px] text-[var(--muted)]">No payments recorded yet.</p> : (
+          <ul className="mt-1 divide-y divide-[var(--line)]">
+            {data.payments.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-semibold capitalize">{p.description || p.payment_type}</span>
+                  <span className="block text-[13px] text-[var(--muted)]">{fmtDate(p.received_date)}{p.invoice_sent_number ? ` · Invoice ${p.invoice_sent_number}` : ""}</span>
+                </span>
+                <span className="shrink-0 text-[16px] font-extrabold text-[#2F6B4F]">{fmt(p.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {data.change_orders.length > 0 && (
+        <section className="card p-4">
+          <p className="label">Change orders</p>
+          <ul className="mt-1 divide-y divide-[var(--line)]">
+            {data.change_orders.map((co) => (
+              <li key={co.id} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-semibold">No. {co.change_order_number} · {co.title}</span>
+                  <span className="block text-[13px] text-[var(--muted)]">{co.signed || co.status === "approved" ? "Approved" : "Awaiting your signature"}</span>
+                  {co.url && <a href={co.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-[14px] font-bold text-[var(--accent-dark)]">{co.signed ? "View" : "Review and sign"} →</a>}
+                </span>
+                <span className="shrink-0 text-[16px] font-extrabold">{co.price_impact >= 0 ? "+" : "−"}{fmt(Math.abs(co.price_impact))}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <p className="text-center text-[14px] text-[var(--muted)]">Questions about billing? <a href={mailto} className="font-bold text-[var(--accent-dark)] underline">Email us</a></p>
+    </>
+  );
+}
+
+// ─────────────────────────────── Photos
+function PhotosTab({ photos, onOpen }: { photos: PortalPhoto[]; onOpen: (url: string) => void }) {
+  if (photos.length === 0) return <Empty>Progress photos will appear here as our crew posts from your job site.</Empty>;
+  const groups: { date: string; items: PortalPhoto[] }[] = [];
+  for (const ph of photos) {
+    const last = groups[groups.length - 1];
+    if (last && last.date === ph.date) last.items.push(ph);
+    else groups.push({ date: ph.date, items: [ph] });
+  }
+  return (
+    <>
+      {groups.map((g, gi) => (
+        <section key={`${g.date}-${gi}`}>
+          <h3 className="px-1 pb-2 text-[16px] font-extrabold">{fmtDate(g.date)}</h3>
+          <div className="grid grid-cols-3 gap-1.5">
+            {g.items.map((ph, i) => (
+              <button key={i} onClick={() => onOpen(ph.full)} className="aspect-square overflow-hidden rounded-lg bg-[var(--line)]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={ph.thumb} alt="Progress photo" loading="lazy" className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </>
+  );
+}

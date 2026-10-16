@@ -54,8 +54,25 @@ export async function GET(request: NextRequest) {
     // in the app), or the shared service key in app_settings so the Penney MCP
     // can fetch the invoice PDF headlessly and email it.
     let supabase;
+    // Third path: the client opening an invoice from their portal. The
+    // portal token must be live and the invoice must belong to that portal's
+    // project and have actually been sent — checked after the load below.
+    let portalProjectId: string | null = null;
+    const portalToken = new URL(request.url).searchParams.get("portalToken");
     const serviceKey = request.headers.get("x-service-key");
-    if (serviceKey) {
+    if (portalToken) {
+      const admin = createAdminClient();
+      const { data: portal } = await admin
+        .from("client_portal_access")
+        .select("project_id, enabled")
+        .eq("token", portalToken)
+        .maybeSingle();
+      if (!portal || !portal.enabled) {
+        return NextResponse.json({ error: "This link is invalid or has expired." }, { status: 404 });
+      }
+      portalProjectId = portal.project_id as string;
+      supabase = admin;
+    } else if (serviceKey) {
       const admin = createAdminClient();
       const { data: keyRow } = await admin
         .from("app_settings")
@@ -85,6 +102,9 @@ export async function GET(request: NextRequest) {
       .single();
 
     if (!inv) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    if (portalProjectId && (inv.project_id !== portalProjectId || !inv.sent_to_client_at || inv.status === "draft")) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const proj = inv.projects as any;
@@ -263,7 +283,8 @@ export async function GET(request: NextRequest) {
     return new NextResponse(pdfBuffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${safeFilename}"`,
+        // Portal opens it in the phone's PDF viewer; the app keeps downloading.
+        "Content-Disposition": `${portalProjectId ? "inline" : "attachment"}; filename="${safeFilename}"`,
       },
     });
   } catch (e) {

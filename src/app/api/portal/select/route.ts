@@ -51,6 +51,8 @@ export async function POST(request: NextRequest) {
     .select("id, project_id, category, options")
     .eq("id", selectionId)
     .eq("project_id", portal.project_id)
+    // A row hidden from the client can't be picked through a stale page.
+    .eq("client_visible", true)
     .single();
 
   if (!selection) return NextResponse.json({ error: "Selection not found" }, { status: 404 });
