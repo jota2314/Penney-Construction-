@@ -1,0 +1,23 @@
+{
+  "id": "/sub",
+  "name": "Penney Sub Portal",
+  "short_name": "Penney Sub",
+  "description": "Your schedule, jobs, billing, drawings and daily log with Penney Construction.",
+  "start_url": "/sub/portal",
+  "scope": "/sub",
+  "display": "standalone",
+  "background_color": "#0b0a08",
+  "theme_color": "#0b0a08",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
