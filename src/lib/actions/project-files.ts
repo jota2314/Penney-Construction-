@@ -6,7 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
-import { fileKey, isCrewVisibleFile, isInternalJob, latestRevisionsOnly } from "@/lib/crew/crew-visibility";
+import { fieldVisibleFiles, isInternalJob } from "@/lib/crew/crew-visibility";
 
 const projectIdSchema = z.string().uuid();
 const uploadCategorySchema = z.enum([
@@ -477,24 +477,9 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   if (!project || (isField && isInternalJob(project))) return [];
 
-  // Honor the office Files tab: a file removed from the project stays hidden,
-  // and a manual move or rename there is what the crew sees too.
-  const hidden = new Set((dismissed ?? []).map((d) => d.file_key));
-  const overrideByKey = new Map((overrides ?? []).map((o) => [o.file_key, o]));
-  const visible = (rows ?? [])
-    .map((f) => {
-      const key = fileKey(f.filename, f.size);
-      const o = overrideByKey.get(key);
-      return { ...f, key, category: o?.category || f.category, label: o?.display_name || f.filename };
-    })
-    .filter(
-      (f) =>
-        !hidden.has(f.key) &&
-        isCrewVisibleFile(f) &&
-        isCrewVisibleFile({ ...f, filename: f.label }),
-    );
-  // Latest revision of each drawing set only — judged on the name the crew sees.
-  const data = latestRevisionsOnly(visible.map((f) => ({ ...f, filename: f.label })));
+  // Honor the office Files tab (removals, moves, renames), drop money and
+  // paperwork, and keep only the latest revision of each drawing set.
+  const data = fieldVisibleFiles(rows ?? [], (dismissed ?? []).map((d) => d.file_key), overrides ?? []);
 
   if (data.length === 0) return [];
 
@@ -519,7 +504,7 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   return data.map((f) => ({
     id: f.id,
-    filename: f.label,
+    filename: f.filename,
     category: f.category,
     mime_type: f.mime_type,
     url: f.storage_path

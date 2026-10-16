@@ -119,3 +119,37 @@ export function latestRevisionsOnly<T extends { filename: string | null; categor
     return !rev || rev.revision >= (top.get(seriesKey(f, rev.series)) ?? -1);
   });
 }
+
+/**
+ * What the field — the crew Job Folder and the sub portal — gets from ONE
+ * job's files, the way the office Files tab left them: a removed file stays
+ * hidden, a move or rename there is what the field sees, money and paperwork
+ * never come through (judged on the stored name and the rename), and only the
+ * latest revision of each drawing set is left. `filename` comes back as the
+ * name the office gave it. Revision sets are per job, so never pass rows from
+ * more than one project at once.
+ */
+export function fieldVisibleFiles<
+  T extends { filename: string | null; size: number | null; category: string | null; mime_type?: string | null },
+>(
+  rows: T[],
+  dismissedKeys: Iterable<string>,
+  overrides: { file_key: string; category: string | null; display_name: string | null }[],
+): T[] {
+  const hidden = new Set(dismissedKeys);
+  const overrideByKey = new Map(overrides.map((o) => [o.file_key, o]));
+  const visible = rows
+    .map((f) => {
+      const key = fileKey(f.filename, f.size);
+      const o = overrideByKey.get(key);
+      return { f, key, category: o?.category || f.category, label: o?.display_name || f.filename };
+    })
+    .filter(
+      ({ f, key, category, label }) =>
+        !hidden.has(key) &&
+        isCrewVisibleFile({ ...f, category }) &&
+        isCrewVisibleFile({ ...f, category, filename: label }),
+    )
+    .map(({ f, category, label }) => ({ ...f, category, filename: label }));
+  return latestRevisionsOnly(visible);
+}

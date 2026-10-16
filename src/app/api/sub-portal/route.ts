@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SUB_PORTAL_COOKIE, getSubPortalClient } from "@/lib/sub-portal/auth";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
+import { fieldVisibleFiles } from "@/lib/crew/crew-visibility";
 
 export const runtime = "nodejs";
 
@@ -128,7 +129,7 @@ export async function GET(request: NextRequest) {
   (projSubsRes.data || []).forEach((ps) => ps.project_id && projectIds.add(ps.project_id));
   const ids = Array.from(projectIds);
 
-  const [projectsRes, filesRes, selectionsRes, inspectionsRes, scopeRes] = await Promise.all([
+  const [projectsRes, filesRes, dismissedRes, overridesRes, selectionsRes, inspectionsRes, scopeRes] = await Promise.all([
     ids.length
       ? supabase
           .from("projects")
@@ -138,10 +139,19 @@ export async function GET(request: NextRequest) {
     ids.length
       ? supabase
           .from("project_files")
-          .select("id, project_id, filename, category, storage_path, storage_bucket")
+          .select("id, project_id, filename, category, mime_type, size, storage_path, storage_bucket")
           .in("project_id", ids)
           .in("category", SUB_FILE_CATEGORIES)
           .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as never[] }),
+    ids.length
+      ? supabase.from("project_dismissed_files").select("project_id, file_key").in("project_id", ids)
+      : Promise.resolve({ data: [] as never[] }),
+    ids.length
+      ? supabase
+          .from("project_file_overrides")
+          .select("project_id, file_key, category, display_name")
+          .in("project_id", ids)
       : Promise.resolve({ data: [] as never[] }),
     ids.length
       ? supabase
@@ -164,10 +174,37 @@ export async function GET(request: NextRequest) {
       : Promise.resolve({ data: [] as never[] }),
   ]);
 
-  // Sign drawings/specs, honoring each row's bucket (rows without
-  // storage_bucket live in project-files — the 7/30 backfill default).
-  type FileRow = { id: string; project_id: string; filename: string; category: string; storage_path: string; storage_bucket: string | null };
-  const fileRows = (filesRes.data || []) as FileRow[];
+  // Same rules as the crew Job Folder, job by job: the office Files tab's
+  // removals and renames, no money or paperwork, and only the latest revision
+  // of each drawing set (Jorge 10/16 — Weidlein showed R1 through R7).
+  type FileRow = {
+    id: string;
+    project_id: string;
+    filename: string;
+    category: string;
+    mime_type: string | null;
+    size: number | null;
+    storage_path: string;
+    storage_bucket: string | null;
+  };
+  type OverrideRow = { project_id: string; file_key: string; category: string | null; display_name: string | null };
+  const byProject = <R extends { project_id: string }>(rows: R[]) => {
+    const map = new Map<string, R[]>();
+    rows.forEach((r) => map.set(r.project_id, [...(map.get(r.project_id) ?? []), r]));
+    return map;
+  };
+  const dismissedByProject = byProject((dismissedRes.data || []) as { project_id: string; file_key: string }[]);
+  const overridesByProject = byProject((overridesRes.data || []) as OverrideRow[]);
+  const fileRows = Array.from(byProject((filesRes.data || []) as FileRow[])).flatMap(([projectId, rows]) =>
+    fieldVisibleFiles(
+      rows,
+      (dismissedByProject.get(projectId) ?? []).map((d) => d.file_key),
+      overridesByProject.get(projectId) ?? [],
+    ).filter((f) => SUB_FILE_CATEGORIES.includes(f.category)),
+  );
+
+  // Sign them, honoring each row's bucket (rows without storage_bucket live in
+  // project-files — the 7/30 backfill default).
   const signedFiles: SignedFile[] = [];
   await Promise.all(
     ["project-files", "email-attachments"].map(async (bucket) => {
