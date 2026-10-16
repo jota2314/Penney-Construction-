@@ -17,7 +17,9 @@ interface SheetRow {
   created_at: string; client_selection_items: { count: number }[];
 }
 interface DocRow { id: string; kind: string; title: string; filename: string | null; published_at: string | null; created_at: string }
-interface DecisionRow { id: string; category: string; status: string; client_visible: boolean }
+interface DecisionRow { id: string; category: string; status: string; client_visible: boolean; client_done_at: string | null; client_dismissed_at: string | null; selected_value: string | null }
+interface ClientItemRow { id: string; name: string; client_action: "approved" | "removed"; client_action_at: string | null; client_selection_sheets: { project_id: string } }
+interface ClientPhaseRow { id: string; name: string; client_completed_at: string | null }
 interface FileRow { id: string; filename: string; storage_bucket: string | null; storage_path: string; created_at: string }
 
 const DOC_KINDS: [string, string][] = [
@@ -35,6 +37,8 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [decisions, setDecisions] = useState<DecisionRow[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
+  const [clientItems, setClientItems] = useState<ClientItemRow[]>([]);
+  const [clientPhases, setClientPhases] = useState<ClientPhaseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   // Two-step confirm (no window.confirm — the browser pane auto-dismisses it).
@@ -45,7 +49,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
 
   const fetchAll = useCallback(async () => {
     const supabase = createClient();
-    const [s, d, c, f] = await Promise.all([
+    const [s, d, c, f, ci, cp] = await Promise.all([
       supabase.from("client_selection_sheets")
         .select("id, title, revision, sheet_date, show_prices, show_allowances, published_at, created_at, client_selection_items(count)")
         .eq("project_id", projectId).order("created_at", { ascending: false }),
@@ -53,17 +57,28 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
         .select("id, kind, title, filename, published_at, created_at")
         .eq("project_id", projectId).order("sort_order").order("created_at", { ascending: false }),
       supabase.from("client_selections")
-        .select("id, category, status, client_visible")
+        .select("id, category, status, client_visible, client_done_at, client_dismissed_at, selected_value")
         .eq("project_id", projectId).order("sort_order"),
       supabase.from("project_files")
         .select("id, filename, storage_bucket, storage_path, created_at")
         .eq("project_id", projectId).ilike("filename", "%.pdf").order("created_at", { ascending: false }),
+      // What the client tapped on their portal (approve / remove / mark complete).
+      supabase.from("client_selection_items")
+        .select("id, name, client_action, client_action_at, client_selection_sheets!inner(project_id)")
+        .eq("client_selection_sheets.project_id", projectId).not("client_action", "is", null)
+        .order("client_action_at", { ascending: false }),
+      supabase.from("schedule_phases")
+        .select("id, name, client_completed_at")
+        .eq("project_id", projectId).not("client_completed_at", "is", null)
+        .order("client_completed_at", { ascending: false }),
     ]);
     return {
       sheets: (s.data as SheetRow[]) ?? [],
       docs: (d.data as DocRow[]) ?? [],
       decisions: (c.data as DecisionRow[]) ?? [],
       files: (f.data as FileRow[]) ?? [],
+      clientItems: (ci.data as unknown as ClientItemRow[]) ?? [],
+      clientPhases: (cp.data as ClientPhaseRow[]) ?? [],
     };
   }, [projectId]);
 
@@ -72,6 +87,8 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
     setDocs(r.docs);
     setDecisions(r.decisions);
     setFiles(r.files);
+    setClientItems(r.clientItems);
+    setClientPhases(r.clientPhases);
     setLoading(false);
   };
   const load = () => fetchAll().then(apply);
@@ -115,6 +132,25 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
     return run(row.id, () => supabase.from("client_selections")
       .update({ client_visible: !row.client_visible, updated_at: now() }).eq("id", row.id));
   }
+  // Undo a client's tap from the office side (nothing a client does erases data).
+  function undoClientItem(row: ClientItemRow) {
+    return run(row.id, () => supabase.from("client_selection_items")
+      .update({ client_action: null, client_action_at: null, client_action_by: null, updated_at: now() }).eq("id", row.id));
+  }
+  function undoClientDecision(row: DecisionRow) {
+    const patch: Record<string, unknown> = { client_dismissed_at: null, updated_at: now() };
+    if (row.client_done_at) {
+      patch.client_done_at = null;
+      patch.status = "pending";
+      if (row.selected_value === "Done") patch.selected_value = null;
+    }
+    return run(row.id, () => supabase.from("client_selections").update(patch).eq("id", row.id));
+  }
+  function undoClientPhase(row: ClientPhaseRow) {
+    return run(row.id, () => supabase.from("schedule_phases")
+      .update({ client_completed_at: null, client_completed_by: null }).eq("id", row.id));
+  }
+
   function addDocument() {
     const f = files.find((x) => x.id === addFileId);
     if (!f) return;
@@ -140,11 +176,42 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
     </span>
   );
 
+  const clientDecisions = decisions.filter((d) => d.client_done_at || d.client_dismissed_at);
+  const clientChanges = clientItems.length + clientDecisions.length + clientPhases.length;
+
   return (
     <div className="space-y-4">
       <a href={`/portal-preview/${projectId}`} target="_blank" rel="noreferrer" className="block">
         <Button variant="outline" className="w-full gap-2"><Eye className="h-4 w-4" /> Preview as client (drafts included)</Button>
       </a>
+
+      {/* What the client changed from their phone */}
+      {clientChanges > 0 && (
+        <section className="rounded-lg border border-amber-500/40 p-3">
+          <h4 className="mb-1 text-sm font-semibold">Client changes ({clientChanges})</h4>
+          <p className="mb-2 text-xs text-muted-foreground">Taps from the client&apos;s portal. Each one also put a to-do on the list. Undo puts it back the way it was.</p>
+          <ul className="divide-y">
+            {clientPhases.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-2 py-1.5">
+                <span className="min-w-0 truncate text-sm">Marked complete: {p.name} <span className="text-xs text-muted-foreground">· {fmtDay(p.client_completed_at)}</span></span>
+                <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => undoClientPhase(p)}><Undo2 className="h-3.5 w-3.5" /> Undo</Button>
+              </li>
+            ))}
+            {clientItems.map((i) => (
+              <li key={i.id} className="flex items-center justify-between gap-2 py-1.5">
+                <span className="min-w-0 truncate text-sm">{i.client_action === "approved" ? "Approved" : "Removed"}: {i.name} <span className="text-xs text-muted-foreground">· {fmtDay(i.client_action_at)}</span></span>
+                <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => undoClientItem(i)}><Undo2 className="h-3.5 w-3.5" /> {i.client_action === "removed" ? "Restore" : "Undo"}</Button>
+              </li>
+            ))}
+            {clientDecisions.map((d) => (
+              <li key={d.id} className="flex items-center justify-between gap-2 py-1.5">
+                <span className="min-w-0 truncate text-sm">{d.client_dismissed_at ? "Not needed" : "Marked done"}: {d.category} <span className="text-xs text-muted-foreground">· {fmtDay(d.client_dismissed_at || d.client_done_at)}</span></span>
+                <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => undoClientDecision(d)}><Undo2 className="h-3.5 w-3.5" /> {d.client_dismissed_at ? "Restore" : "Undo"}</Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Selection sheets */}
       <section className="rounded-lg border p-3">

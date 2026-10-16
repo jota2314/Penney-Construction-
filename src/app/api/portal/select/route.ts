@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
         description: optionId
           ? `Client selected "${chosenValue}" for ${selection.category}`
           : `Client entered their own item for ${selection.category}: "${chosenValue.slice(0, 140)}"`,
-        category: "client_update",
+        category: "follow_up_clients",
         priority: "medium",
         source: "client_portal",
         created_by: portal.created_by,

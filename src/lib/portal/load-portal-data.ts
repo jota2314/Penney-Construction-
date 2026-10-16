@@ -89,7 +89,7 @@ export async function loadPortalData(
 
   let selectionsQuery = supabase
     .from("client_selections")
-    .select("id, category, description, status, allowance_amount, options, selected_option_id, selected_value, selected_at, sort_order, client_visible")
+    .select("id, category, description, status, allowance_amount, options, selected_option_id, selected_value, selected_at, sort_order, client_visible, client_done_at, client_dismissed_at")
     .eq("project_id", projectId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
@@ -122,7 +122,7 @@ export async function loadPortalData(
       .single(),
     supabase
       .from("schedule_phases")
-      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color, event_type")
+      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color, event_type, client_completed_at")
       .eq("project_id", projectId)
       // Master schedule only — daily crew plans are internal (phase_scope 'daily').
       .eq("phase_scope", "master")
@@ -197,7 +197,7 @@ export async function loadPortalData(
   const cascade = cascadeSchedule(rawPhases);
   const schedule = rawPhases.map((p) => {
     const c = cascade.get(p.id);
-    const row = p as unknown as { name: string; description: string | null; color: string | null; event_type: string | null };
+    const row = p as unknown as { name: string; description: string | null; color: string | null; event_type: string | null; client_completed_at: string | null };
     return {
       id: p.id,
       name: row.name,
@@ -209,6 +209,8 @@ export async function loadPortalData(
       start_date: c?.start_date ?? p.start_date,
       end_date: c?.end_date ?? p.end_date,
       firm: c?.firm ?? false,
+      // The client marked it complete on their portal (board status unchanged).
+      client_completed: !!row.client_completed_at,
     };
   });
 
@@ -288,12 +290,13 @@ export async function loadPortalData(
     name: string; brand_model: string | null; details: string | null; image_bucket: string | null;
     image_path: string | null; product_url: string | null; link_label: string | null; quantity: string | null;
     unit_price: string | null; ext_price: number | null; price_note: string | null;
+    client_action: "approved" | "removed" | null;
   };
   let items: ItemRow[] = [];
   if (current) {
     const { data } = await supabase
       .from("client_selection_items")
-      .select("id, section, sort_order, status, status_label, name, brand_model, details, image_bucket, image_path, product_url, link_label, quantity, unit_price, ext_price, price_note")
+      .select("id, section, sort_order, status, status_label, name, brand_model, details, image_bucket, image_path, product_url, link_label, quantity, unit_price, ext_price, price_note, client_action")
       .eq("sheet_id", current.id)
       .order("sort_order", { ascending: true });
     items = (data || []) as ItemRow[];
@@ -347,6 +350,7 @@ export async function loadPortalData(
         unit_price: showPrices ? i.unit_price : null,
         ext_price: showPrices && i.ext_price != null ? Number(i.ext_price) : null,
         price_note: showPrices ? i.price_note : null,
+        client_action: i.client_action,
       })),
     };
   }
@@ -439,7 +443,7 @@ export async function loadPortalData(
     }
   }
   for (const s of decisions) {
-    if (s.status === "pending" && s.client_visible !== false) {
+    if (s.status === "pending" && s.client_visible !== false && !s.client_dismissed_at) {
       needed.push({ kind: "decision", title: `Choose: ${s.category}`, detail: s.description, tab: "selections" });
     }
   }

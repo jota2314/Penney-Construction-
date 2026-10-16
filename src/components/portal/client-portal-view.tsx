@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import type {
   PortalData,
@@ -74,6 +74,37 @@ const STATUS_WORDS: Record<string, string> = {
   completed: "Complete",
 };
 
+type ActionKind = "phase" | "item" | "decision";
+
+// The client's own taps (mark complete, approve, remove, done, not needed,
+// undo). Saved through /api/portal/action; disabled in the staff preview.
+function useClientAction(token: string | undefined, preview: boolean, onReload?: () => void) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const enabled = !!token && !preview;
+  async function act(kind: ActionKind, id: string, action: string) {
+    if (!enabled || busy) return;
+    setBusy(`${kind}:${id}`);
+    try {
+      const res = await fetch("/api/portal/action", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, kind, id, action }),
+      });
+      const d = await res.json();
+      if (d.success) onReload?.();
+      else alert(d.error || "Could not save. Please try again.");
+    } catch {
+      alert("Could not save. Please try again.");
+    }
+    setBusy(null);
+  }
+  return { act, busy, enabled };
+}
+type ClientAction = ReturnType<typeof useClientAction>;
+
+const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+const phaseDone = (p: { status: string | null; client_completed?: boolean }) => p.status === "completed" || !!p.client_completed;
+const itemStatus = (i: PortalSelectionItem): SelectionItemStatus => (i.client_action === "approved" ? "selected" : i.status);
+
 export interface ClientPortalViewProps {
   data: PortalData;
   /** Client mode: the portal token (enables picking). Absent in preview. */
@@ -84,7 +115,8 @@ export interface ClientPortalViewProps {
 export function ClientPortalView({ data, token, onReload }: ClientPortalViewProps) {
   const preview = data.mode === "preview";
   const [tab, setTab] = useState<Tab>("home");
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [photoIndex, setPhotoIndex] = useState<number | null>(null);
+  const action = useClientAction(token, preview, onReload);
 
   // Deep links: /portal/<token>#selections opens that tab.
   useEffect(() => {
@@ -106,13 +138,13 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
   const mailto = `mailto:${CONTACT_EMAIL}?subject=${subject}`;
 
   const total = data.schedule.length;
-  const done = data.schedule.filter((p) => p.status === "completed").length;
-  const current = data.schedule.find((p) => p.status === "in_progress");
+  const done = data.schedule.filter(phaseDone).length;
+  const current = data.schedule.find((p) => p.status === "in_progress" && !p.client_completed);
   const pct = total ? Math.round(((done + (current ? 0.5 : 0)) / total) * 100) : 0;
   const statusWord = STATUS_WORDS[data.project.status] ?? "In progress";
 
   const visibleDecisions = data.selections.filter((s) => s.client_visible !== false);
-  const pendingDecisions = visibleDecisions.filter((s) => s.status === "pending").length;
+  const pendingDecisions = visibleDecisions.filter((s) => s.status === "pending" && !s.client_dismissed_at).length;
 
   return (
     <div className={`pc-portal ${portalFont.className} min-h-screen`}>
@@ -186,21 +218,17 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
 
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
         {tab === "home" && <HomeTab data={data} go={go} />}
-        {tab === "schedule" && <ScheduleTab data={data} />}
+        {tab === "schedule" && <ScheduleTab data={data} action={action} />}
         {tab === "selections" && (
-          <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} />
+          <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} action={action} />
         )}
         {tab === "documents" && <DocumentsTab docs={data.documents} />}
         {tab === "payments" && <PaymentsTab data={data} mailto={mailto} />}
-        {tab === "photos" && <PhotosTab photos={data.photos} onOpen={setLightbox} />}
+        {tab === "photos" && <PhotosTab photos={data.photos} onOpen={setPhotoIndex} />}
       </main>
 
-      {lightbox && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4" onClick={() => setLightbox(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="Progress photo" className="max-h-full max-w-full rounded-lg" />
-          <button className="btn absolute right-3 top-3 text-white" onClick={() => setLightbox(null)}>Close</button>
-        </div>
+      {photoIndex != null && data.photos[photoIndex] && (
+        <PhotoViewer photos={data.photos} index={photoIndex} onIndex={setPhotoIndex} onClose={() => setPhotoIndex(null)} />
       )}
 
       <footer className="mx-auto max-w-2xl px-4 pb-12 pt-4 text-center">
@@ -247,7 +275,7 @@ function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
   // What's happening now first, then the next phases by start date.
   const upcoming = data.schedule
-    .filter((p) => p.status !== "completed")
+    .filter((p) => !phaseDone(p))
     .sort((a, b) =>
       (a.status === "in_progress" ? 0 : 1) - (b.status === "in_progress" ? 0 : 1) ||
       (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"))
@@ -363,7 +391,8 @@ function Shortcut({ title, line, sub, onClick, draft }: { title: string; line: s
 }
 
 // ─────────────────────────────── Schedule
-function ScheduleTab({ data }: { data: PortalData }) {
+function ScheduleTab({ data, action }: { data: PortalData; action: ClientAction }) {
+  const today = todayISO();
   if (data.schedule.length === 0) return <Empty>Your project timeline will appear here once it&apos;s scheduled.</Empty>;
   return (
     <>
@@ -372,8 +401,13 @@ function ScheduleTab({ data }: { data: PortalData }) {
       </p>
       <ol className="card divide-y divide-[var(--line)]">
         {data.schedule.map((p) => {
-          const isDone = p.status === "completed";
-          const isNow = p.status === "in_progress";
+          const teamDone = p.status === "completed";
+          const clientDone = !teamDone && !!p.client_completed;
+          const isDone = teamDone || clientDone;
+          const isNow = !isDone && p.status === "in_progress";
+          // The client can tick off work that has started; future phases stay the team's.
+          const canMark = !isDone && (isNow || (!!p.start_date && p.start_date <= today));
+          const busy = action.busy === `phase:${p.id}`;
           const isInspection = p.event_type === "inspection";
           const chip = isDone ? ["Done", "#2F6B4F"] : isNow ? ["In progress", "#C66638"] : p.firm ? ["Confirmed", "#252D2B"] : ["Estimated", "#8A918C"];
           return (
@@ -389,6 +423,17 @@ function ScheduleTab({ data }: { data: PortalData }) {
                 <p className="mt-1 text-[14px] font-semibold text-[var(--muted)]">
                   {p.firm || isDone || isNow ? `${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}` : weekOf(p.start_date)}
                 </p>
+                {clientDone && (
+                  <div className="mt-2 flex items-center gap-3 text-[14px]">
+                    <span className="font-semibold text-[#2F6B4F]">You marked this complete</span>
+                    <button disabled={!action.enabled || busy} onClick={() => action.act("phase", p.id, "uncomplete")}
+                      className="min-h-[36px] font-bold text-[var(--accent-dark)] disabled:opacity-50">{busy ? "Saving…" : "Undo"}</button>
+                  </div>
+                )}
+                {canMark && (
+                  <button disabled={!action.enabled || busy} onClick={() => action.act("phase", p.id, "complete")}
+                    className="btn btn-ghost mt-2 disabled:opacity-50">{busy ? "Saving…" : "✓ Mark complete"}</button>
+                )}
               </div>
             </li>
           );
@@ -401,27 +446,29 @@ function ScheduleTab({ data }: { data: PortalData }) {
 // ─────────────────────────────── Selections
 function countStatuses(items: PortalSelectionItem[]) {
   const c = { selected: 0, proposed: 0, pending: 0, reused: 0, ordered: 0, installed: 0 };
-  for (const i of items) c[i.status] += 1;
+  for (const i of items) if (i.client_action !== "removed") c[itemStatus(i)] += 1;
   return c;
 }
 
-function SelectionsTab({ data, decisions, token, onReload }: { data: PortalData; decisions: PortalDecision[]; token?: string; onReload?: () => void }) {
+function SelectionsTab({ data, decisions, token, onReload, action }: { data: PortalData; decisions: PortalDecision[]; token?: string; onReload?: () => void; action: ClientAction }) {
   const sheet = data.selection_sheet;
   if (!sheet && decisions.length === 0) {
     return <Empty>No selections yet. We&apos;ll email you when there&apos;s something to choose.</Empty>;
   }
   return (
     <>
-      {sheet && <SheetView sheet={sheet} />}
-      {decisions.length > 0 && <Decisions decisions={decisions} token={token} onReload={onReload} preview={data.mode === "preview"} />}
+      {sheet && <SheetView sheet={sheet} action={action} preview={data.mode === "preview"} />}
+      {decisions.length > 0 && <Decisions decisions={decisions} token={token} onReload={onReload} preview={data.mode === "preview"} action={action} />}
     </>
   );
 }
 
-function SheetView({ sheet }: { sheet: PortalSelectionSheet }) {
+function SheetView({ sheet, action, preview }: { sheet: PortalSelectionSheet; action: ClientAction; preview: boolean }) {
+  const [showRemoved, setShowRemoved] = useState(false);
   const counts = countStatuses(sheet.items);
+  const removed = sheet.items.filter((i) => i.client_action === "removed");
   const sections: { name: string; items: PortalSelectionItem[] }[] = [];
-  for (const it of sheet.items) {
+  for (const it of sheet.items.filter((i) => i.client_action !== "removed")) {
     const name = it.section || "Selections";
     const last = sections[sections.length - 1];
     if (last && last.name === name) last.items.push(it);
@@ -449,9 +496,24 @@ function SheetView({ sheet }: { sheet: PortalSelectionSheet }) {
       {sections.map((s) => (
         <section key={s.name} className="space-y-3">
           <h3 className="px-1 pt-2 text-[18px] font-extrabold">{s.name}</h3>
-          {s.items.map((it) => <ItemCard key={it.id} item={it} showPrices={sheet.show_prices} />)}
+          {s.items.map((it) => <ItemCard key={it.id} item={it} showPrices={sheet.show_prices} action={action} />)}
         </section>
       ))}
+
+      {removed.length > 0 && (
+        <section className="space-y-2">
+          <button onClick={() => setShowRemoved(!showRemoved)} className="card w-full p-3 text-left text-[15px] font-bold text-[var(--muted)]">
+            {showRemoved ? "Hide" : "Show"} {removed.length} item{removed.length === 1 ? "" : "s"} {preview ? "the client removed" : "you removed"}
+          </button>
+          {showRemoved && removed.map((it) => (
+            <div key={it.id} className="card flex items-center justify-between gap-3 p-3 opacity-80">
+              <span className="min-w-0 text-[15px] font-semibold line-through">{it.name}</span>
+              <button disabled={!action.enabled || action.busy === `item:${it.id}`} onClick={() => action.act("item", it.id, "clear")}
+                className="btn btn-ghost shrink-0 disabled:opacity-50">{action.busy === `item:${it.id}` ? "Saving…" : "Put back"}</button>
+            </div>
+          ))}
+        </section>
+      )}
 
       {sheet.allowances.length > 0 && (
         <section className="card p-4">
@@ -482,9 +544,12 @@ function SheetView({ sheet }: { sheet: PortalSelectionSheet }) {
   );
 }
 
-function ItemCard({ item, showPrices }: { item: PortalSelectionItem; showPrices: boolean }) {
+function ItemCard({ item, showPrices, action }: { item: PortalSelectionItem; showPrices: boolean; action: ClientAction }) {
   const [open, setOpen] = useState(false);
   const st = STATUS[item.status] ?? STATUS.pending;
+  const busy = action.busy === `item:${item.id}`;
+  // Approve only means something on items that aren't already the client's pick.
+  const canApprove = !item.client_action && !["selected", "reused", "ordered", "installed"].includes(item.status);
   const hasPrice = showPrices && (item.ext_price != null || item.unit_price);
   return (
     <article className="card overflow-hidden">
@@ -534,12 +599,31 @@ function ItemCard({ item, showPrices }: { item: PortalSelectionItem; showPrices:
           </div>
         </div>
       )}
+      <div className="flex items-center gap-2 border-t border-[var(--line)] px-3.5 py-2.5">
+        {item.client_action === "approved" ? (
+          <>
+            <span className="flex-1 text-[15px] font-bold text-[#2F6B4F]">✓ Approved</span>
+            <button disabled={!action.enabled || busy} onClick={() => action.act("item", item.id, "clear")}
+              className="min-h-[40px] px-2 text-[14px] font-bold text-[var(--accent-dark)] disabled:opacity-50">{busy ? "Saving…" : "Undo"}</button>
+          </>
+        ) : (
+          <>
+            {canApprove && (
+              <button disabled={!action.enabled || busy} onClick={() => action.act("item", item.id, "approve")}
+                className="btn btn-primary flex-1 disabled:opacity-50">{busy ? "Saving…" : "✓ Approve"}</button>
+            )}
+            <button disabled={!action.enabled || busy} onClick={() => action.act("item", item.id, "remove")}
+              className={`btn btn-ghost disabled:opacity-50 ${canApprove ? "" : "flex-1"}`}>Remove</button>
+          </>
+        )}
+      </div>
     </article>
   );
 }
 
 // Decision rows from client_selections — option picker or owner-supplied text.
-function Decisions({ decisions, token, onReload, preview }: { decisions: PortalDecision[]; token?: string; onReload?: () => void; preview: boolean }) {
+function Decisions({ decisions, token, onReload, preview, action }: { decisions: PortalDecision[]; token?: string; onReload?: () => void; preview: boolean; action: ClientAction }) {
+  const [showDismissed, setShowDismissed] = useState(false);
   const [picking, setPicking] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -548,7 +632,9 @@ function Decisions({ decisions, token, onReload, preview }: { decisions: PortalD
   // Preview: rows hidden from the client stay folded so the page reads the
   // way the client will see it.
   const hiddenCount = decisions.filter((s) => s.client_visible === false).length;
-  const shown = decisions.filter((s) => s.client_visible !== false || showHidden);
+  // Rows the client marked "Not needed" fold away, with a way back.
+  const dismissed = decisions.filter((s) => s.client_visible !== false && !!s.client_dismissed_at);
+  const shown = decisions.filter((s) => (s.client_visible !== false || showHidden) && !s.client_dismissed_at);
 
   async function send(body: Record<string, string>, key: string) {
     if (!canPick) return;
@@ -591,7 +677,11 @@ function Decisions({ decisions, token, onReload, preview }: { decisions: PortalD
             {s.status === "selected" && editing !== s.id ? (
               <div className="mt-3 flex items-start gap-3 rounded-xl bg-[#EEF5F0] p-3">
                 <p className="min-w-0 flex-1 whitespace-pre-line text-[15px] font-semibold">{s.selected_value}</p>
-                {s.options.length === 0 && canPick && (
+                {s.client_done_at && (
+                  <button disabled={!action.enabled || action.busy === `decision:${s.id}`} onClick={() => action.act("decision", s.id, "restore")}
+                    className="shrink-0 text-[14px] font-bold text-[var(--accent-dark)] disabled:opacity-50">Undo</button>
+                )}
+                {s.options.length === 0 && canPick && !s.client_done_at && (
                   <button onClick={() => { setEditing(s.id); setDrafts((d) => ({ ...d, [s.id]: s.selected_value || "" })); }}
                     className="shrink-0 text-[14px] font-bold text-[var(--accent-dark)]">Edit</button>
                 )}
@@ -636,9 +726,31 @@ function Decisions({ decisions, token, onReload, preview }: { decisions: PortalD
                 ))}
               </div>
             )}
+            {s.status === "pending" && !hidden && (
+              <div className="mt-3 flex gap-2 border-t border-[var(--line)] pt-3">
+                <button disabled={!action.enabled || !!action.busy} onClick={() => action.act("decision", s.id, "done")}
+                  className="btn btn-ghost flex-1 disabled:opacity-50">{action.busy === `decision:${s.id}` ? "Saving…" : "✓ Mark done"}</button>
+                <button disabled={!action.enabled || !!action.busy} onClick={() => action.act("decision", s.id, "not_needed")}
+                  className="btn btn-ghost flex-1 disabled:opacity-50">Not needed</button>
+              </div>
+            )}
           </section>
         );
       })}
+      {dismissed.length > 0 && (
+        <section className="space-y-2">
+          <button onClick={() => setShowDismissed(!showDismissed)} className="card w-full p-3 text-left text-[15px] font-bold text-[var(--muted)]">
+            {showDismissed ? "Hide" : "Show"} {dismissed.length} marked not needed
+          </button>
+          {showDismissed && dismissed.map((s) => (
+            <div key={s.id} className="card flex items-center justify-between gap-3 p-3 opacity-80">
+              <span className="min-w-0 text-[15px] font-semibold line-through">{s.category}</span>
+              <button disabled={!action.enabled || action.busy === `decision:${s.id}`} onClick={() => action.act("decision", s.id, "restore")}
+                className="btn btn-ghost shrink-0 disabled:opacity-50">Put back</button>
+            </div>
+          ))}
+        </section>
+      )}
     </>
   );
 }
@@ -763,22 +875,22 @@ function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
 }
 
 // ─────────────────────────────── Photos
-function PhotosTab({ photos, onOpen }: { photos: PortalPhoto[]; onOpen: (url: string) => void }) {
+function PhotosTab({ photos, onOpen }: { photos: PortalPhoto[]; onOpen: (index: number) => void }) {
   if (photos.length === 0) return <Empty>Progress photos will appear here as our crew posts from your job site.</Empty>;
-  const groups: { date: string; items: PortalPhoto[] }[] = [];
-  for (const ph of photos) {
+  const groups: { date: string; items: { ph: PortalPhoto; index: number }[] }[] = [];
+  photos.forEach((ph, index) => {
     const last = groups[groups.length - 1];
-    if (last && last.date === ph.date) last.items.push(ph);
-    else groups.push({ date: ph.date, items: [ph] });
-  }
+    if (last && last.date === ph.date) last.items.push({ ph, index });
+    else groups.push({ date: ph.date, items: [{ ph, index }] });
+  });
   return (
     <>
       {groups.map((g, gi) => (
         <section key={`${g.date}-${gi}`}>
           <h3 className="px-1 pb-2 text-[16px] font-extrabold">{fmtDate(g.date)}</h3>
           <div className="grid grid-cols-3 gap-1.5">
-            {g.items.map((ph, i) => (
-              <button key={i} onClick={() => onOpen(ph.full)} className="aspect-square overflow-hidden rounded-lg bg-[var(--line)]">
+            {g.items.map(({ ph, index }) => (
+              <button key={index} onClick={() => onOpen(index)} className="aspect-square overflow-hidden rounded-lg bg-[var(--line)]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={ph.thumb} alt="Progress photo" loading="lazy" className="h-full w-full object-cover" />
               </button>
@@ -787,5 +899,64 @@ function PhotosTab({ photos, onOpen }: { photos: PortalPhoto[]; onOpen: (url: st
         </section>
       ))}
     </>
+  );
+}
+
+// Full-screen photo viewer: swipe (phone), arrow buttons or arrow keys to
+// move through every photo; Esc or Close to leave.
+function PhotoViewer({ photos, index, onIndex, onClose }: { photos: PortalPhoto[]; index: number; onIndex: (i: number) => void; onClose: () => void }) {
+  const touchX = useRef<number | null>(null);
+  const count = photos.length;
+  const prev = () => onIndex((index - 1 + count) % count);
+  const next = () => onIndex((index + 1) % count);
+  const ph = photos[index];
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") onIndex((index - 1 + count) % count);
+      else if (e.key === "ArrowRight") onIndex((index + 1) % count);
+      else if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; };
+  }, [index, count, onIndex, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black text-white"
+      onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
+      onTouchEnd={(e) => {
+        const start = touchX.current;
+        touchX.current = null;
+        if (start == null) return;
+        const dx = e.changedTouches[0].clientX - start;
+        if (dx > 40) prev();
+        else if (dx < -40) next();
+      }}>
+      <div className="flex items-center justify-between px-4 py-3">
+        <span className="text-[15px] font-bold">{index + 1} / {count}<span className="ml-2 font-semibold text-white/60">{fmtDate(ph.date)}</span></span>
+        <button onClick={onClose} className="btn text-white">Close</button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 pb-6">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img key={ph.full} src={ph.full} alt={`Progress photo ${index + 1}`} className="max-h-full max-w-full rounded-lg object-contain" />
+        {count > 1 && (
+          <>
+            <button aria-label="Previous photo" onClick={prev}
+              className="absolute left-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-[26px] font-bold backdrop-blur">‹</button>
+            <button aria-label="Next photo" onClick={next}
+              className="absolute right-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-[26px] font-bold backdrop-blur">›</button>
+            {/* Warm the neighbors so swiping feels instant. */}
+            <span className="hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photos[(index + 1) % count].full} alt="" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photos[(index - 1 + count) % count].full} alt="" />
+            </span>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

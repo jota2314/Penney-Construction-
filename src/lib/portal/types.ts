@@ -16,6 +16,9 @@ export interface PortalDecision {
   sort_order: number;
   /** Preview only: false = hidden from the client. */
   client_visible?: boolean;
+  /** The client tapped Done / Not needed on their portal. */
+  client_done_at?: string | null;
+  client_dismissed_at?: string | null;
 }
 
 export type SelectionItemStatus = "selected" | "proposed" | "pending" | "reused" | "ordered" | "installed";
@@ -35,6 +38,8 @@ export interface PortalSelectionItem {
   unit_price: string | null;
   ext_price: number | null;
   price_note: string | null;
+  /** The client tapped Approve or Remove on their portal. */
+  client_action: "approved" | "removed" | null;
 }
 
 export interface PortalAllowanceRow {
@@ -86,6 +91,8 @@ export interface PortalNeed {
 export interface PortalPhase {
   id: string; name: string; description: string | null; start_date: string | null; end_date: string | null;
   status: string | null; color: string | null; firm: boolean; event_type?: string | null; sort_order?: number | null;
+  /** The client marked it complete on their portal (board status unchanged). */
+  client_completed?: boolean;
 }
 
 export interface PortalChangeOrder {
