@@ -18,7 +18,8 @@ export type MentionSource =
   | "client_payment"
   | "bill_pay_approval"
   | "spend_help"
-  | "sub_schedule";
+  | "sub_schedule"
+  | "sub_signup";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -732,6 +733,61 @@ export async function notifySubScheduleEvent({
   body: string;
   url: string;
 }): Promise<void> {
+  await notifyOfficeOfSub({
+    projectId,
+    title,
+    body,
+    url,
+    emailLead: `${subName} made a schedule change in the sub portal:`,
+    sourceType: "sub_schedule",
+  });
+}
+
+/**
+ * A sub scanned a job's site QR: either signed up for the portal on the spot
+ * (new login, maybe a brand-new directory record) or, already signed in,
+ * added themselves to a job they weren't on. Same audience as schedule
+ * moves — Jorge, Ryan, and the job's PM — so the office can switch off anyone
+ * who shouldn't be there from the sub's Portal button.
+ */
+export async function notifySubSiteEvent({
+  subName,
+  projectId,
+  title,
+  body,
+  url,
+}: {
+  subName: string;
+  projectId: string;
+  title: string;
+  body: string;
+  url: string;
+}): Promise<void> {
+  await notifyOfficeOfSub({
+    projectId,
+    title,
+    body,
+    url,
+    emailLead: `${subName} scanned the job QR:`,
+    sourceType: "sub_signup",
+  });
+}
+
+async function notifyOfficeOfSub({
+  projectId,
+  title,
+  body,
+  url,
+  emailLead,
+  sourceType,
+}: {
+  projectId: string | null;
+  title: string;
+  body: string;
+  url: string;
+  emailLead: string;
+  sourceType: Extract<MentionSource, "sub_schedule" | "sub_signup">;
+}): Promise<void> {
   const admin = createAdminClient();
   const [{ data: office }, { data: project }] = await Promise.all([
     admin.from("profiles").select("id, email, full_name").in("email", SUB_SCHEDULE_OFFICE_EMAILS),
@@ -762,9 +818,9 @@ export async function notifySubScheduleEvent({
       profile,
       kind: "post" as const,
       title: finalTitle,
-      emailLead: `${subName} made a schedule change in the sub portal:`,
+      emailLead,
     })),
-    sourceType: "sub_schedule",
+    sourceType,
     sourceId: crypto.randomUUID(),
     body,
     url,

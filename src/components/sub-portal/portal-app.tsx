@@ -27,9 +27,19 @@ export function SubPortalApp() {
   const [data, setData] = useState<PortalData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [field, setField] = useState<FieldData | null>(null);
+  // A job's site QR lands here as /sub/portal?job={projectId}: open straight
+  // onto that job's log (clock in, photos). Read once on mount.
+  const [linkedJob] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("job");
+    } catch {
+      return null;
+    }
+  });
   // Remember the last tab on this phone — a sub who lives in Field stays
   // there. Safe as a lazy initializer because the page mounts client-only.
   const [tab, setTabState] = useState<Tab>(() => {
+    if (linkedJob) return "field";
     try {
       const saved = window.localStorage.getItem(TAB_KEY) as Tab | null;
       if (saved && ["home", "schedule", "jobs", "money", "field"].includes(saved)) return saved;
@@ -43,11 +53,24 @@ export function SubPortalApp() {
   const [clockOutOpen, setClockOutOpen] = useState(false);
   // Which job the Field tab shows (null = the job list). Lives here so the
   // Home tab's "Daily log" button can open a job's log in one tap.
-  const [fieldJob, setFieldJobState] = useState<string | null>(() => readFieldJob());
+  const [fieldJob, setFieldJobState] = useState<string | null>(() => linkedJob ?? readFieldJob());
   const setFieldJob = useCallback((id: string | null) => {
     setFieldJobState(id);
     writeFieldJob(id);
   }, []);
+
+  // Keep the QR's job as this phone's open job, then drop ?job= so a
+  // refresh or Home Screen launch doesn't keep forcing it.
+  useEffect(() => {
+    if (!linkedJob) return;
+    writeFieldJob(linkedJob);
+    try {
+      window.localStorage.setItem(TAB_KEY, "field");
+    } catch {
+      /* convenience only */
+    }
+    router.replace("/sub/portal");
+  }, [linkedJob, router]);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   // "What got done" chips — plumbing words for a plumber, electrical for an
