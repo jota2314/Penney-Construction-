@@ -245,7 +245,13 @@ function Empty({ children }: { children: React.ReactNode }) {
 function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
   const t = data.today_on_site;
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
-  const upcoming = data.schedule.filter((p) => p.status !== "completed").slice(0, 3);
+  // What's happening now first, then the next phases by start date.
+  const upcoming = data.schedule
+    .filter((p) => p.status !== "completed")
+    .sort((a, b) =>
+      (a.status === "in_progress" ? 0 : 1) - (b.status === "in_progress" ? 0 : 1) ||
+      (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"))
+    .slice(0, 3);
   const sheet = data.selection_sheet;
   const f = data.financials;
   const counts = sheet ? countStatuses(sheet.items) : null;
@@ -334,7 +340,7 @@ function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
 
       <div className="grid grid-cols-2 gap-3">
         <Shortcut onClick={() => go("selections")} title="Selections"
-          line={sheet ? [sheet.title.replace(/^Fixture \+ Finish /, ""), sheet.revision].filter(Boolean).join(" ") : `${data.selections.length} item${data.selections.length === 1 ? "" : "s"}`}
+          line={sheet ? [sheet.title.replace(/^Fixture \+ Finish /, ""), sheet.revision].filter(Boolean).join(" ") : data.selections.length ? `${data.selections.length} item${data.selections.length === 1 ? "" : "s"}` : "None right now"}
           sub={counts ? `${counts.selected} selected · ${counts.pending} pending` : undefined} draft={sheet?.staged} />
         <Shortcut onClick={() => go("documents")} title="Documents" line={`${data.documents.length} file${data.documents.length === 1 ? "" : "s"}`} />
         <Shortcut onClick={() => go("payments")} title="Payments"

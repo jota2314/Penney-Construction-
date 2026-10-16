@@ -260,7 +260,11 @@ export async function loadPortalData(
 
   // ---- "Today at your home": live headcount + today's/tomorrow's crew plan
   const taskRows = (rows: { name: string; description: string | null; assigned_employee_ids: string[] | null }[] | null) => {
-    const tasks = (rows || []).map((t) => ({ name: t.name, description: t.description ?? null }));
+    // Two crew rows with the same task (one per person) read as one line.
+    const seen = new Set<string>();
+    const tasks = (rows || [])
+      .filter((t) => { const k = t.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+      .map((t) => ({ name: t.name, description: t.description ?? null }));
     const ids = new Set<string>();
     (rows || []).forEach((t) => (t.assigned_employee_ids ?? []).forEach((id) => ids.add(id)));
     return { tasks, planned_count: ids.size };
