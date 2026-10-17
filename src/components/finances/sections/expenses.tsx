@@ -416,24 +416,24 @@ export default async function SpentPage({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="rounded-lg border bg-card p-4">
+          <div className="@container min-w-0 rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Total spent</div>
-            <div className="text-2xl font-bold tabular-nums mt-1">{fmt(totalSpent)}</div>
+            <div className="text-[clamp(0.875rem,12cqi,1.5rem)] leading-tight [overflow-wrap:anywhere] font-bold tracking-tight tabular-nums mt-1">{fmt(totalSpent)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">{paidRows.length.toLocaleString()} paid transactions</div>
           </div>
-          <div className="rounded-lg border bg-card p-4">
+          <div className="@container min-w-0 rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">On projects</div>
-            <div className="text-2xl font-bold tabular-nums mt-1 text-amber-500">{fmt(projectTotal)}</div>
+            <div className="text-[clamp(0.875rem,12cqi,1.5rem)] leading-tight [overflow-wrap:anywhere] font-bold tracking-tight tabular-nums mt-1 text-amber-500">{fmt(projectTotal)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">{projectSpent.length.toLocaleString()} invoices</div>
           </div>
-          <div className="rounded-lg border bg-card p-4">
+          <div className="@container min-w-0 rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Overhead</div>
-            <div className="text-2xl font-bold tabular-nums mt-1 text-orange-500">{fmt(overheadTotal)}</div>
+            <div className="text-[clamp(0.875rem,12cqi,1.5rem)] leading-tight [overflow-wrap:anywhere] font-bold tracking-tight tabular-nums mt-1 text-orange-500">{fmt(overheadTotal)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">{overhead.length.toLocaleString()} invoices</div>
           </div>
-          <Link href="/invoices?tab=unpaid" className="rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
+          <Link href="/invoices?tab=unpaid" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Owed (unpaid)</div>
-            <div className="text-2xl font-bold tabular-nums mt-1 text-red-400">{fmt(owedTotal)}</div>
+            <div className="text-[clamp(0.875rem,12cqi,1.5rem)] leading-tight [overflow-wrap:anywhere] font-bold tracking-tight tabular-nums mt-1 text-red-400">{fmt(owedTotal)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">{unpaidRows.length.toLocaleString()} open bills →</div>
           </Link>
         </div>
