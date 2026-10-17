@@ -14,8 +14,9 @@ import {
   type Signal,
 } from "./suggestions";
 
-// Job mail → SUGGESTED selections-log updates. Runs in the fetch-emails cron
-// after classification. For inbound mail on a job with open selection items
+// Job mail → SUGGESTED selections-log updates. Runs in its own cron
+// (/api/cron/selection-suggestions), 7 minutes after fetch-emails has stored
+// and classified the mail. For inbound mail on a job with open selection items
 // it looks for four things: a client's pick, a showroom/vendor quote (PDFs
 // read line by line), an order confirmation, a delivery notice. Each becomes
 // a suggestion in agent_suggestions that a person approves or dismisses in
@@ -34,13 +35,13 @@ const MODELS = [CLAUDE_HAIKU, CLAUDE_SONNET_4_6];
 const TEAM_DOMAIN = "penneyconstructioninc.com";
 const JORGE = "jbetancur@penneyconstructioninc.com";
 const LOOKBACK_DAYS = 3;
-const PER_TICK = 4;
+const PER_TICK = 8;
 const BODY_CHARS = 8000;
 const MAX_PDFS = 3;
 const MAX_PDF_BYTES = 4_000_000;
 const MIN_CALL_MS = 10_000;
 // A two-page quote PDF took ~18 s to read in testing; an email with one waits
-// for a tick with room rather than timing out halfway.
+// for the next tick rather than timing out halfway.
 const MIN_PDF_CALL_MS = 22_000;
 const CLOSED: Stage[] = ["installed", "removed", "reused"];
 

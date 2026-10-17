@@ -5,6 +5,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/selection-suggestions",
+      "schedule": "7,22,37,52 * * * *"
+    },
+    {
       "path": "/api/gmail/watch",
       "schedule": "0 6 * * *"
     },
