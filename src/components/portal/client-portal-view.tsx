@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { scheduleProgress } from "@/lib/schedule/progress";
+import { deriveCurrentScheduleActivity } from "@/lib/schedule/health";
 import type {
   PortalData,
   PortalDecision,
@@ -139,7 +140,9 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
   const mailto = `mailto:${CONTACT_EMAIL}?subject=${subject}`;
 
   const { total, percent: pct, pendingClientReports } = scheduleProgress(data.schedule);
-  const current = data.schedule.find((p) => p.status === "in_progress");
+  const today = todayISO();
+  const activity = deriveCurrentScheduleActivity(data.schedule, today, data.project.status);
+  const current = activity.current;
   const statusWord = STATUS_WORDS[data.project.status] ?? "In progress";
 
   const visibleDecisions = data.selections.filter((s) => s.client_visible !== false);
@@ -217,7 +220,7 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
       </nav>
 
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
-        {tab === "home" && <HomeTab data={data} go={go} />}
+        {tab === "home" && <HomeTab data={data} go={go} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
         {tab === "schedule" && <ScheduleTab data={data} action={action} />}
         {tab === "selections" && (
           <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} action={action} />
@@ -270,16 +273,9 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 // ─────────────────────────────── Home
-function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
+function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab) => void; upcoming: PortalData["schedule"]; today: string }) {
   const t = data.today_on_site;
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
-  // What's happening now first, then the next phases by start date.
-  const upcoming = data.schedule
-    .filter((p) => !phaseDone(p))
-    .sort((a, b) =>
-      (a.status === "in_progress" ? 0 : 1) - (b.status === "in_progress" ? 0 : 1) ||
-      (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"))
-    .slice(0, 3);
   const sheet = data.selection_sheet;
   const f = data.financials;
   const counts = sheet ? countStatuses(sheet.items) : null;
@@ -351,14 +347,14 @@ function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
           {data.schedule.length > 0 && <button onClick={() => go("schedule")} className="text-[14px] font-bold text-[var(--accent-dark)]">Full schedule</button>}
         </div>
         {upcoming.length === 0 ? (
-          <p className="mt-2 text-[15px] text-[var(--muted)]">{data.schedule.length > 0 ? "All scheduled work is complete." : data.project.status === "completed" ? "Your project is complete." : "Your schedule will appear here once your start date is set."}</p>
+          <p className="mt-2 text-[15px] text-[var(--muted)]">{data.project.status === "completed" ? "Your project is complete." : data.schedule.length === 0 ? "Your schedule will appear here once your start date is set." : data.schedule.every(phaseDone) ? "All scheduled work is complete." : "The team is reviewing the next schedule update."}</p>
         ) : (
           <ul className="mt-2 divide-y divide-[var(--line)]">
             {upcoming.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
                 <span className="text-[16px] font-semibold">{p.name}</span>
                 <span className="shrink-0 text-[14px] text-[var(--muted)]">
-                  {p.status === "in_progress" ? "In progress" : p.firm ? fmtShort(p.start_date) : weekOf(p.start_date)}
+                  {p.status === "in_progress" && p.start_date && p.start_date <= today ? "In progress" : p.firm ? fmtShort(p.start_date) : weekOf(p.start_date)}
                 </span>
               </li>
             ))}

@@ -115,3 +115,22 @@ test('a historical start date never says Starts today', () => {
   assert.equal(scheduleStartLabel(0), 'Starts today');
   assert.equal(scheduleStartLabel(3), 'Starts in 3d');
 });
+
+test('portal current/upcoming excludes past and held records while preserving the full schedule', () => {
+  const phases = [
+    master({ id: 'stale-dumpster', name: 'Dumpster & Debris Removal', status: 'in_progress', start_date: '2026-09-01', end_date: '2026-09-30' }),
+    master({ id: 'stale-framing', start_date: '2026-10-01', end_date: '2026-10-02' }),
+    master({ id: 'held', status: 'on_hold', start_date: '2026-10-17', end_date: '2026-10-20' }),
+    master({ id: 'done', status: 'completed', end_date: '2026-10-20' }),
+    master({ id: 'current', status: 'in_progress' }),
+    master({ id: 'next', start_date: '2026-10-17', end_date: '2026-10-18' }),
+  ];
+  const snapshot = structuredClone(phases);
+  const activity = deriveCurrentScheduleActivity(phases, today, 'in_progress');
+  assert.equal(activity.current.id, 'current');
+  assert.equal(activity.next.id, 'next');
+  assert.deepEqual(activity.upcoming.map(p => p.id), ['current', 'next']);
+  assert.deepEqual(phases, snapshot);
+  assert.deepEqual(deriveCurrentScheduleActivity(phases, today, 'completed'), { current: null, next: null, upcoming: [] });
+  assert.deepEqual(deriveCurrentScheduleActivity(phases.slice(0, 4), today, 'in_progress').upcoming, []);
+});

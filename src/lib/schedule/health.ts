@@ -5,7 +5,7 @@ export interface ScheduleHealthPhase {
   name: string;
   phase_scope?: string | null;
   event_type?: string | null;
-  status: string;
+  status: string | null;
   start_date?: string | null;
   end_date?: string | null;
   is_confirmed?: boolean | null;
@@ -42,17 +42,21 @@ function isOpen(ph: ScheduleHealthPhase) {
 }
 
 /** Same current/next activity on the board and Command Center; never a completed row. */
-export function deriveCurrentScheduleActivity<T extends ScheduleHealthPhase>(phases: readonly T[], today: string) {
+export function deriveCurrentScheduleActivity<T extends ScheduleHealthPhase>(phases: readonly T[], today: string, projectStatus?: string) {
+  if (projectStatus === "completed" || projectStatus === "cancelled") return { current: null, next: null, upcoming: [] as T[] };
   const open = phases.filter((p) => isWork(p) && isOpen(p) && p.status !== "on_hold" && p.start_date);
   const master = open.filter(isMasterPhase);
-  const pickNow = (rows: T[]) => rows
+  const nowRows = (rows: T[]) => rows
     .filter((p) => p.start_date! <= today && (p.end_date || p.start_date!) >= today)
     .sort((a, b) => Number(b.status === "in_progress") - Number(a.status === "in_progress") ||
-      (a.end_date || a.start_date!).localeCompare(b.end_date || b.start_date!) || a.name.localeCompare(b.name))[0] ?? null;
-  const pickNext = (rows: T[]) => rows
+      (a.end_date || a.start_date!).localeCompare(b.end_date || b.start_date!) || a.name.localeCompare(b.name));
+  const nextRows = (rows: T[]) => rows
     .filter((p) => p.start_date! > today)
-    .sort((a, b) => a.start_date!.localeCompare(b.start_date!) || a.name.localeCompare(b.name))[0] ?? null;
-  return { current: pickNow(master) ?? pickNow(open), next: pickNext(master) ?? pickNext(open) };
+    .sort((a, b) => a.start_date!.localeCompare(b.start_date!) || a.name.localeCompare(b.name));
+  const masterNow = nowRows(master), masterNext = nextRows(master);
+  const current = masterNow.length ? masterNow : nowRows(open);
+  const upcoming = masterNext.length ? masterNext : nextRows(open);
+  return { current: current[0] ?? null, next: upcoming[0] ?? null, upcoming: [...current, ...upcoming] };
 }
 
 export interface ScheduleWorkLog {
