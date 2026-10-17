@@ -140,14 +140,21 @@ export async function runSelectionSuggestions(db: SupabaseClient, opts: { deadli
     if (left < MIN_CALL_MS) break;
     if (left < MIN_PDF_CALL_MS && pickPdfs(email, senderRole(email, "")).length > 0) continue;
     const projectId = (email.project_id && projectIds.includes(email.project_id) ? email.project_id : email.matched_project_id) as string;
+    // Claim it first: two deployments run this cron, and a second tick must
+    // not read (and bill, and file) the same email. A read that should be
+    // retried hands the email back.
+    const { data: claimed } = await db.from("inbox_emails").update({ selections_checked_at: new Date().toISOString() })
+      .eq("id", email.id).is("selections_checked_at", null).select("id").maybeSingle();
+    if (!claimed) continue;
+    const release = () => db.from("inbox_emails").update({ selections_checked_at: null }).eq("id", email.id);
     try {
       const outcome = await suggestFromEmail(db, email, projectId, { deadlineMs: opts.deadlineMs });
-      if (outcome.status === "retry") { summary.failed += 1; continue; }
+      if (outcome.status === "retry") { await release(); summary.failed += 1; continue; }
       if (outcome.status === "read") { summary.read += 1; summary.suggested += outcome.inserted; }
-      await db.from("inbox_emails").update({ selections_checked_at: new Date().toISOString() }).eq("id", email.id);
       summary.checked += 1;
     } catch (err) {
       console.error(`[selections] email ${email.id} failed:`, err instanceof Error ? err.message : String(err));
+      await release();
       summary.failed += 1;
     }
   }
