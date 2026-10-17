@@ -1,3 +1,5 @@
+import { scheduleProgress, isMasterPhase } from "@/lib/schedule/progress";
+import { withEffectiveScheduleDates } from "@/lib/schedule/cascade";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Header } from "@/components/layout/header";
@@ -60,7 +62,7 @@ async function ProjectsContent() {
     fetchAllRows((from, to) =>
       supabase
         .from("schedule_phases")
-        .select("project_id, name, status, start_date, end_date, event_type")
+      .select("id, project_id, name, status, start_date, end_date, planned_start_date, planned_end_date, is_confirmed, is_manually_scheduled, sort_order, phase_scope, event_type, actual_completed_at")
         .not("project_id", "is", null)
         .order("id")
         .range(from, to)
@@ -106,31 +108,29 @@ async function ProjectsContent() {
   // (event_type "crew") share the table but aren't construction phases —
   // counting them deflates progress every time someone gets scheduled.
   const progressMap: Record<string, number> = {};
-  const phasesByProject = new Map<string, { total: number; completed: number }>();
+  const phasesByProject = new Map<string, typeof allPhases>();
   for (const ph of allPhases) {
-    if (!ph.project_id || ph.event_type === "crew") continue;
-    if (!phasesByProject.has(ph.project_id)) {
-      phasesByProject.set(ph.project_id, { total: 0, completed: 0 });
-    }
-    const entry = phasesByProject.get(ph.project_id)!;
-    entry.total++;
-    if (ph.status === "completed") entry.completed++;
+    if (!ph.project_id) continue;
+    const rows = phasesByProject.get(ph.project_id) ?? [];
+    rows.push(ph);
+    phasesByProject.set(ph.project_id, rows);
   }
-  for (const [pid, { total, completed }] of phasesByProject) {
-    progressMap[pid] = total > 0 ? Math.round((completed / total) * 100) : 0;
+  for (const [pid, rows] of phasesByProject) {
+    progressMap[pid] = scheduleProgress(rows).percent;
   }
+  const effectivePhases = [...phasesByProject.values()].flatMap(rows => withEffectiveScheduleDates(rows.filter(isMasterPhase)));
 
   // Live phase label per project: what the schedule says is happening today
   // (or the next phase starting within two weeks). The hand-set
   // projects.phase goes stale — jobs read "Pre-Con" at 70% built.
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const horizon = new Date(now);
   horizon.setDate(horizon.getDate() + 14);
   const horizonStr = horizon.toISOString().slice(0, 10);
   const activePhaseMap: Record<string, { name: string; inProgress: boolean }> = {};
   const upcomingPhaseMap: Record<string, { name: string; start: string }> = {};
-  for (const ph of allPhases) {
-    if (!ph.project_id || ph.event_type === "crew" || !ph.name) continue;
+  for (const ph of effectivePhases) {
+    if (!ph.project_id || !isMasterPhase(ph) || !ph.name) continue;
     if (ph.status === "completed") continue;
     if (ph.start_date && ph.end_date && ph.start_date <= todayStr && ph.end_date >= todayStr) {
       const prev = activePhaseMap[ph.project_id];
@@ -181,7 +181,7 @@ async function ProjectsContent() {
     // supabase-js types a to-one FK join as an array; at runtime it's an object.
     customer: p.customer as unknown as { first_name: string; last_name: string; email: string | null; phone: string | null } | null,
     heatScore: heatMap[p.id] || 0,
-    progress: progressMap[p.id] ?? p.progress ?? null,
+    progress: progressMap[p.id] ?? null,
     current_phase_name: activePhaseMap[p.id]?.name ?? upcomingPhaseMap[p.id]?.name ?? null,
     latest_estimate_total: latestEstimateMap[p.id]?.total ?? null,
     latest_estimate_id: latestEstimateMap[p.id]?.id ?? null,

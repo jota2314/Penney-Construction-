@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { canViewJobBoard } from "@/lib/auth/role-access";
 import { projectColor } from "@/lib/board/crew-colors";
 import { easternToday } from "@/lib/board/board-data";
+import { isMasterPhase } from "@/lib/schedule/progress";
 
 /**
  * Cell edits for the crew board, written straight into `schedule_phases`.
@@ -29,7 +31,7 @@ import { easternToday } from "@/lib/board/board-data";
 
 const CREW_EVENT_TYPE = "crew";
 const PHASE_COLUMNS =
-  "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, confirmed_at, confirmed_with, assigned_employee_ids, assigned_sub_ids, phase_scope, notes, estimate_line_item_id";
+  "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, confirmed_at, confirmed_with, assigned_employee_ids, assigned_sub_ids, phase_scope, notes, estimate_line_item_id, master_phase_id";
 
 interface PhaseRow {
   id: string;
@@ -49,6 +51,7 @@ interface PhaseRow {
   notes: string | null;
   /** Clock-in reads the budget line off the phase — a split must keep it. */
   estimate_line_item_id: string | null;
+  master_phase_id: string | null;
 }
 
 /**
@@ -66,6 +69,7 @@ function carriedFields(row: PhaseRow, line: string | null) {
     color: row.color,
     notes: row.notes,
     estimate_line_item_id: line,
+    master_phase_id: row.master_phase_id,
     is_confirmed: row.is_confirmed,
     confirmed_at: row.is_confirmed ? (row.confirmed_at ?? new Date().toISOString()) : null,
     confirmed_with: row.is_confirmed ? row.confirmed_with : null,
@@ -80,6 +84,7 @@ const setSchema = z.object({
   date: dateSchema,
   projectId: z.string().uuid("Pick a job."),
   scope: z.string().trim().max(120).optional(),
+  masterPhaseId: z.string().uuid().nullable().optional(),
   confirmed: z.boolean(),
   /**
    * Editing an existing chip: that day comes off this row first, so changing
@@ -98,6 +103,7 @@ const assignCellsSchema = z.object({
   cells: z.array(cellSchema).min(1, "Pick at least one day.").max(200, "That's too many days at once."),
   projectId: z.string().uuid("Pick a job."),
   scope: z.string().trim().max(120).optional(),
+  masterPhaseId: z.string().uuid().nullable().optional(),
   confirmed: z.boolean(),
 });
 
@@ -193,7 +199,29 @@ function revalidate(projectIds: (string | null | undefined)[]) {
   revalidatePath("/crew");
   revalidatePath("/schedule");
   revalidatePath("/command-center");
-  for (const id of new Set(projectIds)) if (id) revalidatePath(`/projects/${id}`);
+  for (const id of new Set(projectIds)) if (id) revalidateSchedule(id);
+}
+
+export async function getProjectMasterPhaseOptions(projectId: string) {
+  const auth = await authed();
+  if ("error" in auth) return { options: [], error: auth.error ?? "Not allowed" };
+  if (!z.string().uuid().safeParse(projectId).success) return { options: [], error: "Pick a job." };
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("schedule_phases")
+    .select("id, name, status, phase_scope, event_type")
+    .eq("project_id", projectId).order("sort_order").order("start_date");
+  return { options: (data ?? []).filter(isMasterPhase).map(({ id, name, status }) => ({ id, name, status })), error: error?.message ?? null };
+}
+
+/** Check before taking an old day off its run; the database also enforces this link. */
+async function validateMasterPhase(supabase: Db, projectId: string, phaseId: string | null | undefined) {
+  if (!phaseId) return null;
+  const { data, error } = await supabase.from("schedule_phases")
+    .select("id, project_id, name, phase_scope, event_type")
+    .eq("id", phaseId).maybeSingle();
+  if (error) return error.message;
+  if (!data || data.project_id !== projectId || !isMasterPhase(data)) return "Choose a master schedule task from this job.";
+  return null;
 }
 
 /**
@@ -216,6 +244,9 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
     .maybeSingle();
   if (!project) return { error: "That job doesn't exist." };
 
+  const linkError = await validateMasterPhase(supabase, projectId, parsed.data.masterPhaseId);
+  if (linkError) return { error: linkError };
+
   const name = parsed.data.scope?.trim() || project.name;
 
   const touchedBefore: (string | null)[] = [];
@@ -234,7 +265,7 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
     }
     touchedBefore.push(old.project_id);
     // Same job, new words: the day keeps its budget line and notes.
-    if (old.project_id === projectId) carry = { lineId: old.estimate_line_item_id, notes: old.notes };
+    if (old.project_id === projectId) carry = { lineId: old.estimate_line_item_id, notes: old.notes, masterPhaseId: old.master_phase_id };
     const res = await takeOffDay(supabase, old, personKind, personId, date, auth.userId);
     if (res.error) return { error: res.error };
   }
@@ -249,6 +280,7 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
     userId: auth.userId,
     userName: auth.name,
     carry,
+    masterPhaseId: parsed.data.masterPhaseId,
   });
   if (placed.error) return { error: placed.error };
 
@@ -276,6 +308,8 @@ export async function assignCrewCells(input: AssignCrewCellsInput) {
     .eq("id", projectId)
     .maybeSingle();
   if (!project) return { error: "That job doesn't exist." };
+  const linkError = await validateMasterPhase(supabase, projectId, parsed.data.masterPhaseId);
+  if (linkError) return { error: linkError };
   const name = parsed.data.scope?.trim() || project.name;
 
   // Person by person, day by day — so each insert can fold into yesterday's.
@@ -292,6 +326,7 @@ export async function assignCrewCells(input: AssignCrewCellsInput) {
       projectId,
       name,
       confirmed,
+      masterPhaseId: parsed.data.masterPhaseId,
       userId: auth.userId,
       userName: auth.name,
     });
@@ -382,8 +417,10 @@ interface Placement {
   confirmed: boolean;
   userId: string;
   userName: string;
+  /** Omitted retains an existing link; null explicitly clears it. */
+  masterPhaseId?: string | null;
   /** A moved or edited day keeps its budget line and notes. */
-  carry?: { lineId: string | null; notes: string | null };
+  carry?: { lineId: string | null; notes: string | null; masterPhaseId?: string | null };
 }
 
 /**
@@ -415,7 +452,7 @@ async function place(
   // Re-assigning a day they already had on this job keeps that day's budget
   // line and notes, unless the caller is bringing its own.
   const carry =
-    p.carry ?? (covering[0] ? { lineId: covering[0].estimate_line_item_id, notes: covering[0].notes } : undefined);
+    p.carry ?? (covering[0] ? { lineId: covering[0].estimate_line_item_id, notes: covering[0].notes, masterPhaseId: covering[0].master_phase_id } : undefined);
   for (const row of covering) {
     touched.push(row.project_id);
     const res = await takeOffDay(supabase, row, p.personKind, p.personId, p.date, p.userId);
@@ -442,6 +479,7 @@ async function place(
       color: projectColor(p.projectId),
       estimate_line_item_id: await usableLine(supabase, carry?.lineId),
       notes: carry?.notes ?? null,
+      master_phase_id: p.masterPhaseId !== undefined ? p.masterPhaseId : carry?.masterPhaseId ?? null,
       assigned_employee_ids: p.personKind === "employee" ? [p.personId] : [],
       assigned_sub_ids: p.personKind === "sub" ? [p.personId] : [],
       created_by: p.userId,
@@ -506,7 +544,7 @@ export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
     confirmed: phase.is_confirmed,
     userId: auth.userId,
     userName: auth.name,
-    carry: { lineId: phase.estimate_line_item_id, notes: phase.notes },
+    carry: { lineId: phase.estimate_line_item_id, notes: phase.notes, masterPhaseId: phase.master_phase_id },
   });
   if (placed.error) return { error: placed.error };
 
@@ -795,7 +833,7 @@ async function mergeNeighbors(supabase: Db, row: PhaseRow, kind: "employee" | "s
   if (error) return { error: error.message };
 
   const matches = ((candidates ?? []) as PhaseRow[]).filter(
-    (c) => c.id !== row.id && c.project_id === row.project_id && ownedSolo(c, kind, id),
+    (c) => c.id !== row.id && c.project_id === row.project_id && c.master_phase_id === row.master_phase_id && ownedSolo(c, kind, id),
   );
   let prev = matches.find((c) => c.end_date === prevDay);
   let next = matches.find((c) => c.start_date === nextDay);

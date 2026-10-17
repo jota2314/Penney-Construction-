@@ -53,6 +53,7 @@ import type {
 import type { ActualWork } from "@/lib/board/actual-work";
 import { CrewDayDialog } from "./crew-day-dialog";
 import { JobPicker } from "./crew-job-picker";
+import { CrewMasterPhasePicker } from "./crew-master-phase-picker";
 import { clipFrom, longDate, movable, shortJob, type CrewClip } from "./crew-helpers";
 
 /**
@@ -150,6 +151,7 @@ export function BoardCrew({ data }: Props) {
   const suppressClick = useRef(false);
   const [blockJob, setBlockJob] = useState("");
   const [blockScope, setBlockScope] = useState("");
+  const [blockMasterPhaseId, setBlockMasterPhaseId] = useState<string | null | undefined>(undefined);
 
   // Copy & paste
   const [clip, setClip] = useState<CrewClip | null>(null);
@@ -302,7 +304,7 @@ export function BoardCrew({ data }: Props) {
     if (project) addPending(targets, () => optimisticChip(project, clip.scope || project.name, clip.confirmed));
     const cells = targets.map((t) => ({ personKind: t.person.kind, personId: t.person.id, date: t.date }));
     void run(
-      () => assignCrewCells({ cells, projectId: clip.projectId, scope: clip.scope, confirmed: clip.confirmed }),
+      () => assignCrewCells({ cells, projectId: clip.projectId, scope: clip.scope, confirmed: clip.confirmed, masterPhaseId: clip.masterPhaseId }),
       targets.length === 1
         ? `${shortJob(clip.projectName)} → ${targets[0].person.name.split(" ")[0]}, ${longDate(targets[0].date)}`
         : `${shortJob(clip.projectName)} pasted on ${targets.length} days`,
@@ -392,15 +394,16 @@ export function BoardCrew({ data }: Props) {
     copyCell(cell);
   };
 
-  const assignBlock = (projectId: string, scope: string) => {
+  const assignBlock = (projectId: string, scope: string, masterPhaseId?: string | null) => {
     const project = projectById.get(projectId);
     const { refs, targets } = selectedRefs();
     if (!project || !refs.length) return;
     addPending(targets, () => optimisticChip(project, scope.trim() || project.name, confirmNew));
     setSel(null);
     setBlockScope("");
+    setBlockMasterPhaseId(undefined);
     void run(
-      () => assignCrewCells({ cells: refs, projectId, scope, confirmed: confirmNew }),
+      () => assignCrewCells({ cells: refs, projectId, scope, confirmed: confirmNew, masterPhaseId }),
       `${project.name} on ${refs.length} day${refs.length === 1 ? "" : "s"}`,
     );
   };
@@ -812,7 +815,7 @@ export function BoardCrew({ data }: Props) {
               {selected.size} day{selected.size === 1 ? "" : "s"} picked
             </span>
             <div className="w-56">
-              <JobPicker projects={data.projects} value={blockJob} onChange={setBlockJob} compact />
+              <JobPicker projects={data.projects} value={blockJob} onChange={id => { setBlockJob(id); setBlockMasterPhaseId(undefined); }} compact />
             </div>
             <Input
               value={blockScope}
@@ -821,10 +824,11 @@ export function BoardCrew({ data }: Props) {
               maxLength={120}
               className="h-8 w-52 text-xs"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && blockJob) assignBlock(blockJob, blockScope);
+                if (e.key === "Enter" && blockJob) assignBlock(blockJob, blockScope, blockMasterPhaseId);
               }}
             />
-            <Button size="sm" className="h-8" disabled={!blockJob || working} onClick={() => assignBlock(blockJob, blockScope)}>
+            <CrewMasterPhasePicker projectId={blockJob} value={blockMasterPhaseId} onChange={setBlockMasterPhaseId} compact />
+            <Button size="sm" className="h-8" disabled={!blockJob || working} onClick={() => assignBlock(blockJob, blockScope, blockMasterPhaseId)}>
               Assign
             </Button>
             {clip && (

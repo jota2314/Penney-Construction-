@@ -24,8 +24,8 @@ export interface PopupPhase {
 
 export interface PhasePatch {
   name: string;
-  start_date: string;
-  end_date: string;
+  start_date?: string;
+  end_date?: string;
   notes: string | null;
   assigned_employee_ids: string[];
 }
@@ -57,6 +57,7 @@ function spanDays(a: string, b: string): number {
 export function PhasePopup({
   phase,
   displayedDates,
+  actualCompletionDate,
   issues,
   predecessors,
   successors,
@@ -71,8 +72,9 @@ export function PhasePopup({
   onOpenInList,
 }: {
   phase: PopupPhase;
-  /** Effective chart dates; edits still start from the saved dates. */
+  /** Effective chart dates. Inspection booking edits retain saved dates. */
   displayedDates?: { start: string; end: string };
+  actualCompletionDate?: string;
   issues: SequenceIssue[];
   predecessors: PhaseLink[];
   successors: PhaseLink[];
@@ -97,6 +99,8 @@ export function PhasePopup({
   const start = displayedDates?.start ?? phase.start_date;
   const end = displayedDates?.end ?? phase.end_date;
   const shifted = start !== phase.start_date || end !== phase.end_date;
+  const editStart = actualCompletionDate ? phase.start_date : start;
+  const editEnd = actualCompletionDate ? phase.end_date : end;
 
   async function mutate(run: () => PhaseMutationResult, success?: () => void) {
     if (pendingRef.current) return;
@@ -156,7 +160,7 @@ export function PhasePopup({
           <BottomSheetTitle className="break-words pr-0 leading-snug">{phase.name}</BottomSheetTitle>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
             <span className="tabular-nums">
-              {pretty(start)} – {pretty(end)}
+              {actualCompletionDate ? `Passed ${pretty(actualCompletionDate)}` : `${pretty(start)} – ${pretty(end)}`}
             </span>
             <span>·</span>
             <span>{spanDays(start, end)} days</span>
@@ -186,7 +190,7 @@ export function PhasePopup({
       </div>
 
       <BottomSheetBody className="space-y-4 overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))]">
-        {shifted && <p className="rounded-xl bg-amber-500/10 p-3 text-sm text-amber-600 dark:text-amber-400">Projected dates after earlier delays. Saved dates: {pretty(phase.start_date)} - {pretty(phase.end_date)}.</p>}
+        {shifted && <p className="rounded-xl bg-amber-500/10 p-3 text-sm text-amber-600 dark:text-amber-400">{actualCompletionDate ? "Actual inspection completion." : "Projected dates after earlier delays."} Saved schedule dates: {pretty(phase.start_date)} - {pretty(phase.end_date)}.</p>}
         {error && <p role="alert" className="rounded-xl bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
         <fieldset disabled={pending} className="min-w-0 space-y-4 disabled:opacity-60" aria-busy={pending}>
         {issues.length > 0 && (
@@ -221,8 +225,7 @@ export function PhasePopup({
               }
               void mutate(() => onUpdatePhase(phase.id, {
                 name: (fd.get("name") as string).trim(),
-                start_date: fd.get("start") as string,
-                end_date: fd.get("end") as string,
+                ...(startDate !== editStart || endDate !== editEnd ? { start_date: startDate, end_date: endDate } : {}),
                 notes: ((fd.get("notes") as string) || "").trim() || null,
                 assigned_employee_ids: Array.from(crew),
               }), () => setEditing(false));
@@ -244,7 +247,7 @@ export function PhasePopup({
                   name="start"
                   type="date"
                   required
-                  defaultValue={phase.start_date}
+                  defaultValue={editStart}
                   className="mt-1 min-h-11 min-w-0 w-full rounded-lg border bg-background px-2 py-1.5 text-base sm:text-sm"
                 />
               </label>
@@ -254,7 +257,7 @@ export function PhasePopup({
                   name="end"
                   type="date"
                   required
-                  defaultValue={phase.end_date}
+                  defaultValue={editEnd}
                   className="mt-1 min-h-11 min-w-0 w-full rounded-lg border bg-background px-2 py-1.5 text-base sm:text-sm"
                 />
               </label>

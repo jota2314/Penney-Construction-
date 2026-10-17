@@ -14,6 +14,11 @@ import type {
 import { listRecentFieldActivity } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
 import { listRecentCompanyFeedPosts } from "@/lib/actions/company-feed";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { crewToday } from "@/lib/crew/schedule-dates";
+import { deriveCurrentScheduleActivity, deriveScheduleHealth, recentWorkDates, type ScheduleWorkLog } from "@/lib/schedule/health";
+import { isMasterPhase } from "@/lib/schedule/progress";
+import { withEffectiveScheduleDates } from "@/lib/schedule/cascade";
 
 const TZ = "America/New_York";
 
@@ -92,7 +97,17 @@ type PhaseRow = {
   start_date: string;
   end_date: string;
   status: "not_started" | "in_progress" | "completed" | "on_hold";
+  phase_scope: string | null;
+  event_type: string | null;
+  is_confirmed: boolean | null;
+  is_manually_scheduled: boolean | null;
+  actual_completed_at: string | null;
+  sort_order: number | null;
+  planned_start_date: string | null;
+  planned_end_date: string | null;
+  estimate_line_item_id: string | null;
 };
+type WorkLogRow = ScheduleWorkLog & { project_id: string | null };
 
 // Open clock-in (daily_logs status='in_progress'). project_id is direct on
 // new project-first logs; older clock-ins only know their schedule phase.
@@ -137,7 +152,6 @@ export async function getCommandCenterFeedData(
   const [
     myDatedTodosRes,
     projectsRes,
-    phasesRes,
     liveLogsRes,
     depositsWeekRes,
     receiptsWeekRes,
@@ -159,23 +173,15 @@ export async function getCommandCenterFeedData(
     ),
     // Every active jobsite — the rail is the source of truth for "what's on
     // the board", so no tight cap (was 8, which silently dropped jobs).
-    safe<ProjectRow[]>(
-      supabase
+    fetchAllRows<ProjectRow>((from, to) => supabase
         .from("projects")
         .select("id, project_number, name, status, address, city, state, contract_value, estimated_value")
-        .in("status", ["in_progress", "contracted"])
+        .neq("status", "cancelled")
+        .eq("is_overhead", false)
         .order("updated_at", { ascending: false })
-        .limit(50),
-    ),
-    safe<PhaseRow[]>(
-      supabase
-        .from("schedule_phases")
-        .select("id, project_id, name, start_date, end_date, status")
-        .gte("end_date", today.toISOString().slice(0, 10))
-        .lte("start_date", in14d.toISOString().slice(0, 10))
-        .order("start_date", { ascending: true })
-        .limit(200),
-    ),
+        .order("id")
+        .range(from, to)
+        .throwOnError()).then((data) => ({ data })),
     // Who's on the clock right now — drives the "Live" badge + crew initials
     // on jobsite cards. 24h window so a forgotten open shift doesn't show a
     // site as live for days.
@@ -220,8 +226,32 @@ export async function getCommandCenterFeedData(
     ),
   ]);
 
-  const activeProjects = projectsRes.data ?? [];
-  const phases = phasesRes.data ?? [];
+  const projectRows = projectsRes.data ?? [];
+  const projectIds = projectRows.map((p) => p.id);
+  // Whole master plans are needed to distinguish "no plan" from past or future work.
+  const [savedPhases, workLogs] = projectIds.length ? await Promise.all([
+    fetchAllRows<PhaseRow>((from, to) => supabase.from("schedule_phases")
+      .select("id, project_id, name, start_date, end_date, status, phase_scope, event_type, is_confirmed, is_manually_scheduled, actual_completed_at, sort_order, planned_start_date, planned_end_date, estimate_line_item_id")
+      .in("project_id", projectIds).order("id").range(from, to).throwOnError()),
+    fetchAllRows<WorkLogRow>((from, to) => supabase.from("daily_logs")
+      .select("project_id, started_at, ended_at, status")
+      .in("project_id", projectIds)
+      .gte("started_at", new Date(Date.now() - 31 * 86400_000).toISOString())
+      .order("id").range(from, to).throwOnError()),
+  ]) : [[], []];
+  const todayDateStr = crewToday();
+  const phases = projectRows.flatMap((project) => {
+    const rows = savedPhases.filter((phase) => phase.project_id === project.id);
+    const effective = new Map(withEffectiveScheduleDates(rows.filter(isMasterPhase)).map((phase) => [phase.id, phase]));
+    return rows.map((phase) => effective.get(phase.id) ?? phase);
+  });
+  const scheduleHealth = new Map(projectRows.map((project) => [project.id, deriveScheduleHealth({
+    status: project.status,
+    phases: phases.filter((phase) => phase.project_id === project.id),
+    today: todayDateStr,
+    recentWorkDates: recentWorkDates(workLogs.filter((log) => log.project_id === project.id), todayDateStr),
+  })]));
+  const activeProjects = projectRows.filter((project) => ["in_progress", "contracted"].includes(project.status) || scheduleHealth.get(project.id)!.issues.length > 0);
 
   const depositsWeekTotal = (depositsWeekRes.data ?? []).reduce(
     (sum, row) => sum + Number(row.amount ?? 0),
@@ -376,12 +406,10 @@ export async function getCommandCenterFeedData(
     liveCrewByProject.has(p.id) ? 0 : p.status === "in_progress" ? 1 : 2;
   const orderedProjects = [...activeProjects].sort((a, b) => jobsiteRank(a) - jobsiteRank(b));
 
-  const todayDateStr = today.toISOString().slice(0, 10);
   const jobsites: Jobsite[] = orderedProjects.map((p, i) => {
     const ps = phasesByProject.get(p.id) ?? [];
-    const current = ps.find((x) => x.start_date <= todayDateStr && x.end_date >= todayDateStr);
-    const next = ps.find((x) => x.start_date > todayDateStr);
-    const phaseLabel = current?.name ?? (next ? `Next: ${next.name}` : p.status === "in_progress" ? "In progress" : "Pre-con");
+    const { current, next } = deriveCurrentScheduleActivity(ps, todayDateStr);
+    const phaseLabel = current?.name ?? (next && next.start_date <= in14d.toISOString().slice(0, 10) ? `Next: ${next.name}` : p.status === "in_progress" ? "No current master work" : p.status.replace(/_/g, " "));
     const status = current?.status === "in_progress" ? "in progress" : current?.name?.toLowerCase() ?? p.status.replace(/_/g, " ");
     const addressParts = [p.address, p.city].filter(Boolean).join(", ");
 
@@ -393,9 +421,10 @@ export async function getCommandCenterFeedData(
       lead: null,
       status,
       phase: phaseLabel,
+      scheduleIssues: scheduleHealth.get(p.id)?.issues.map((issue) => issue.text) ?? [],
       weather: "—",
       color: PROJECT_COLORS[i % PROJECT_COLORS.length],
-      stage: (p.status === "in_progress" ? "active" : "precon") as "active" | "precon",
+      stage: (p.status === "in_progress" ? "active" : p.status === "contracted" ? "precon" : "review") as "active" | "precon" | "review",
     };
   });
 

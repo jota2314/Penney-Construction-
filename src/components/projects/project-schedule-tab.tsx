@@ -32,13 +32,15 @@ import {
   List,
   ShieldAlert,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
 import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
+import { crewToday, scheduleDays } from "@/lib/crew/schedule-dates";
+import { isMasterPhase, scheduleProgress } from "@/lib/schedule/progress";
+import { deriveScheduleHealth } from "@/lib/schedule/health";
 import { Lock } from "lucide-react";
-import { buildPlanFromEstimate, setPhaseConfirmation, updateSchedulePhase } from "@/lib/actions/schedule";
+import { buildPlanFromEstimate, setPhaseConfirmation, updateSchedulePhase, createSchedulePhase, deleteSchedulePhase } from "@/lib/actions/schedule";
 import type { ScheduleNotifyResult } from "@/lib/notifications/schedule-notify";
 import { ScheduleGantt } from "@/components/schedule/schedule-gantt";
 import {
@@ -69,6 +71,7 @@ interface SchedulePhase {
   is_confirmed?: boolean;
   is_manually_scheduled?: boolean;
   confirmed_with?: string | null;
+  actual_completed_at?: string | null;
 }
 
 interface LineItemOption {
@@ -191,9 +194,9 @@ export function ProjectScheduleTab({
   changeOrders,
   lineItems,
   employees,
-  userId,
 }: ProjectScheduleTabProps) {
   const [phases, setPhases] = useState(initialPhases);
+  useEffect(() => { setPhases(initialPhases); }, [initialPhases]);
   const [suggestedScope, setSuggestedScope] = useState<{ name: string; lineId: string } | null>(null);
   const missingCOs = uncoveredChangeOrders(changeOrders, lineItems, phases);
   const [showAdd, setShowAdd] = useState(false);
@@ -307,31 +310,19 @@ export function ProjectScheduleTab({
     if (!proposedPhases || proposedPhases.length === 0) return;
     setAddingPhases(true);
 
-    const supabase = createClient();
     const newPhases: SchedulePhase[] = [];
 
     for (let i = 0; i < proposedPhases.length; i++) {
       const p = proposedPhases[i];
       const color = PHASE_COLORS[(phases.length + i) % PHASE_COLORS.length];
 
-      const { data, error } = await supabase
-        .from("schedule_phases")
-        .insert({
-          project_id: projectId,
-          name: p.name,
-          start_date: p.start_date,
-          end_date: p.end_date || p.start_date,
-          planned_start_date: p.start_date,
-          planned_end_date: p.end_date || p.start_date,
-          status: "not_started",
-          event_type: p.event_type || "phase",
-          notes: p.notes || null,
-          sort_order: phases.length + i,
-          color,
-          created_by: userId,
-        })
-        .select("*")
-        .single();
+      const { data, error } = await createSchedulePhase({
+        project_id: projectId, name: p.name, start_date: p.start_date,
+        end_date: p.end_date || p.start_date, phase_scope: "master",
+        event_type: p.event_type || "phase", notes: p.notes || "",
+        sort_order: phases.length + i, color,
+      });
+      if (error) { setMutationError(error); break; }
 
       if (!error && data) newPhases.push(data);
     }
@@ -341,21 +332,26 @@ export function ProjectScheduleTab({
     router.refresh();
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-  const weekOut = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+  const today = crewToday();
+  const daysAhead = scheduleDays(today, 8);
+  const tomorrow = daysAhead[1];
+  const weekOut = daysAhead[7];
   // Two schedules, one table: the PLAN is the master phases; day-to-day crew
   // rows (phase_scope 'daily') render in the short-term strip up top instead.
-  const masterPhases = phases.filter((p) => p.phase_scope !== "daily");
+  const masterPhases = useMemo(() => phases.filter(isMasterPhase), [phases]);
+  const cascadeMap = useMemo(
+    () => cascadeSchedule(masterPhases as unknown as CascadeInput[]), [masterPhases],
+  );
+  const effectiveMasterPhases = useMemo(() => masterPhases.map(phase => ({
+    ...phase,
+    start_date: cascadeMap.get(phase.id)?.start_date ?? phase.start_date,
+    end_date: cascadeMap.get(phase.id)?.end_date ?? phase.end_date,
+  })), [masterPhases, cascadeMap]);
   const shortTerm = phases
     .filter((p) => p.phase_scope === "daily" && p.end_date >= today && p.start_date <= weekOut)
     .sort((a, b) => a.start_date.localeCompare(b.start_date));
-  const totalPhases = masterPhases.length;
-  const completedPhases = masterPhases.filter((p) => p.status === "completed").length;
-  const overduePhases = masterPhases.filter(
-    (p) => p.status !== "completed" && p.end_date < today
-  ).length;
-  const progress = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
+  const { total: totalPhases, completed: completedPhases, percent: progress } = scheduleProgress(phases);
+  const overduePhases = deriveScheduleHealth({ status: "in_progress", phases: effectiveMasterPhases, today }).overdueCount;
 
   async function handleBuildFromEstimate() {
     setBuildingPlan(true);
@@ -378,7 +374,6 @@ export function ProjectScheduleTab({
   async function handleAddPhase(formData: FormData) {
     setSaving(true);
     setMutationError(null);
-    const supabase = createClient();
 
     const name = formData.get("name") as string;
     const startDate = formData.get("start_date") as string;
@@ -386,54 +381,37 @@ export function ProjectScheduleTab({
     const lineItemId = formData.get("estimate_line_item_id") as string;
     const color = PHASE_COLORS[phases.length % PHASE_COLORS.length];
 
-    const { data, error } = await supabase
-      .from("schedule_phases")
-      .insert({
-        project_id: projectId,
-        name,
-        start_date: startDate,
-        end_date: endDate,
-        planned_start_date: startDate,
-        planned_end_date: endDate,
-        status: "not_started",
-        phase_scope: "master",
-        is_confirmed: false,
-        event_type: (formData.get("event_type") as string) || "phase",
-        notes: (formData.get("notes") as string) || null,
-        sort_order: phases.length,
-        color,
-        estimate_line_item_id: lineItemId || null,
-        assigned_employee_ids: Array.from(addAssignees),
-        created_by: userId,
-      })
-      .select("*")
-      .single();
+    const { data, error } = await createSchedulePhase({
+      project_id: projectId, name, start_date: startDate, end_date: endDate,
+      phase_scope: "master", event_type: (formData.get("event_type") as string) || "phase",
+      notes: (formData.get("notes") as string) || "", sort_order: phases.length, color,
+      estimate_line_item_id: lineItemId || null, assigned_employee_ids: Array.from(addAssignees),
+    });
 
     if (!error && data) {
       setPhases((prev) => [...prev, data]);
       setShowAdd(false);
       setAddAssignees(new Set());
       setExpandedId(data.id);
+      router.refresh();
     } else {
-      setMutationError(error?.message || "Could not add this phase.");
+      setMutationError(error || "Could not add this phase.");
     }
     setSaving(false);
   }
 
   async function handleUpdateStatus(phaseId: string, newStatus: string) {
     setMutationError(null);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("schedule_phases")
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq("id", phaseId);
+    const { error } = await updateSchedulePhase(phaseId, { project_id: projectId, status: newStatus });
     if (error) {
-      setMutationError(error.message);
+      setMutationError(error);
       return false;
     }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, status: newStatus } : p))
     );
+    router.refresh();
+    return true;
   }
 
   // Confirm = put the phase LIVE. It shows up on the /schedule calendar and
@@ -469,6 +447,7 @@ export function ProjectScheduleTab({
       ),
     );
     if (res.notify) setNotifyResult(res.notify);
+    router.refresh();
     return true;
   }
 
@@ -478,15 +457,18 @@ export function ProjectScheduleTab({
     const result = await updateSchedulePhase(phaseId, { project_id: projectId, ...patch });
     if (result.error) { setMutationError(result.error); return false; }
     setPhases(prev => prev.map(phase => phase.id === phaseId ? { ...phase, ...patch } : phase));
+    router.refresh();
     return true;
   }
 
   async function handleUpdatePhase(
     phaseId: string,
-    patch: { name: string; start_date: string; end_date: string; notes: string | null; assigned_employee_ids: string[] },
+    patch: { name: string; start_date?: string; end_date?: string; notes: string | null; assigned_employee_ids: string[] },
   ) {
     setMutationError(null);
     setNotifyResult(null);
+    const dateIntent = patch.start_date !== undefined || patch.end_date !== undefined
+      ? { is_manually_scheduled: true } : {};
     const res = await updateSchedulePhase(phaseId, {
       project_id: projectId,
       name: patch.name,
@@ -494,16 +476,18 @@ export function ProjectScheduleTab({
       end_date: patch.end_date,
       notes: patch.notes ?? "",
       assigned_employee_ids: patch.assigned_employee_ids,
+      ...dateIntent,
     });
     if (res.error) {
       setMutationError(res.error);
       return false;
     }
     setPhases((prev) =>
-      prev.map((p) => (p.id === phaseId ? { ...p, ...patch } : p))
+      prev.map((p) => (p.id === phaseId ? { ...p, ...patch, ...dateIntent } : p))
     );
     if (res.notify) setNotifyResult(res.notify);
     setEditingId(null);
+    router.refresh();
     return true;
   }
 
@@ -513,46 +497,35 @@ export function ProjectScheduleTab({
       return "cancelled" as const;
     }
     setMutationError(null);
-    const supabase = createClient();
-    const { error } = await supabase.from("schedule_phases").delete().eq("id", phaseId);
+    const { error } = await deleteSchedulePhase(phaseId, projectId);
     if (error) {
-      setMutationError(error.message);
+      setMutationError(error);
       return false;
     }
     setPhases((prev) => prev.filter((p) => p.id !== phaseId));
+    router.refresh();
     return true;
   }
 
   async function handleUpdateLineItem(phaseId: string, lineItemId: string) {
     setMutationError(null);
-    const supabase = createClient();
     const value = lineItemId || null;
-    const { error } = await supabase
-      .from("schedule_phases")
-      .update({ estimate_line_item_id: value, updated_at: new Date().toISOString() })
-      .eq("id", phaseId);
+    const { error } = await updateSchedulePhase(phaseId, { project_id: projectId, estimate_line_item_id: value });
     if (error) {
-      setMutationError(error.message);
+      setMutationError(error);
       return;
     }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, estimate_line_item_id: value } : p))
     );
+    router.refresh();
   }
 
-  // Live cascade: where every phase actually lands once confirmed slips ripple
-  // through. Confirmed/started phases keep their dates; unconfirmed ones slide.
-  const cascadeMap = useMemo(
-    () => cascadeSchedule(phases.filter((p) => p.phase_scope !== "daily") as unknown as CascadeInput[]),
-    [phases]
-  );
-
-  // Sequence check: nothing links one phase to another, so the trade order is
-  // only as good as the last person who typed a date. This reads it back.
-  const sequenceIssues = useMemo(() => checkSequence(phases as SequencePhase[]), [phases]);
+  // Validate the same dates the chart and client see, including the forecast.
+  const sequenceIssues = useMemo(() => checkSequence(effectiveMasterPhases as SequencePhase[]), [effectiveMasterPhases]);
   const issueMap = useMemo(() => issuesByPhase(sequenceIssues), [sequenceIssues]);
   // What waits on what — inferred from the same trade order, drawn as arrows.
-  const phaseLinks = useMemo(() => inferDependencies(phases as SequencePhase[]), [phases]);
+  const phaseLinks = useMemo(() => inferDependencies(effectiveMasterPhases as SequencePhase[]), [effectiveMasterPhases]);
   const conflictCount = sequenceIssues.filter((i) => i.severity === "conflict").length;
   const warningCount = sequenceIssues.length - conflictCount;
 
@@ -1229,20 +1202,25 @@ export function ProjectScheduleTab({
 
           <div className={view === "gantt" ? "hidden" : "space-y-0"}>
           {[...masterPhases]
-            .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.sort_order - b.sort_order)
+            .sort((a, b) => (cascadeMap.get(a.id)?.start_date ?? a.start_date).localeCompare(cascadeMap.get(b.id)?.start_date ?? b.start_date) || a.sort_order - b.sort_order)
             .map((phase, index, ordered) => {
+              const liveStart = cascadeMap.get(phase.id)?.start_date ?? phase.start_date;
+              const liveEnd = cascadeMap.get(phase.id)?.end_date ?? phase.end_date;
+              const actualCompletion = cascadeMap.get(phase.id)?.actual_completion_date;
+              const editStart = actualCompletion ? phase.start_date : liveStart;
+              const editEnd = actualCompletion ? phase.end_date : liveEnd;
               const status = STATUS_CONFIG[phase.status] || STATUS_CONFIG.not_started;
-              const isOverdue = phase.status !== "completed" && phase.end_date < today;
+              const isOverdue = phase.status !== "completed" && liveEnd < today;
               const isEditing = editingId === phase.id;
               const isExpanded = expandedId === phase.id;
               const variance = phase.planned_end_date
                 ? Math.round(
-                    (new Date(phase.end_date).getTime() - new Date(phase.planned_end_date).getTime()) /
+                    (new Date(liveEnd).getTime() - new Date(phase.planned_end_date).getTime()) /
                       (1000 * 60 * 60 * 24)
                   )
                 : 0;
-              const start = new Date(`${phase.start_date}T00:00:00`);
-              const end = new Date(`${phase.end_date}T00:00:00`);
+              const start = new Date(`${liveStart}T00:00:00`);
+              const end = new Date(`${liveEnd}T00:00:00`);
               const cascaded = !phase.is_confirmed && phase.status === "not_started"
                 ? cascadeMap.get(phase.id)
                 : null;
@@ -1293,9 +1271,9 @@ export function ProjectScheduleTab({
                         </span>
                         <span className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                           <span>
+                            {actualCompletion ? "Passed " : ""}
                             {start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            {" – "}
-                            {end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {!actualCompletion && <> – {end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</>}
                           </span>
                           {(phase.assigned_employee_ids?.length ?? 0) > 0 && (
                             <span className="inline-flex items-center gap-1">
@@ -1341,10 +1319,13 @@ export function ProjectScheduleTab({
                         onSubmit={(e) => {
                           e.preventDefault();
                           const fd = new FormData(e.currentTarget);
+                          const editedStart = fd.get("start") as string;
+                          const editedEnd = fd.get("end") as string;
+                          const editedDates = editedStart !== editStart || editedEnd !== editEnd
+                            ? { start_date: editedStart, end_date: editedEnd } : {};
                           handleUpdatePhase(phase.id, {
                             name: (fd.get("name") as string).trim(),
-                            start_date: fd.get("start") as string,
-                            end_date: fd.get("end") as string,
+                            ...editedDates,
                             notes: ((fd.get("notes") as string) || "").trim() || null,
                             assigned_employee_ids: Array.from(editAssignees),
                           });
@@ -1362,11 +1343,11 @@ export function ProjectScheduleTab({
                         <div className="grid grid-cols-2 gap-2">
                           <label className="text-xs text-muted-foreground">
                             Start
-                            <input name="start" type="date" required defaultValue={phase.start_date} className="mt-1 w-full rounded-lg border bg-background px-2 py-2 text-xs" />
+                            <input name="start" type="date" required defaultValue={editStart} className="mt-1 w-full rounded-lg border bg-background px-2 py-2 text-xs" />
                           </label>
                           <label className="text-xs text-muted-foreground">
                             End
-                            <input name="end" type="date" required defaultValue={phase.end_date} className="mt-1 w-full rounded-lg border bg-background px-2 py-2 text-xs" />
+                            <input name="end" type="date" required defaultValue={editEnd} className="mt-1 w-full rounded-lg border bg-background px-2 py-2 text-xs" />
                           </label>
                         </div>
                         <label className="block text-xs text-muted-foreground">
@@ -1448,9 +1429,7 @@ export function ProjectScheduleTab({
                         )}
                         {cascaded?.start_date && cascaded.start_date !== phase.start_date && (
                           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-                            Based on earlier work, this phase may move to{" "}
-                            {new Date(`${cascaded.start_date}T00:00:00`).toLocaleDateString()} –{" "}
-                            {new Date(`${cascaded.end_date || cascaded.start_date}T00:00:00`).toLocaleDateString()}.
+                            These forecast dates reflect earlier work and remain tentative until confirmed.
                           </div>
                         )}
                         {variance !== 0 && (

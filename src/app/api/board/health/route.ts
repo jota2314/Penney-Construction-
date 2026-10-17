@@ -3,6 +3,11 @@ import { getUser } from "@/lib/auth/get-user";
 import { canViewJobBoard } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
+import { crewToday } from "@/lib/crew/schedule-dates";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { deriveScheduleHealth, recentWorkDates, type ScheduleHealthPhase, type ScheduleWorkLog } from "@/lib/schedule/health";
+import { withEffectiveScheduleDates, type CascadeInput } from "@/lib/schedule/cascade";
+import { isMasterPhase } from "@/lib/schedule/progress";
 
 export const maxDuration = 60;
 
@@ -14,7 +19,8 @@ export const maxDuration = 60;
  * the board never renders blank dots.
  */
 
-const BOARD_STATUSES = ["in_progress", "contracted", "proposal_sent", "estimating"];
+type HealthPhase = ScheduleHealthPhase & CascadeInput & { project_id: string };
+type HealthLog = ScheduleWorkLog & { id: string; project_id: string | null; text: string | null };
 
 interface Signals {
   id: string;
@@ -22,6 +28,8 @@ interface Signals {
   number: string;
   status: string;
   overduePhases: string[];
+  scheduleIssues: string[];
+  scheduleUrgent: boolean;
   overdueTodos: string[];
   openTodoCount: number;
   stuckOrders: string[];
@@ -37,17 +45,10 @@ interface HealthRow {
   issues: string[];
 }
 
-function localDateStr(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /** Signals-only fallback rating, also used when the model reply won't parse. */
 function ruleBasedHealth(s: Signals): HealthRow {
   const issues = [
-    ...s.overduePhases.map((p) => `Phase past its end date: ${p}`),
+    ...s.scheduleIssues,
     ...s.stuckOrders.map((o) => `Material order past needed-by: ${o}`),
     ...s.overdueTodos.map((t) => `Overdue: ${t}`),
     ...s.unsignedCOs.map((c) => `CO not signed: ${c}`),
@@ -55,7 +56,7 @@ function ruleBasedHealth(s: Signals): HealthRow {
   if (s.status === "in_progress" && s.daysSinceLastLog !== null && s.daysSinceLastLog > 5) {
     issues.push(`No field activity in ${s.daysSinceLastLog} days`);
   }
-  const health = issues.length >= 3 ? "red" : issues.length > 0 ? "yellow" : "green";
+  const health = s.scheduleUrgent || issues.length >= 3 ? "red" : issues.length > 0 ? "yellow" : "green";
   return { id: s.id, health, note: issues.length ? "" : "On track", issues };
 }
 
@@ -72,24 +73,25 @@ export async function POST() {
   const { data: projects } = await supabase
     .from("projects")
     .select("id, name, project_number, status")
-    .in("status", BOARD_STATUSES)
+    .neq("status", "cancelled")
     .eq("is_overhead", false);
   if (!projects || projects.length === 0) {
     return NextResponse.json({ projects: [] });
   }
 
   const ids = projects.map((p) => p.id);
-  const today = localDateStr(new Date());
-  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+  const today = crewToday();
+  const recentCutoff = new Date(Date.now() - 31 * 24 * 3600 * 1000).toISOString();
 
   const [{ data: phases }, { data: todos }, { data: orders }, { data: cos }, { data: logs }] =
     await Promise.all([
-      supabase
+      fetchAllRows<HealthPhase>((from, to) => supabase
         .from("schedule_phases")
-        .select("project_id, name, end_date, status")
+        .select("id, project_id, name, phase_scope, event_type, start_date, end_date, planned_start_date, planned_end_date, sort_order, is_manually_scheduled, is_confirmed, actual_completed_at, estimate_line_item_id, status")
         .in("project_id", ids)
-        .lt("end_date", today)
-        .not("status", "in", '("completed","cancelled")'),
+        .order("id")
+        .range(from, to)
+        .throwOnError()).then((data) => ({ data })),
       supabase
         .from("todos")
         .select("project_id, description, due_date")
@@ -106,26 +108,32 @@ export async function POST() {
         .select("project_id, title, status")
         .in("project_id", ids)
         .not("status", "in", '("approved","rejected","cancelled")'),
-      supabase
+      fetchAllRows<HealthLog>((from, to) => supabase
         .from("daily_logs")
-        .select("project_id, started_at, text")
+        .select("id, project_id, started_at, ended_at, status, text")
         .in("project_id", ids)
-        .gte("started_at", twoWeeksAgo)
+        .gte("started_at", recentCutoff)
         .order("started_at", { ascending: false })
-        .limit(400),
+        .order("id")
+        .range(from, to)
+        .throwOnError()).then((data) => ({ data })),
     ]);
 
   const signals: Signals[] = projects.map((p) => {
     const projLogs = (logs ?? []).filter((l) => l.project_id === p.id);
     const lastLog = projLogs[0];
     const projTodos = (todos ?? []).filter((t) => t.project_id === p.id);
+    const savedPhases = (phases ?? []).filter((ph) => ph.project_id === p.id);
+    const effective = withEffectiveScheduleDates(savedPhases.filter(isMasterPhase));
+    const schedule = deriveScheduleHealth({ status: p.status, phases: effective, today, recentWorkDates: recentWorkDates(projLogs, today) });
     return {
       id: p.id,
       name: p.name,
       number: p.project_number,
       status: p.status,
-      overduePhases: (phases ?? [])
-        .filter((ph) => ph.project_id === p.id)
+      scheduleIssues: schedule.issues.map((issue) => issue.text),
+      scheduleUrgent: schedule.issues.some((issue) => issue.tone === "urgent"),
+      overduePhases: schedule.overduePhases
         .slice(0, 5)
         .map((ph) => `${ph.name} (ended ${ph.end_date})`),
       overdueTodos: projTodos
@@ -152,14 +160,14 @@ export async function POST() {
         .slice(0, 5)
         .map((l) => l.text!.slice(0, 200)),
     };
-  });
+  }).filter((s) => ["in_progress", "contracted", "proposal_sent", "estimating"].includes(s.status) || s.scheduleIssues.length > 0);
 
   const fallback = signals.map(ruleBasedHealth);
 
   try {
     const system = `You are the project-health reader for Penney Construction's job board. Today: ${nowStamp()}
 
-You get one JSON array of active projects with hard signals (overdue phases, stuck material orders, overdue todos, unsigned change orders, field-log recency) and the raw text of recent field logs. Read the field-log tone too — complaints, rework, blockers, waiting-on-someone all count against a job.
+You get one JSON array of projects with hard signals (scheduleIssues, overdue master phases, stuck material orders, overdue todos, unsigned change orders, field-log recency) and the raw text of recent field logs. scheduleIssues are deterministic review findings and must be preserved; they are not permission to change dates or status. Read the field-log tone too — complaints, rework, blockers, waiting-on-someone all count against a job.
 
 Return ONLY a JSON array, one object per project, same order:
 [{"id":"<project id>","health":"green"|"yellow"|"red","note":"<one short sentence, plain words, how the job feels>","issues":["<short issue to raise>", ...]}]
@@ -177,13 +185,15 @@ Rules:
     const merged: HealthRow[] = fallback.map((fb) => {
       const ai = byId.get(fb.id);
       if (!ai || !["green", "yellow", "red"].includes(ai.health)) return fb;
+      const signal = signals.find((s) => s.id === fb.id)!;
+      const aiIssues = Array.isArray(ai.issues) ? ai.issues.filter((i) => typeof i === "string") : [];
+      // An AI summary may add context, never erase or downgrade known schedule gaps.
+      const health = signal.scheduleUrgent ? "red" : signal.scheduleIssues.length && ai.health === "green" ? "yellow" : ai.health;
       return {
         id: fb.id,
-        health: ai.health,
-        note: typeof ai.note === "string" ? ai.note.slice(0, 140) : "",
-        issues: Array.isArray(ai.issues)
-          ? ai.issues.filter((i) => typeof i === "string").slice(0, 4)
-          : fb.issues,
+        health,
+        note: signal.scheduleIssues.length ? signal.scheduleIssues[0] : typeof ai.note === "string" ? ai.note.slice(0, 140) : "",
+        issues: [...new Set([...signal.scheduleIssues, ...aiIssues])].slice(0, Math.max(4, signal.scheduleIssues.length)),
       };
     });
     return NextResponse.json({ projects: merged });

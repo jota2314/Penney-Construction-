@@ -1,8 +1,12 @@
 "use client";
 
+import { scheduleProgress as getScheduleProgress } from "@/lib/schedule/progress";
+import { ScheduleReconciliation } from "@/components/projects/schedule-reconciliation";
+import { InspectionScheduleSection } from "@/components/projects/inspection-schedule-section";
 import { useState } from "react";
+import { useVisibleRefresh } from "@/lib/hooks/use-visible-refresh";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -149,6 +153,10 @@ interface ProjectDetailTabsProps {
     event_type: string | null;
     notes: string | null;
     sort_order: number;
+    phase_scope?: string | null;
+    client_completed_at?: string | null;
+    actual_completed_at?: string | null;
+    updated_at?: string;
     estimate_line_item_id?: string | null;
     assigned_employee_ids?: string[];
     assigned_sub_ids?: string[];
@@ -225,6 +233,8 @@ export function ProjectDetailTabs({
   // The Quotes tab became Subs — keep old ?tab=quotes links working.
   const activeTab = rawActiveTab === "quotes" ? "subs" : rawActiveTab;
   const pathname = usePathname();
+  const router = useRouter();
+  useVisibleRefresh(router.refresh);
   const searchParams = useSearchParams();
   // Full current URL (tab + returnUrl + filters) so links that leave the
   // project page can bring the user back to exactly where they were.
@@ -259,16 +269,14 @@ export function ProjectDetailTabs({
     { value: "subs", label: "Subs", icon: HardHat, count: quoteRequests.length, show: canManageDocuments },
     { value: "invoices", label: "Invoices", icon: Receipt, count: invoices.length, show: true },
     { value: "files", label: "Files", icon: FolderOpen, count: projectFiles.length + uploadedFiles.length, show: canManageDocuments },
-    { value: "schedule", label: "Schedule", icon: Calendar, count: schedulePhases.length, show: true },
+    { value: "schedule", label: "Schedule", icon: Calendar, count: getScheduleProgress(schedulePhases).total, show: true },
     { value: "portal", label: "Portal", icon: Link2, count: 0, show: true },
     { value: "punch-list", label: "Punch List", icon: ClipboardList, count: openPunchCount, show: true },
     { value: "finances", label: "Money", icon: DollarSign, count: 0, show: true },
   ].filter((item) => item.show);
 
-  const completedPhaseCount = schedulePhases.filter((phase) => phase.status === "completed").length;
-  const scheduleProgress = schedulePhases.length > 0
-    ? Math.round((completedPhaseCount / schedulePhases.length) * 100)
-    : 0;
+  const scheduleVersion = project.status + ":" + schedulePhases.map(p => [p.id, p.updated_at, p.status, p.start_date, p.end_date, p.actual_completed_at].join(":")).join("|");
+  const { total: masterPhaseCount, completed: completedPhaseCount, percent: scheduleProgress } = getScheduleProgress(schedulePhases);
   const projectValue = Number(financials?.adjusted_contract)
     || Number(project.contract_value)
     || Number(project.estimated_value)
@@ -394,8 +402,8 @@ export function ProjectDetailTabs({
 
         <div className="mt-3 flex items-center justify-between text-xs md:text-sm">
           <span className="text-muted-foreground">
-            {schedulePhases.length > 0
-              ? `${completedPhaseCount} of ${schedulePhases.length} phases — ${scheduleProgress}%`
+            {masterPhaseCount > 0
+              ? `${completedPhaseCount} of ${masterPhaseCount} phases — ${scheduleProgress}%`
               : "Schedule not started"}
           </span>
           <span className="font-semibold tabular-nums">
@@ -601,7 +609,7 @@ export function ProjectDetailTabs({
           quoteRequests={quoteRequests}
           invoices={invoices}
           projectFiles={projectFiles}
-          schedulePhaseCount={schedulePhases.length}
+          schedulePhaseCount={masterPhaseCount}
           completedPhaseCount={completedPhaseCount}
           punchListCount={openPunchCount}
           financials={financials as Parameters<typeof ProjectDetail>[0]["financials"]}
@@ -664,6 +672,8 @@ export function ProjectDetailTabs({
 
       {/* ── Schedule Tab ── */}
       <TabsContent value="schedule">
+        <ScheduleReconciliation projectId={project.id} refreshKey={scheduleVersion} />
+        <InspectionScheduleSection projectId={project.id} refreshKey={scheduleVersion} />
         <ProjectScheduleTab
           projectId={project.id}
           projectName={project.name}

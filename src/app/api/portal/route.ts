@@ -40,8 +40,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Access to this portal has been turned off. Please contact Penney Construction." }, { status: 403 });
   }
 
-  // 2. Track the view (first-viewed timestamp + count).
-  await supabase
+  // 2. Track navigation, not background schedule refreshes.
+  if (new URL(request.url).searchParams.get("refresh") !== "1") await supabase
     .from("client_portal_access")
     .update({
       last_viewed_at: new Date().toISOString(),

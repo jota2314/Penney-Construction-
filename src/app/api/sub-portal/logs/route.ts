@@ -1,3 +1,4 @@
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSubAccess, getSubProjectIds } from "@/lib/sub-portal/access";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
@@ -222,5 +223,6 @@ export async function POST(request: NextRequest) {
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  revalidateSchedule(projectId);
   return NextResponse.json({ ok: true, logId: data.id });
 }

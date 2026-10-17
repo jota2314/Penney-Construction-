@@ -55,6 +55,7 @@ export type CellSource = "board" | "sub" | "schedule";
 
 export interface CrewCell {
   phaseId: string;
+  masterPhaseId?: string | null;
   projectId: string | null;
   projectName: string;
   projectNumber: string;
@@ -125,6 +126,7 @@ export interface CrewBoardData {
 
 interface PhaseRow {
   id: string;
+  master_phase_id: string | null;
   project_id: string | null;
   name: string;
   start_date: string;
@@ -235,7 +237,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
       supabase
         .from("schedule_phases")
         .select(
-          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, planned_start_date, estimate_line_item_id",
+          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, planned_start_date, estimate_line_item_id, master_phase_id",
         )
         .lte("start_date", lastStr)
         .gte("end_date", firstStr)
@@ -356,6 +358,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     const assignees = (p.assigned_employee_ids?.length ?? 0) + (p.assigned_sub_ids?.length ?? 0);
     const cell: CrewCell = {
       phaseId: p.id,
+      masterPhaseId: p.master_phase_id,
       projectId: p.project_id,
       projectName: proj?.name ?? "No project",
       projectNumber: proj?.projectNumber ?? "",

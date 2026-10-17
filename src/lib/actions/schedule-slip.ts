@@ -3,7 +3,9 @@
 import { slippedDates } from "@/lib/schedule/slip-dates";
 import { crewToday } from "@/lib/crew/schedule-dates";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
+import { withEffectiveScheduleDates, type CascadeInput } from "@/lib/schedule/cascade";
+import { isMasterPhase } from "@/lib/schedule/progress";
 import {
   notifySchedulePhaseAssignees,
   formatShortRange,
@@ -18,7 +20,8 @@ import {
  *
  * Only master phases move. Daily crew assignments stay on their assigned dates.
  * Started work retains its original start; completed/past work stays put.
- * Postgres date arithmetic handles month/year rollover for free.
+ * The move starts from the dates the office sees, including the forecast,
+ * then pins that decision without replacing the original plan.
  *
  * Shifting a CONFIRMED (live) phase emails everyone assigned to it — the
  * schedule they were told about just moved.
@@ -33,14 +36,12 @@ export async function slipProjectSchedule(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { shifted: 0, error: "Not authenticated" };
 
-  // Pull every phase that isn't already done — we shift not_started,
-  // in_progress, and on_hold. Completed phases keep their dates.
+  // Completed anchors still participate in the forecast, but never move.
   const { data: phases, error: readErr } = await supabase
     .from("schedule_phases")
-    .select("id, start_date, end_date, status, is_confirmed")
+    .select("id, name, event_type, phase_scope, sort_order, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, is_manually_scheduled, actual_completed_at")
     .eq("project_id", projectId)
-    .eq("phase_scope", "master")
-    .neq("status", "completed");
+    .or("phase_scope.eq.master,phase_scope.is.null");
   if (readErr) return { shifted: 0, error: readErr.message };
   if (!phases || phases.length === 0) return { shifted: 0 };
 
@@ -48,16 +49,20 @@ export async function slipProjectSchedule(
 
   let shifted = 0;
   let notified = 0;
-  for (const p of phases) {
-    const dates = slippedDates(p, days, today);
+  const failures: string[] = [];
+  const effective = withEffectiveScheduleDates((phases as CascadeInput[]).filter(isMasterPhase));
+  for (const p of effective) {
+    if (!p.start_date || !p.end_date || !p.status) continue;
+    const dates = slippedDates({ start_date: p.start_date, end_date: p.end_date, status: p.status }, days, today);
     if (!dates) continue;
     const newStart = dates.start_date;
     const newEnd = dates.end_date;
     const { error: upErr } = await supabase
       .from("schedule_phases")
-      .update({ start_date: newStart, end_date: newEnd })
-      .eq("id", p.id);
-    if (upErr) continue;
+      .update({ start_date: newStart, end_date: newEnd, is_manually_scheduled: true })
+      .eq("id", p.id)
+      .eq("project_id", projectId);
+    if (upErr) { failures.push(p.name || p.id); continue; }
     shifted++;
 
     if (p.is_confirmed) {
@@ -73,10 +78,8 @@ export async function slipProjectSchedule(
     }
   }
 
-  revalidatePath("/board");
-  revalidatePath("/crew");
-  revalidatePath("/schedule");
-  revalidatePath("/command-center");
-  revalidatePath(`/projects/${projectId}`);
-  return { shifted, notified };
+  revalidateSchedule(projectId);
+  return { shifted, notified, ...(failures.length ? {
+    error: `${shifted} phases moved; ${failures.length} could not be saved (${failures.slice(0, 3).join(", ")}). Refresh the schedule before retrying.`,
+  } : {}) };
 }

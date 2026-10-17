@@ -842,6 +842,7 @@ export const WRITE_TOOLS: Tool[] = [
       type: "object" as const,
       properties: {
         title: { type: "string" },
+        event_type: { type: "string", enum: ["meeting", "walkthrough", "inspection"], description: "Use inspection for inspector bookings; these create linked master milestones on the project." },
         date: { type: "string", description: "YYYY-MM-DD" },
         start_time: { type: "string", description: "HH:MM (24h)" },
         end_time: { type: "string", description: "HH:MM (24h)" },
@@ -852,7 +853,7 @@ export const WRITE_TOOLS: Tool[] = [
           items: { type: "string" },
           description: "Attendee email addresses",
         },
-        project_id: { type: "string", description: "Link to a project" },
+        project_id: { type: "string", description: "Link to a project. Required for inspections." },
       },
       required: ["title", "date", "start_time"],
     },
@@ -865,6 +866,7 @@ export const WRITE_TOOLS: Tool[] = [
       properties: {
         project_id: { type: "string" },
         name: { type: "string", description: "Phase name" },
+        phase_scope: { type: "string", enum: ["master", "daily"], description: "master for an activity/milestone in the client-facing project plan; daily for a particular crew assignment/visit. Choose master when the user asks to add project scope or change the master plan. Inspections are always master. Other work defaults to daily." },
         start_date: { type: "string", description: "YYYY-MM-DD. Required." },
         end_date: { type: "string", description: "YYYY-MM-DD. Optional — defaults to start_date for single-day phases. Must be >= start_date." },
         status: {
