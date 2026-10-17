@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
 import { z } from "zod";
 import { logWorkLinks, type LogWorkItem } from "@/lib/crew/log-work-links";
 import { reportProgressSchema, formatReportProgress, type ReportProgress } from "@/lib/crew/report-progress";
@@ -387,6 +388,7 @@ export async function clockInOnPhase(
   revalidatePath("/command-center");
   revalidatePath("/crew");
   revalidatePath("/board");
+  revalidateSchedule(phase.project_id);
   return { logId: data.id, onSite, distanceM };
 }
 
@@ -429,11 +431,12 @@ export async function clockOutWithLog(
     .eq("id", logId)
     .eq("author_id", userId)
     .eq("status", "in_progress")
-    .select("id")
+    .select("id,project_id")
     .maybeSingle();
 
   if (error) return { error: error.message };
   if (!closed) return { error: "This shift is already closed or unavailable. Refresh your time log." };
+  if (closed.project_id) revalidateSchedule(closed.project_id);
   revalidatePath("/command-center");
   revalidatePath("/crew");
   revalidatePath("/board");
@@ -626,6 +629,7 @@ export async function postDailyLog(
   revalidatePath("/command-center");
   revalidatePath("/crew");
   revalidatePath("/board");
+  if (projectId) revalidateSchedule(projectId);
   return { ok: true, logId: data?.id };
 }
 

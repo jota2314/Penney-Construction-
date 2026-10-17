@@ -1,6 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
+import { isCalendarDate, scheduleDatePatch } from "@/lib/schedule/date-patch";
+import { phaseTransitionDates } from "@/lib/schedule/transition-dates";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
@@ -24,14 +27,17 @@ interface SchedulePhaseInput {
   assigned_sub_ids?: string[];
   color?: string;
   notes?: string;
+  event_type?: string;
+  phase_scope?: "master" | "daily";
+  estimate_line_item_id?: string | null;
 }
 
 const schedulePhaseBaseSchema = z.object({
   project_id: z.string().uuid("Choose a valid project."),
   name: z.string().trim().min(1, "Schedule item is required.").max(120),
   description: z.string().trim().max(500).optional(),
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid start date."),
-  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid end date."),
+  start_date: z.string().refine(isCalendarDate, "Choose a valid start date."),
+  end_date: z.string().refine(isCalendarDate, "Choose a valid end date."),
   is_manually_scheduled: z.boolean().optional(),
   status: z
     .enum(["not_started", "in_progress", "completed", "on_hold"])
@@ -41,6 +47,9 @@ const schedulePhaseBaseSchema = z.object({
   assigned_sub_ids: z.array(z.string().uuid()).max(100).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   notes: z.string().trim().max(2000).optional(),
+  event_type: z.enum(["phase", "meeting", "walkthrough", "inspection"]).optional(),
+  phase_scope: z.enum(["master", "daily"]).optional(),
+  estimate_line_item_id: z.string().uuid().nullable().optional(),
 });
 
 const schedulePhaseInputSchema = schedulePhaseBaseSchema.refine(
@@ -67,7 +76,7 @@ export async function createSchedulePhase(input: SchedulePhaseInput) {
 
   if (!user) return { error: "Not authenticated" };
 
-  const { error } = await supabase.from("schedule_phases").insert({
+  const { data, error } = await supabase.from("schedule_phases").insert({
     project_id: validated.project_id,
     name: validated.name,
     description: validated.description || null,
@@ -75,21 +84,23 @@ export async function createSchedulePhase(input: SchedulePhaseInput) {
     end_date: validated.end_date,
     planned_start_date: validated.start_date,
     planned_end_date: validated.end_date,
+    is_manually_scheduled: validated.is_manually_scheduled ?? true,
     status: validated.status || "not_started",
     sort_order: validated.sort_order ?? 0,
     assigned_employee_ids: validated.assigned_employee_ids ?? [],
     assigned_sub_ids: validated.assigned_sub_ids ?? [],
     color: validated.color || "#3b82f6",
     notes: validated.notes || null,
+    event_type: validated.event_type ?? "phase",
+    phase_scope: validated.event_type === "inspection" ? "master" : validated.phase_scope ?? "master",
+    estimate_line_item_id: validated.estimate_line_item_id ?? null,
     created_by: user.id,
-  });
+  }).select("*").single();
 
   if (error) return { error: error.message };
 
-  revalidatePath(`/projects/${validated.project_id}`);
-  revalidatePath("/schedule");
-  revalidatePath("/command-center");
-  return { error: null };
+  revalidateSchedule(validated.project_id);
+  return { error: null, data };
 }
 
 /**
@@ -173,17 +184,23 @@ export async function updateSchedulePhase(
 
   const { data: before } = await supabase
     .from("schedule_phases")
-    .select("is_confirmed, start_date, end_date, assigned_employee_ids, assigned_sub_ids")
+    .select("status, event_type, is_confirmed, is_manually_scheduled, start_date, end_date, assigned_employee_ids, assigned_sub_ids")
     .eq("id", id)
+    .eq("project_id", validated.project_id)
     .single();
   if (!before) return { error: "Phase not found" };
 
-  const patch: Record<string, unknown> = {};
-  if (validated.is_manually_scheduled !== undefined) patch.is_manually_scheduled = validated.is_manually_scheduled;
+  if ((validated.end_date ?? before.end_date) < (validated.start_date ?? before.start_date)) {
+    return { error: "End date must be on or after the start date." };
+  }
+  const patch: Record<string, unknown> = { ...scheduleDatePatch(validated, before) };
+  if (validated.status !== undefined && validated.start_date === undefined && validated.end_date === undefined) {
+    const transition = await phaseTransitionDates(supabase, validated.project_id, id, before, { status: validated.status });
+    if (transition.error) return { error: transition.error };
+    if (transition.dates) Object.assign(patch, transition.dates);
+  }
   if (validated.name !== undefined) patch.name = validated.name;
   if (validated.description !== undefined) patch.description = validated.description || null;
-  if (validated.start_date !== undefined) patch.start_date = validated.start_date;
-  if (validated.end_date !== undefined) patch.end_date = validated.end_date;
   if (validated.status !== undefined) patch.status = validated.status;
   if (validated.sort_order !== undefined) patch.sort_order = validated.sort_order;
   if (validated.assigned_employee_ids !== undefined)
@@ -192,13 +209,15 @@ export async function updateSchedulePhase(
     patch.assigned_sub_ids = validated.assigned_sub_ids;
   if (validated.color !== undefined) patch.color = validated.color;
   if (validated.notes !== undefined) patch.notes = validated.notes || null;
+  if (validated.estimate_line_item_id !== undefined) patch.estimate_line_item_id = validated.estimate_line_item_id;
   if (Object.keys(patch).length === 0) return { error: null };
   patch.updated_at = new Date().toISOString();
 
   const { error } = await supabase
     .from("schedule_phases")
     .update(patch)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("project_id", validated.project_id);
 
   if (error) return { error: error.message };
 
@@ -256,9 +275,7 @@ export async function updateSchedulePhase(
     }
   }
 
-  revalidatePath(`/projects/${input.project_id}`);
-  revalidatePath("/schedule");
-  revalidatePath("/command-center");
+  revalidateSchedule(validated.project_id);
   return { error: null, notify };
 }
 
@@ -277,12 +294,16 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
     .from("schedule_phases")
     .select("google_calendar_event_id")
     .eq("id", id)
+    .eq("project_id", projectId)
     .single();
+
+  if (!phase) return { error: "Phase not found" };
 
   const { error } = await supabase
     .from("schedule_phases")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("project_id", projectId);
 
   if (error) return { error: error.message };
 
@@ -295,9 +316,7 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
     }
   }
 
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/schedule");
-  revalidatePath("/command-center");
+  revalidateSchedule(projectId);
   return { error: null };
 }
 
@@ -412,8 +431,7 @@ export async function buildPlanFromEstimate(
   const { error } = await supabase.from("schedule_phases").insert(allRows);
   if (error) return { error: error.message, created: 0 };
 
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/schedule");
+  revalidateSchedule(projectId);
   return { error: null, created: rows.length };
 }
 
@@ -526,8 +544,9 @@ export async function setPhaseConfirmation(
 
   const { data: phase } = await supabase
     .from("schedule_phases")
-    .select("is_confirmed, assigned_employee_ids, assigned_sub_ids, estimate_line_item_id")
+    .select("status, event_type, is_confirmed, is_manually_scheduled, assigned_employee_ids, assigned_sub_ids, estimate_line_item_id")
     .eq("id", phaseId)
+    .eq("project_id", projectId)
     .single();
   if (!phase) return { error: "Phase not found" };
 
@@ -560,10 +579,12 @@ export async function setPhaseConfirmation(
         confirmed_with: confirmedWith?.trim() || null,
       }
     : { is_confirmed: false, confirmed_at: null, confirmed_with: null };
+  const transition = await phaseTransitionDates(supabase, projectId, phaseId, phase, { is_confirmed: isConfirmed });
+  if (transition.error) return { error: transition.error };
 
   const { error } = await supabase
     .from("schedule_phases")
-    .update({ ...patch, updated_at: new Date().toISOString() })
+    .update({ ...patch, ...transition.dates, updated_at: new Date().toISOString() })
     .eq("id", phaseId);
 
   if (error) return { error: error.message };
@@ -577,8 +598,6 @@ export async function setPhaseConfirmation(
     });
   }
 
-  revalidatePath("/command-center");
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/schedule");
+  revalidateSchedule(projectId);
   return { error: null, notify };
 }

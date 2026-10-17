@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/money";
+import { scheduleProgress } from "@/lib/schedule/progress";
+import { deriveCurrentScheduleActivity } from "@/lib/schedule/health";
 import type {
   PortalData,
   PortalDecision,
@@ -102,7 +104,7 @@ function useClientAction(token: string | undefined, preview: boolean, onReload?:
 type ClientAction = ReturnType<typeof useClientAction>;
 
 const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-const phaseDone = (p: { status: string | null; client_completed?: boolean }) => p.status === "completed" || !!p.client_completed;
+const phaseDone = (p: { status: string | null }) => p.status === "completed";
 const itemStatus = (i: PortalSelectionItem): SelectionItemStatus => (i.client_action === "approved" ? "selected" : i.status);
 
 export interface ClientPortalViewProps {
@@ -137,10 +139,10 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
   const subject = encodeURIComponent(`${data.project.project_number} — ${data.project.name}`);
   const mailto = `mailto:${CONTACT_EMAIL}?subject=${subject}`;
 
-  const total = data.schedule.length;
-  const done = data.schedule.filter(phaseDone).length;
-  const current = data.schedule.find((p) => p.status === "in_progress" && !p.client_completed);
-  const pct = total ? Math.round(((done + (current ? 0.5 : 0)) / total) * 100) : 0;
+  const { total, percent: pct, pendingClientReports } = scheduleProgress(data.schedule);
+  const today = todayISO();
+  const activity = deriveCurrentScheduleActivity(data.schedule, today, data.project.status);
+  const current = activity.current;
   const statusWord = STATUS_WORDS[data.project.status] ?? "In progress";
 
   const visibleDecisions = data.selections.filter((s) => s.client_visible !== false);
@@ -188,11 +190,12 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
           <div className="mt-4">
             <div className="mb-1.5 flex items-baseline justify-between text-[14px]">
               <span className="font-semibold">{current ? current.name : pct === 100 ? "Complete" : "Schedule"}</span>
-              <span className="font-bold">{pct}%</span>
+              <span className="font-bold">{pct}% verified</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-[var(--line)]">
               <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${pct}%` }} />
             </div>
+            {pendingClientReports > 0 && <p className="mt-1 text-[13px] text-[var(--muted)]">{pendingClientReports} completion report{pendingClientReports === 1 ? "" : "s"} awaiting team verification</p>}
           </div>
         )}
       </section>
@@ -217,7 +220,7 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
       </nav>
 
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
-        {tab === "home" && <HomeTab data={data} go={go} />}
+        {tab === "home" && <HomeTab data={data} go={go} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
         {tab === "schedule" && <ScheduleTab data={data} action={action} />}
         {tab === "selections" && (
           <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} action={action} />
@@ -270,16 +273,9 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 // ─────────────────────────────── Home
-function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
+function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab) => void; upcoming: PortalData["schedule"]; today: string }) {
   const t = data.today_on_site;
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
-  // What's happening now first, then the next phases by start date.
-  const upcoming = data.schedule
-    .filter((p) => !phaseDone(p))
-    .sort((a, b) =>
-      (a.status === "in_progress" ? 0 : 1) - (b.status === "in_progress" ? 0 : 1) ||
-      (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"))
-    .slice(0, 3);
   const sheet = data.selection_sheet;
   const f = data.financials;
   const counts = sheet ? countStatuses(sheet.items) : null;
@@ -351,14 +347,14 @@ function HomeTab({ data, go }: { data: PortalData; go: (t: Tab) => void }) {
           {data.schedule.length > 0 && <button onClick={() => go("schedule")} className="text-[14px] font-bold text-[var(--accent-dark)]">Full schedule</button>}
         </div>
         {upcoming.length === 0 ? (
-          <p className="mt-2 text-[15px] text-[var(--muted)]">Your schedule will appear here once your start date is set.</p>
+          <p className="mt-2 text-[15px] text-[var(--muted)]">{data.project.status === "completed" ? "Your project is complete." : data.schedule.length === 0 ? "Your schedule will appear here once your start date is set." : data.schedule.every(phaseDone) ? "All scheduled work is complete." : "The team is reviewing the next schedule update."}</p>
         ) : (
           <ul className="mt-2 divide-y divide-[var(--line)]">
             {upcoming.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
                 <span className="text-[16px] font-semibold">{p.name}</span>
                 <span className="shrink-0 text-[14px] text-[var(--muted)]">
-                  {p.status === "in_progress" ? "In progress" : p.firm ? fmtShort(p.start_date) : weekOf(p.start_date)}
+                  {p.status === "in_progress" && p.start_date && p.start_date <= today ? "In progress" : p.firm ? fmtShort(p.start_date) : weekOf(p.start_date)}
                 </span>
               </li>
             ))}
@@ -403,13 +399,13 @@ function ScheduleTab({ data, action }: { data: PortalData; action: ClientAction 
         {data.schedule.map((p) => {
           const teamDone = p.status === "completed";
           const clientDone = !teamDone && !!p.client_completed;
-          const isDone = teamDone || clientDone;
+          const isDone = teamDone;
           const isNow = !isDone && p.status === "in_progress";
           // The client can tick off work that has started; future phases stay the team's.
-          const canMark = !isDone && (isNow || (!!p.start_date && p.start_date <= today));
+          const canMark = !isDone && !clientDone && (isNow || (!!p.start_date && p.start_date <= today));
           const busy = action.busy === `phase:${p.id}`;
           const isInspection = p.event_type === "inspection";
-          const chip = isDone ? ["Done", "#2F6B4F"] : isNow ? ["In progress", "#C66638"] : p.firm ? ["Confirmed", "#252D2B"] : ["Estimated", "#8A918C"];
+          const chip = isDone ? ["Done", "#2F6B4F"] : clientDone ? ["Awaiting verification", "#7A5A1E"] : isNow ? ["In progress", "#C66638"] : p.firm ? ["Confirmed", "#252D2B"] : ["Estimated", "#8A918C"];
           return (
             <li key={p.id} className={`flex gap-3 p-4 ${isNow ? "bg-[#FBF1EB]" : ""}`}>
               <span className={`mt-1 h-3.5 w-3.5 shrink-0 ${isInspection ? "rotate-45 rounded-[3px]" : "rounded-full"}`}
@@ -421,11 +417,11 @@ function ScheduleTab({ data, action }: { data: PortalData; action: ClientAction 
                 </div>
                 {p.description && <p className="mt-0.5 text-[14px] text-[var(--muted)]">{p.description}</p>}
                 <p className="mt-1 text-[14px] font-semibold text-[var(--muted)]">
-                  {p.firm || isDone || isNow ? `${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}` : weekOf(p.start_date)}
+                  {p.actual_completion_date ? `Passed ${fmtDate(p.actual_completion_date)}` : p.firm || isDone || isNow ? `${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}` : weekOf(p.start_date)}
                 </p>
                 {clientDone && (
                   <div className="mt-2 flex items-center gap-3 text-[14px]">
-                    <span className="font-semibold text-[#2F6B4F]">You marked this complete</span>
+                    <span className="font-semibold text-[#7A5A1E]">You reported this complete — awaiting team verification</span>
                     <button disabled={!action.enabled || busy} onClick={() => action.act("phase", p.id, "uncomplete")}
                       className="min-h-[36px] font-bold text-[var(--accent-dark)] disabled:opacity-50">{busy ? "Saving…" : "Undo"}</button>
                   </div>

@@ -26,6 +26,9 @@ import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/es
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { resolveVendorType } from "@/lib/finance/spend-category";
+import { isCalendarDate, scheduleDatePatch } from "@/lib/schedule/date-patch";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
+import { phaseTransitionDates } from "@/lib/schedule/transition-dates";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -1350,6 +1353,9 @@ async function createScheduleEvent(input: Record<string, unknown>, supabase: Sup
   const startTime = String(input.start_time);
   const endTime = input.end_time ? String(input.end_time) : undefined;
   const title = String(input.title);
+  const eventType = String(input.event_type || (/\binspection\b/i.test(title) ? "inspection" : "meeting"));
+  if (!isCalendarDate(date)) return JSON.stringify({ error: "Choose a valid event date (YYYY-MM-DD)." });
+  if (eventType === "inspection" && !input.project_id) return JSON.stringify({ error: "Choose the project for this inspection." });
 
   const startISO = `${date}T${startTime}:00`;
   const endISO = endTime
@@ -1378,14 +1384,18 @@ async function createScheduleEvent(input: Record<string, unknown>, supabase: Sup
 
   const insertData: Record<string, unknown> = {
     name: title, start_date: date, end_date: date,
-    status: "not_started", event_type: "meeting", color: "#f59e0b", phase_scope: "daily",
+    status: "not_started", event_type: eventType, color: eventType === "inspection" ? "#ef4444" : "#f59e0b",
+    phase_scope: eventType === "inspection" ? "master" : "daily",
+    planned_start_date: date, planned_end_date: date, is_manually_scheduled: true,
     notes: input.description ? String(input.description) : null,
     created_by: createdBy,
   };
   if (googleEventId) insertData.google_calendar_event_id = googleEventId;
   if (input.project_id) insertData.project_id = String(input.project_id);
 
-  const { data: phase } = await supabase.from("schedule_phases").insert(insertData).select("id").single();
+  const { data: phase, error } = await supabase.from("schedule_phases").insert(insertData).select("id").single();
+  if (error) return JSON.stringify({ error: `Could not save the project event: ${error.message}`, event_id: googleEventId });
+  if (input.project_id) revalidateSchedule(String(input.project_id));
 
   return JSON.stringify({
     success: true,
@@ -1404,8 +1414,8 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
   const startDate = String(input.start_date);
   const endDate = input.end_date ? String(input.end_date) : startDate;
 
-  if (endDate < startDate) {
-    return JSON.stringify({ error: "end_date must be on or after start_date." });
+  if (!isCalendarDate(startDate) || !isCalendarDate(endDate) || endDate < startDate) {
+    return JSON.stringify({ error: "Choose valid start and end dates, with end on or after start." });
   }
 
   let createdBy = userId;
@@ -1418,6 +1428,9 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
   }
 
   const eventType = String(input.event_type || "phase");
+  if (input.phase_scope !== undefined && !["master", "daily"].includes(String(input.phase_scope))) {
+    return JSON.stringify({ error: "phase_scope must be master or daily." });
+  }
   const colors: Record<string, string> = {
     phase: "#8b5cf6", inspection: "#ef4444", walkthrough: "#f59e0b", meeting: "#3b82f6",
   };
@@ -1432,9 +1445,12 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     name: String(input.name),
     start_date: startDate,
     end_date: endDate,
+    planned_start_date: startDate,
+    planned_end_date: endDate,
+    is_manually_scheduled: true,
     status: String(input.status || "not_started"),
     event_type: eventType,
-    phase_scope: "daily",
+    phase_scope: eventType === "inspection" || input.phase_scope === "master" ? "master" : "daily",
     color: colors[eventType] || "#8b5cf6",
     created_by: createdBy,
   };
@@ -1450,6 +1466,7 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
   const rosterMsg = await syncCrewToProjectRoster(
     supabase, assignedIds, data.project_id as string | null, createdBy
   );
+  if (data.project_id) revalidateSchedule(data.project_id);
 
   return JSON.stringify({
     success: true,
@@ -1495,17 +1512,37 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   // Snapshot before the write — a LIVE (confirmed) phase re-notifies its
   // people when dates move or someone new is put on it.
-  const { data: before } = await supabase
+  const { data: before, error: readError } = await supabase
     .from("schedule_phases")
-    .select("is_confirmed, start_date, end_date, assigned_employee_ids")
+    .select("project_id, status, event_type, is_confirmed, is_manually_scheduled, start_date, end_date, assigned_employee_ids")
     .eq("id", String(input.phase_id))
     .single();
+  if (readError || !before) return JSON.stringify({ error: readError?.message ?? "Phase not found" });
+  const dateEdit = {
+    ...(input.start_date !== undefined ? { start_date: String(input.start_date) } : {}),
+    ...(input.end_date !== undefined ? { end_date: String(input.end_date) } : {}),
+  };
+  const newStart = dateEdit.start_date ?? before.start_date;
+  const newEnd = dateEdit.end_date ?? before.end_date;
+  if (!isCalendarDate(newStart) || !isCalendarDate(newEnd) || newEnd < newStart) {
+    return JSON.stringify({ error: "Choose valid start and end dates, with end on or after start." });
+  }
+  Object.assign(updates, scheduleDatePatch({ ...dateEdit,
+    ...(Object.keys(dateEdit).length ? { is_manually_scheduled: true } : {}),
+  }, before));
+  if (input.status !== undefined && !Object.keys(dateEdit).length && before.project_id) {
+    const transition = await phaseTransitionDates(supabase, before.project_id, String(input.phase_id), before, { status: String(input.status) });
+    if (transition.error) return JSON.stringify({ error: transition.error });
+    if (transition.dates) Object.assign(updates, transition.dates);
+  }
 
   const { data, error } = await supabase
     .from("schedule_phases").update(updates).eq("id", String(input.phase_id))
     .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids").single();
 
   if (error) return JSON.stringify({ error: error.message });
+
+  if (data.project_id) revalidateSchedule(data.project_id);
 
   let rosterMsg = "";
   const { data: { user } } = await supabase.auth.getUser();
@@ -1561,13 +1598,14 @@ async function deleteSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   const { data: phase } = await supabase
     .from("schedule_phases")
-    .select("id, name, google_calendar_event_id")
+    .select("id, name, project_id, google_calendar_event_id")
     .eq("id", phaseId)
     .single();
   if (!phase) return JSON.stringify({ error: `Phase ${phaseId} not found` });
 
   const { error } = await supabase.from("schedule_phases").delete().eq("id", phaseId);
   if (error) return JSON.stringify({ error: error.message });
+  if (phase.project_id) revalidateSchedule(phase.project_id);
 
   let calendarCleanup = "";
   if (phase.google_calendar_event_id) {

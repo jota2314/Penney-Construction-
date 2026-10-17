@@ -6,6 +6,7 @@ export interface CrewClip {
   projectName: string;
   scope: string;
   confirmed: boolean;
+  masterPhaseId?: string | null;
   color: string;
 }
 
@@ -16,6 +17,7 @@ export function clipFrom(cell: CrewCell): CrewClip | null {
     projectName: cell.projectName,
     scope: cell.name !== cell.projectName ? cell.name : "",
     confirmed: cell.confirmed,
+    masterPhaseId: cell.masterPhaseId,
     color: cell.color,
   };
 }

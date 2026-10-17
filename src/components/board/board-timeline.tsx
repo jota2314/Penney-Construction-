@@ -1,5 +1,7 @@
 "use client";
 
+import { scheduleStartLabel } from "@/lib/schedule/health";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -749,6 +751,7 @@ export function BoardTimeline({
               className="inline-flex items-center gap-2 rounded border border-border bg-muted/40 px-2.5 py-1 text-xs hover:border-primary/60 hover:text-primary"
             >
               <span className="max-w-[180px] truncate">{job.name}</span>
+              {job.scheduleIssues.length > 0 && <span className="text-amber-500" title={job.scheduleIssues.map((issue) => issue.text).join("; ")}>Schedule needs review</span>}
               {job.contractValue !== null && (
                 <span className="tabular-nums text-[10px] text-muted-foreground">{money(job.contractValue)}</span>
               )}
@@ -1004,9 +1007,9 @@ function NameCell({
   onFit: () => void;
 }) {
   const dot =
-    health?.health === "red"
+    job.scheduleIssues.some((issue) => issue.tone === "urgent") || health?.health === "red"
       ? "bg-red-500"
-      : health?.health === "yellow"
+      : job.scheduleIssues.length > 0 || health?.health === "yellow"
         ? "bg-amber-500"
         : health?.health === "green"
           ? "bg-green-500"
@@ -1067,7 +1070,7 @@ function NameCell({
         <div className="truncate pl-6 text-[11px] leading-tight text-muted-foreground">
           {starting && job.startsInDays !== null && job.startDate ? (
             <span className="text-amber-500">
-              {job.startsInDays <= 0 ? "Starts today" : `Starts in ${job.startsInDays}d`} · {shortDay(job.startDate)}
+              {scheduleStartLabel(job.startsInDays)} · {shortDay(job.startDate)}
             </span>
           ) : job.nowStep ? (
             <span className="text-foreground/80">▸ {job.nowStep.name}</span>
@@ -1092,10 +1095,22 @@ function NameCell({
             {job.crewToday.length} on site
           </Chip>
         )}
-        {job.status === "in_progress" && job.nothingAhead && (
-          <Chip tone="red" title="Nothing on the calendar from today on — book the next step">
+        {job.unscheduled && (
+          <Chip tone="red" title="Daily assignments do not replace the project's master construction schedule">
             <CalendarOff className="h-2.5 w-2.5" aria-hidden />
-            Nothing booked
+            Master schedule missing
+          </Chip>
+        )}
+        {job.workStartedStatusMismatch && (
+          <Chip tone="red" title="Recent field work is recorded while the project is still marked as preconstruction. Review its status.">
+            <AlertTriangle className="h-2.5 w-2.5" aria-hidden />
+            Work recorded · review status
+          </Chip>
+        )}
+        {job.nothingAhead && (
+          <Chip tone="red" title="Unfinished master work remains but none is planned from today on — review the next step">
+            <CalendarOff className="h-2.5 w-2.5" aria-hidden />
+            No remaining plan
           </Chip>
         )}
         {job.overdueCount > 0 && (

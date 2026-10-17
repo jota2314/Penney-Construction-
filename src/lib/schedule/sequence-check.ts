@@ -47,6 +47,8 @@ export interface SequencePhase {
   event_type?: string | null;
   phase_scope?: string | null;
   status?: string | null;
+  is_confirmed?: boolean | null;
+  is_manually_scheduled?: boolean | null;
 }
 
 export type Severity = "conflict" | "warning";
@@ -502,6 +504,21 @@ export function checkSequence(phases: SequencePhase[]): SequenceIssue[] {
     }
   }
 
+  // An explicit booking stays where the office put it. If an inferred
+  // prerequisite now runs past it, surface the readiness conflict instead of
+  // silently moving a confirmed sub or an intentionally placed phase.
+  const byId = new Map(live.map(p => [p.id, p]));
+  for (const dependency of inferDependencies(live)) {
+    const from = byId.get(dependency.fromId);
+    const to = byId.get(dependency.toId);
+    if (!from || !to || from.status === "completed" || to.status === "completed" ||
+        !(to.is_confirmed || to.is_manually_scheduled) || from.end_date <= to.start_date) continue;
+    if (issues.some(issue => issue.phaseId === to.id && issue.relatedPhaseId === from.id)) continue;
+    add({
+      phaseId: to.id, relatedPhaseId: from.id, rule: "dependency-readiness", severity: "warning",
+      message: `${shortName(to.name)} starts ${fmt(to.start_date)}, while ${shortName(from.name)} is forecast through ${fmt(from.end_date)} — review readiness before this date.`,
+    });
+  }
   return issues;
 }
 
@@ -545,10 +562,13 @@ export function inferDependencies(phases: SequencePhase[]): PhaseLink[] {
    */
   const chain = (from: typeof tagged, to: typeof tagged, reason: string) => {
     if (from.length === 0 || to.length === 0) return;
-    const gate = [...from].sort(
-      (a, b) => a.end_date.localeCompare(b.end_date) || a.start_date.localeCompare(b.start_date)
-    )[from.length - 1];
-    for (const t of to) link(gate, t, reason);
+    for (const t of to) {
+      const candidates = from.filter(p => sharesArea(p.name, t.name));
+      const gate = candidates.sort(
+        (a, b) => a.end_date.localeCompare(b.end_date) || a.start_date.localeCompare(b.start_date)
+      ).at(-1);
+      if (gate) link(gate, t, reason);
+    }
   };
 
   const demo = of("demo");

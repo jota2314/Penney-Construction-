@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useVisibleRefresh } from "@/lib/hooks/use-visible-refresh";
 import { useParams } from "next/navigation";
 import { ClientPortalView } from "@/components/portal/client-portal-view";
 import type { PortalData } from "@/lib/portal/types";
@@ -12,17 +13,21 @@ export default function ClientPortalPage() {
   const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<PortalData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestRequest = useRef(0);
 
-  const load = useCallback(() => {
-    fetch(`/api/portal?token=${token}`)
+  const load = useCallback((background = false) => {
+    const request = ++latestRequest.current;
+    fetch(`/api/portal?token=${token}${background ? "&refresh=1" : ""}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => { if (d.error) setError(d.error); else setData(d); })
-      .catch(() => setError("We couldn't load your project."));
+      .then((d) => { if (request !== latestRequest.current) return; if (d.error) { setError(d.error); setData(null); } else { setData(d); setError(null); } })
+      .catch(() => { if (request === latestRequest.current) setError("We couldn't refresh your project. Reconnecting…"); });
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+  const refresh = useCallback(() => load(true), [load]);
+  useVisibleRefresh(refresh);
 
-  if (error) return <Shell><p className="max-w-sm px-8 text-center text-[15px] text-[#9E4E28]">{error}</p></Shell>;
+  if (error && !data) return <Shell><p className="max-w-sm px-8 text-center text-[15px] text-[#9E4E28]">{error}</p></Shell>;
   if (!data) return <Shell><p className="text-[15px] font-semibold text-[#606B65]">Loading your project…</p></Shell>;
   return <ClientPortalView data={data} token={token} onReload={load} />;
 }

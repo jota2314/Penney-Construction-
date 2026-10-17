@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSubAccess, getSubProjectIds } from "@/lib/sub-portal/access";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
+import { isCalendarDate } from "@/lib/schedule/date-patch";
 
 export const runtime = "nodejs";
 
@@ -18,12 +20,9 @@ const fmtDay = (iso: string) =>
  * POST /api/sub-portal/inspections
  *   { id, status?: "pending"|"passed"|"failed", scheduledFor?: "YYYY-MM-DD", note? }
  *
- * The sub updates an inspection on one of his jobs — passed, failed, or
- * booked for a day. `project_inspections` has no schedule column, so a
- * booking is written into `notes` ("Scheduled for Fri, Sep 5") with the
- * status left pending. Every change also drops a one-line post into the
- * job's daily log so the office sees it in the feed without opening the
- * inspections table.
+ * The validated portal member updates the checklist and its explicitly
+ * linked master milestone atomically. Bookings use a structured date;
+ * completion is an actual timestamp, never a replacement planned date.
  */
 export async function POST(request: NextRequest) {
   const access = await resolveSubAccess(request);
@@ -45,7 +44,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Status must be pending, passed, or failed" }, { status: 400 });
   }
   const scheduledFor = (body.scheduledFor || "").trim();
-  if (scheduledFor && !/^\d{4}-\d{2}-\d{2}$/.test(scheduledFor)) {
+  if (scheduledFor && !isCalendarDate(scheduledFor)) {
     return NextResponse.json({ error: "Date must be YYYY-MM-DD" }, { status: 400 });
   }
   const note = (body.note || "").trim().slice(0, 1000);
@@ -55,7 +54,7 @@ export async function POST(request: NextRequest) {
 
   const { data: insp } = await supabase
     .from("project_inspections")
-    .select("id, project_id, name, status, notes")
+    .select("id, project_id, name, status, notes, updated_at")
     .eq("id", id)
     .maybeSingle();
   if (!insp) return NextResponse.json({ error: "Inspection not found" }, { status: 404 });
@@ -76,16 +75,15 @@ export async function POST(request: NextRequest) {
 
   // What we write, and the one-liner the office reads.
   const nowIso = new Date().toISOString();
-  const patch: Record<string, unknown> = { updated_at: nowIso };
+  const patch: Record<string, unknown> = {};
   let line = "";
   if (status === "passed" || status === "failed") {
     patch.status = status;
-    patch.completed_at = nowIso;
     line = `${insp.name}: ${status.toUpperCase()}`;
     if (note) patch.notes = withExisting(note);
   } else if (scheduledFor) {
     patch.status = "pending";
-    patch.completed_at = null;
+    patch.scheduled_for = scheduledFor;
     patch.notes = withExisting(note ? `Scheduled for ${fmtDay(scheduledFor)} — ${note}` : `Scheduled for ${fmtDay(scheduledFor)}`);
     line = `${insp.name}: scheduled for ${fmtDay(scheduledFor)}`;
   } else if (status === "pending") {
@@ -99,8 +97,15 @@ export async function POST(request: NextRequest) {
   }
   if (note && line && !line.includes(note)) line += ` — ${note}`;
 
-  const { error } = await supabase.from("project_inspections").update(patch).eq("id", id);
+  const { error } = await supabase.rpc("update_project_inspection_lifecycle", {
+    p_inspection_id: id,
+    p_patch: patch,
+    p_expected_updated_at: insp.updated_at,
+    p_source: "sub-portal",
+    p_subcontractor_id: subId,
+  });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidateSchedule(insp.project_id);
 
   // Feed line, attributed to the sub. Best-effort: the inspection is
   // already updated even if this insert fails.

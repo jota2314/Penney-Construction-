@@ -51,7 +51,7 @@ export interface ProjectHealth {
   issues: string[];
 }
 
-const HEALTH_CACHE_KEY = "job-board-health-v2";
+const HEALTH_CACHE_KEY = "job-board-health-v3";
 const HEALTH_CACHE_TTL_MS = 30 * 60 * 1000;
 const MODE_KEY = "job-board-mode";
 const RANGE_KEY = "job-board-range";
@@ -571,15 +571,17 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     return () => clearInterval(id);
   }, [mode, router, loadHealth]);
 
-  const crewOut = data.onsite.reduce((n, j) => n + j.crewToday.length, 0);
-  const needNext = data.onsite.filter((j) => j.nothingAhead).length;
-  const late = data.onsite.reduce((n, j) => n + j.overdueCount, 0);
+  const allJobs = [...data.onsite, ...data.starting, ...data.pipeline, ...data.review];
+  const scheduleReview = allJobs.filter((j) => j.scheduleIssues.length > 0 && matches(j));
+  const crewOut = allJobs.reduce((n, j) => n + j.crewToday.length, 0);
+  const needNext = allJobs.filter((j) => j.unscheduled || j.nothingAhead).length;
+  const late = allJobs.reduce((n, j) => n + j.overdueCount, 0);
   const allOpen = [...onsite, ...starting].every((j) => expanded.has(j.id));
   const customRange = !RANGES.some((r) => r.days === visibleDays);
 
   const projectOptions = useMemo(
     () =>
-      [...data.onsite, ...data.starting, ...data.pipeline]
+      [...data.onsite, ...data.starting, ...data.pipeline, ...data.review]
         .map((j) => ({ id: j.id, name: j.name, project_number: j.projectNumber }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [data],
@@ -678,7 +680,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
           )}
           <span className="hidden text-xs text-muted-foreground xl:inline">
             {data.onsite.length} jobs on site · {crewOut} crew in today
-            {needNext > 0 && <span className="text-red-400"> · {needNext} with nothing booked</span>}
+            {needNext > 0 && <span className="text-red-400"> · {needNext} need a remaining master plan</span>}
             {late > 0 && <span className="text-amber-500"> · {late} late steps</span>}
           </span>
           {data.canSeeMoney && data.dueInWindow > 0 && (
@@ -709,6 +711,18 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
       </div>
 
       {healthError && <p className="text-xs text-red-400">{healthError} — tap Refresh to retry.</p>}
+      {scheduleReview.length > 0 && (
+        <details className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium text-amber-700 dark:text-amber-400">Schedule needs review · {scheduleReview.length} job{scheduleReview.length === 1 ? "" : "s"}</summary>
+          <ul className="mt-2 max-h-52 space-y-2 overflow-y-auto text-xs">
+            {scheduleReview.map((job) => <li key={job.id}>
+              <a href={`/projects/${job.id}?tab=schedule`} className="font-medium underline underline-offset-2">{job.name}</a>
+              <span className="ml-1 text-muted-foreground">({job.status.replace(/_/g, " ")})</span>
+              <p>{job.scheduleIssues.map((issue) => issue.text).join(" · ")}</p>
+            </li>)}
+          </ul>
+        </details>
+      )}
       {mode === "jobs" && (
         <p className="hidden text-[11px] text-muted-foreground lg:block">
           Drag a bar to move it · drag an end to stretch · shift-click to pick several · alt-drag moves a step and

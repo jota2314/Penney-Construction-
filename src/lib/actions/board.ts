@@ -56,6 +56,7 @@ export async function moveBoardPhases(
       project_id: m.projectId,
       start_date: m.start,
       end_date: m.end,
+      is_manually_scheduled: true,
     });
     if (res.error) {
       revalidatePath("/board");

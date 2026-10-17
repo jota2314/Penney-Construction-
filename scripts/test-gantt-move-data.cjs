@@ -6,7 +6,7 @@ const fs = require("fs"),
 function load(file, mocks = {}) {
   const c = {
     exports: {},
-    require: (n) => (n in mocks ? mocks[n] : require(n)),
+    require: (n) => (n in mocks ? mocks[n] : n.startsWith(".") ? load(require("node:path").join(require("node:path").dirname(file), n + ".ts"), mocks) : require(n)),
   };
   vm.runInNewContext(
     ts.transpileModule(fs.readFileSync(file, "utf8"), {
@@ -102,6 +102,8 @@ const mocks = new Proxy(
       }),
     },
     "next/cache": { revalidatePath() {} },
+    "@/lib/schedule/revalidate": { revalidateSchedule() {} },
+    "@/lib/schedule/date-patch": load("src/lib/schedule/date-patch.ts"),
     zod: require("zod"),
   },
   { has: () => true, get: (t, k) => t[k] ?? {} }

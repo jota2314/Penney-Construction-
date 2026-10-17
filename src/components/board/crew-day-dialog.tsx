@@ -43,6 +43,7 @@ import type {
   CrewProjectOption,
 } from "@/lib/board/crew-board-data";
 import { JobPicker } from "./crew-job-picker";
+import { CrewMasterPhasePicker } from "./crew-master-phase-picker";
 import {
   clipFrom,
   daysBetween,
@@ -155,7 +156,7 @@ function DayPanel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       // Alt+← is the browser's Back; an open menu owns its own arrows.
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
       if (t?.closest('[role="menu"],[role="listbox"]')) return;
@@ -230,6 +231,7 @@ function DayPanel({
           projectId: card.projectId as string,
           scope: scopeOf(card),
           confirmed: card.confirmed,
+          masterPhaseId: card.masterPhaseId,
         }),
       );
     }
@@ -318,7 +320,7 @@ function DayPanel({
               key={c.phaseId}
               title={`Change ${shortJob(c.projectName)}`}
               projects={data.projects}
-              initial={{ projectId: c.projectId ?? "", scope: scopeOf(c), confirmed: c.confirmed }}
+              initial={{ projectId: c.projectId ?? "", scope: scopeOf(c), confirmed: c.confirmed, masterPhaseId: c.masterPhaseId }}
               suggestionsFor={suggestionsFor}
               busy={busy === `edit|${c.phaseId}`}
               submitLabel="Save"
@@ -333,6 +335,7 @@ function DayPanel({
                       projectId: v.projectId,
                       scope: v.scope,
                       confirmed: v.confirmed,
+                      masterPhaseId: v.masterPhaseId,
                       replacePhaseId: c.phaseId,
                     }),
                   () => setEditingId(null),
@@ -392,6 +395,7 @@ function DayPanel({
                     projectId: v.projectId,
                     scope: v.scope,
                     confirmed: v.confirmed,
+                    masterPhaseId: v.masterPhaseId,
                   }),
                 () => setAdding(false),
               )
@@ -684,6 +688,7 @@ interface JobValues {
   projectId: string;
   scope: string;
   confirmed: boolean;
+  masterPhaseId?: string | null;
 }
 
 /** The jobs worth one tap: running ones first, then active. */
@@ -719,7 +724,7 @@ function JobFields({
             <button
               key={p.id}
               type="button"
-              onClick={() => onChange({ ...value, projectId: p.id })}
+              onClick={() => onChange({ ...value, projectId: p.id, masterPhaseId: p.id === value.projectId ? value.masterPhaseId : undefined })}
               className={cn(
                 "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
                 value.projectId === p.id ? "border-primary bg-primary/15 text-foreground" : "border-border text-muted-foreground hover:text-foreground",
@@ -733,7 +738,7 @@ function JobFields({
         <JobPicker
           projects={projects}
           value={value.projectId}
-          onChange={(id) => onChange({ ...value, projectId: id })}
+          onChange={(id) => onChange({ ...value, projectId: id, masterPhaseId: id === value.projectId ? value.masterPhaseId : undefined })}
           compact
           placeholder="Another job…"
         />
@@ -762,6 +767,7 @@ function JobFields({
           </div>
         )}
       </div>
+      <CrewMasterPhasePicker projectId={value.projectId} value={value.masterPhaseId} onChange={masterPhaseId => onChange({ ...value, masterPhaseId })} />
       <label className="flex items-center gap-2 text-sm">
         <Checkbox checked={value.confirmed} onCheckedChange={(v) => onChange({ ...value, confirmed: v === true })} />
         Confirmed — shows on their phone

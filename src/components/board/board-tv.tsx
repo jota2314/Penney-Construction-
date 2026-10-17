@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CalendarOff, CloudRain, Package, Users } from "lucide-react";
+import { AlertTriangle, CloudRain, Package, Users } from "lucide-react";
 import type { BoardData, BoardJob } from "@/lib/board/board-data";
 import type { ProjectHealth } from "./job-board";
 
@@ -61,7 +61,7 @@ export function BoardTv({ data, health, onOpen }: Props) {
   }, []);
 
   // Crews on site lead, then anything else in construction.
-  const working = data.onsite.filter((j) => j.crewToday.length > 0);
+  const working = [...data.onsite, ...data.starting, ...data.pipeline, ...data.review].filter((j) => j.crewToday.length > 0);
   const quiet = data.onsite.filter((j) => j.crewToday.length === 0);
   const cards = [...working, ...quiet].slice(0, 9);
 
@@ -165,9 +165,9 @@ function TvCard({
   onOpen: (id: string) => void;
 }) {
   const stripe =
-    health?.health === "red"
+    job.scheduleIssues.some((issue) => issue.tone === "urgent") || health?.health === "red"
       ? "border-l-red-500"
-      : health?.health === "yellow"
+      : job.scheduleIssues.length > 0 || health?.health === "yellow"
         ? "border-l-amber-500"
         : "border-l-green-500";
 
@@ -218,13 +218,11 @@ function TvCard({
               : `Quiet ${job.daysSinceLastLog}d`}
           </span>
         )}
-        {job.unscheduled && (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-500">
-            <CalendarOff className="h-3 w-3" aria-hidden />
-            Not scheduled
-          </span>
-        )}
       </div>
+
+      {job.scheduleIssues.map((issue) => (
+        <p key={issue.code} className={`text-xs ${issue.tone === "urgent" ? "text-red-400" : "text-amber-500"}`}>{issue.text}</p>
+      ))}
 
       {job.lastLog && (
         <p className="border-t border-border pt-2 text-xs leading-relaxed text-muted-foreground">
@@ -252,11 +250,14 @@ function NeedsYou({
   health: Map<string, ProjectHealth>;
   onOpen: (id: string) => void;
 }) {
-  const all = [...data.onsite, ...data.starting];
+  const all = [...data.onsite, ...data.starting, ...data.pipeline, ...data.review];
 
   const items: { id: string; projectId: string; text: string; tone: string }[] = [];
 
   for (const job of all) {
+    for (const issue of job.scheduleIssues) {
+      items.push({ id: `schedule-${job.id}-${issue.code}`, projectId: job.id, text: `${job.name} — ${issue.text}`, tone: issue.tone === "urgent" ? "text-red-400" : "text-amber-500" });
+    }
     for (const m of job.markers) {
       if (!m.overdue) continue;
       items.push({
@@ -282,14 +283,6 @@ function NeedsYou({
         tone: "text-amber-500",
       });
     }
-    if (job.unscheduled) {
-      items.push({
-        id: `sched-${job.id}`,
-        projectId: job.id,
-        text: `${job.name} — in construction with nothing scheduled`,
-        tone: "text-amber-500",
-      });
-    }
     const h = health.get(job.id);
     for (const issue of h?.health === "red" ? h.issues.slice(0, 1) : []) {
       items.push({
@@ -311,7 +304,7 @@ function NeedsYou({
         Needs you
       </span>
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
-        {items.slice(0, 12).map((it) => (
+        {items.map((it) => (
           <button
             key={it.id}
             type="button"

@@ -1,3 +1,4 @@
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { applyClientTap } from "@/lib/selections/service";
@@ -33,7 +34,7 @@ const ALLOWED: Record<Kind, Action[]> = {
  *
  * Nothing here erases data. Remove / Not needed only hide the row from the
  * client (the team restores it from the Portal tab), a phase marked complete
- * shows as done on the portal only (the board status stays the team's), and
+ * shows as awaiting verification (verified progress stays the team's), and
  * every tap drops a to-do on the team's list (self-reminder pattern, no
  * auto-email — client comms stay in email).
  */
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
       .select("id, name")
       .eq("id", id)
       .eq("project_id", portal.project_id)
-      .eq("phase_scope", "master")
+      .or("phase_scope.eq.master,phase_scope.is.null")
       .single();
     if (!phase) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const done = action === "complete";
@@ -146,6 +147,7 @@ export async function POST(request: NextRequest) {
   }
 
   await notifyTeam(supabase, portal, note);
+  revalidateSchedule(portal.project_id);
   return NextResponse.json({ success: true });
 }
 

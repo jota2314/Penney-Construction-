@@ -7,10 +7,9 @@ import {
 } from "@/lib/ai/claude";
 import { buildSchedulePrompt } from "@/lib/ai/prompts/schedule";
 import { loadScheduleContext } from "@/lib/ai/shared-context";
-import {
-  notifySchedulePhaseAssignees,
-  formatShortRange,
-} from "@/lib/notifications/schedule-notify";
+import { deleteSchedulePhase, updateSchedulePhase } from "@/lib/actions/schedule";
+import { isCalendarDate } from "@/lib/schedule/date-patch";
+import { revalidateSchedule } from "@/lib/schedule/revalidate";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -43,6 +42,7 @@ Return a JSON object:
       "project_name": "Project name",
       "start_date": "YYYY-MM-DD",
       "end_date": "YYYY-MM-DD",
+      "phase_scope": "master for project activities or milestones; daily for a crew assignment",
       "assigned_to": ["First Last", ...],
       "notes": "Details",
       "status": "not_started" | "in_progress" | "completed" | "on_hold",
@@ -155,6 +155,12 @@ IMPORTANT FOR UPDATES:
           }
 
           if (projectId) {
+            const startDate = String(action.start_date ?? "");
+            const endDate = String(action.end_date || startDate);
+            if (!isCalendarDate(startDate) || !isCalendarDate(endDate) || endDate < startDate) {
+              executedActions.push(`Could not create ${action.name}: choose valid start and end dates.`);
+              continue;
+            }
             // Dedup: skip if a phase with same name + project + start_date already exists
             const { data: existing } = await supabase
               .from("schedule_phases")
@@ -167,7 +173,7 @@ IMPORTANT FOR UPDATES:
             if (existing && existing.length > 0) {
               executedActions.push(`Skipped (already exists): ${action.name} on ${action.start_date}`);
             } else {
-              await supabase.from("schedule_phases").insert({
+              const { error: createError } = await supabase.from("schedule_phases").insert({
                 project_id: projectId,
                 name: (action.name as string) || "Scheduled work",
                 start_date: action.start_date as string,
@@ -175,7 +181,8 @@ IMPORTANT FOR UPDATES:
                 planned_start_date: action.start_date as string,
                 planned_end_date: action.end_date as string || action.start_date as string,
                 status: "not_started",
-                phase_scope: "daily",
+                phase_scope: action.event_type === "inspection" || action.phase_scope === "master" ? "master" : "daily",
+                is_manually_scheduled: true,
                 assigned_employee_ids: assignedIds,
                 notes: (action.notes as string) || null,
                 event_type: (action.event_type as string) || "phase",
@@ -183,7 +190,8 @@ IMPORTANT FOR UPDATES:
                 color: action.event_type === "inspection" ? "#ef4444" : action.event_type === "walkthrough" ? "#f59e0b" : "#8b5cf6",
                 created_by: user.id,
               });
-              executedActions.push(`Created: ${action.name} on ${action.start_date}`);
+              if (createError) executedActions.push(`Could not create ${action.name}: ${createError.message}`);
+              else { revalidateSchedule(projectId); executedActions.push(`Created: ${action.name} on ${action.start_date}`); }
             }
           }
         } else if (action.action === "update") {
@@ -209,51 +217,42 @@ IMPORTANT FOR UPDATES:
           }
 
           if (targetPhase) {
-            const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-            if (action.start_date) updates.start_date = action.start_date;
-            if (action.end_date) updates.end_date = action.end_date;
-            if (action.status) updates.status = action.status;
-            if (action.notes) updates.notes = action.notes;
-
-            const { error: updateError } = await supabase
-              .from("schedule_phases")
-              .update(updates)
-              .eq("id", targetPhase.id);
-            executedActions.push(`Updated: ${targetPhase.name} → ${action.start_date || targetPhase.start_date} to ${action.end_date || targetPhase.end_date}`);
-
-            // A LIVE (confirmed) phase moving dates re-notifies its crew/subs.
-            const newStart = (action.start_date as string) || targetPhase.start_date;
-            const newEnd = (action.end_date as string) || targetPhase.end_date;
-            const datesChanged =
-              newStart !== targetPhase.start_date || newEnd !== targetPhase.end_date;
-            if (!updateError && targetPhase.is_confirmed && datesChanged) {
-              const notify = await notifySchedulePhaseAssignees({
-                phaseId: targetPhase.id,
-                kind: "updated",
-                actorId: user.id,
-                changes: [
-                  `Dates: ${formatShortRange(targetPhase.start_date, targetPhase.end_date)} → ${formatShortRange(newStart, newEnd)}`,
-                ],
-              });
-              if (notify.emailed.length > 0) {
-                executedActions.push(`Emailed schedule update to: ${notify.emailed.join(", ")}`);
-              }
+            if (!targetPhase.project_id) { executedActions.push("Choose a project before updating this event."); continue; }
+            const result = await updateSchedulePhase(targetPhase.id, {
+              project_id: targetPhase.project_id,
+              ...(action.start_date ? { start_date: String(action.start_date) } : {}),
+              ...(action.end_date ? { end_date: String(action.end_date) } : {}),
+              ...(action.start_date || action.end_date ? { is_manually_scheduled: true } : {}),
+              ...(action.status ? { status: String(action.status) } : {}),
+              ...(action.notes ? { notes: String(action.notes) } : {}),
+            });
+            if (result.error) executedActions.push(`Could not update ${targetPhase.name}: ${result.error}`);
+            else {
+              executedActions.push(`Updated: ${targetPhase.name} → ${action.start_date || targetPhase.start_date} to ${action.end_date || targetPhase.end_date}`);
+              if (result.notify?.emailed.length) executedActions.push(`Emailed schedule update to: ${result.notify.emailed.join(", ")}`);
             }
           } else {
             executedActions.push(`Could not find phase "${action.name}" to update`);
           }
         } else if (action.action === "delete") {
-          const phaseName = (action.name as string || "").toLowerCase();
+          const phaseName = (action.name as string || "").trim().toLowerCase();
+          if (!phaseName) { executedActions.push("Choose the exact phase to delete."); continue; }
 
-          const { data: matchingPhases } = await supabase
+          let query = supabase
             .from("schedule_phases")
-            .select("id, name")
+            .select("id, name, project_id")
             .ilike("name", `%${phaseName}%`);
+          if (projectContext?.id) query = query.eq("project_id", projectContext.id);
+          const { data: matchingPhases, error: matchError } = await query;
+          if (matchError) { executedActions.push(`Could not find the phase: ${matchError.message}`); continue; }
 
-          if ((matchingPhases ?? []).length > 0) {
+          if (matchingPhases?.length === 1) {
             const target = matchingPhases![0];
-            await supabase.from("schedule_phases").delete().eq("id", target.id);
-            executedActions.push(`Deleted: ${target.name}`);
+            if (!target.project_id) { executedActions.push("Choose a project before deleting this event."); continue; }
+            const result = await deleteSchedulePhase(target.id, target.project_id);
+            executedActions.push(result.error ? `Could not delete ${target.name}: ${result.error}` : `Deleted: ${target.name}`);
+          } else if ((matchingPhases?.length ?? 0) > 1) {
+            executedActions.push(`More than one phase matches "${action.name}". Choose the project and exact phase before deleting.`);
           } else {
             executedActions.push(`Could not find phase "${action.name}" to delete`);
           }

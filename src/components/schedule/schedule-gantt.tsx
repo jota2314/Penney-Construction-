@@ -155,7 +155,7 @@ export function ScheduleGantt({
       .map((p) => {
         const c = cascade?.get(p.id);
         const useCascade =
-          c && !c.firm && c.start_date && c.end_date && (c.start_date !== p.start_date || c.end_date !== p.end_date);
+          c && c.start_date && c.end_date && (c.start_date !== p.start_date || c.end_date !== p.end_date);
         const startStr = useCascade ? c!.start_date! : p.start_date;
         const endStr = useCascade ? c!.end_date! : p.end_date;
         const start = parseDate(startStr);
@@ -165,7 +165,8 @@ export function ScheduleGantt({
           phase: p,
           start,
           end,
-          shifted: Boolean(useCascade),
+          shifted: Boolean(useCascade && !c?.actual_completion_date),
+          actualCompletionDate: c?.actual_completion_date,
           slipDays: c?.slip_days ?? 0,
           baselineStart: p.planned_start_date ? parseDate(p.planned_start_date) : null,
           baselineEnd: p.planned_end_date ? parseDate(p.planned_end_date) : null,
@@ -729,6 +730,7 @@ export function ScheduleGantt({
           key={selected.phase.id}
           phase={selected.phase}
           displayedDates={{ start: toKey(selected.start), end: toKey(selected.end) }}
+          actualCompletionDate={selected.actualCompletionDate}
           issues={issues?.get(selected.phase.id) ?? []}
           predecessors={predecessors}
           successors={successors}

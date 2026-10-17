@@ -4,6 +4,10 @@ export type { PaymentAnchor } from "@/lib/finance/payment-date";
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { deriveCurrentScheduleActivity, deriveScheduleHealth, isClockInRow, recentWorkDates, type ScheduleHealthIssue } from "@/lib/schedule/health";
+import { isMasterPhase } from "@/lib/schedule/progress";
+import { withEffectiveScheduleDates } from "@/lib/schedule/cascade";
+export { isClockInRow } from "@/lib/schedule/health";
 import {
   getSiteForecasts,
   siteKey,
@@ -38,6 +42,7 @@ export const DAYS_FORWARD = 120;
 const ONSITE_STATUSES = ["in_progress"] as const;
 const STARTING_STATUSES = ["contracted"] as const;
 const PIPELINE_STATUSES = ["proposal_sent", "estimating"] as const;
+const BOARD_STATUSES: readonly string[] = [...ONSITE_STATUSES, ...STARTING_STATUSES, ...PIPELINE_STATUSES];
 
 /**
  * Event types that are not construction work. They belong on the board, but a
@@ -48,52 +53,11 @@ const NON_WORK_EVENTS = new Set(["meeting", "shop_meeting", "walkthrough"]);
 /** Same-day events: drawn as a marker on the day, never as a run of work. */
 const MILESTONE_EVENTS = new Set(["inspection", "meeting", "shop_meeting", "walkthrough"]);
 
-/** Names the general clock-in paths give the row they spawn. */
-const CLOCK_IN_NAMES = new Set(["Needs allocation", "Change order work"]);
-
-/**
- * A clock-in leftover, not a plan. Clocking in on a budget line with no
- * phase covering today spawns a one-day `daily` row named after the line
- * ("Dumpster & Waste", "Needs allocation") that sits `in_progress` forever.
- * Those are attendance records — the time logs already say who worked — and
- * on the plan they buried the real sequence.
- *
- * Every trait has to match, because planned daily steps get marked done too
- * (schedule chat, the MCP tools, the project page) and those must stay: a
- * clock-in row is never confirmed, never has planned dates, is one day long,
- * and is either still open or carries the budget line / generic name the
- * clock-in gave it. (10/5: 41 real completed steps were hiding under the
- * looser test.)
- */
-export function isClockInRow(ph: {
-  phase_scope: string | null;
-  event_type: string | null;
-  status: string;
-  name: string;
-  start_date: string;
-  end_date?: string | null;
-  is_confirmed?: boolean | null;
-  planned_start_date?: string | null;
-  estimate_line_item_id?: string | null;
-}) {
-  if (ph.phase_scope !== "daily") return false;
-  if (ph.event_type !== null && ph.event_type !== "phase") return false;
-  if (ph.status === "not_started" || ph.is_confirmed || ph.planned_start_date) return false;
-  if ((ph.end_date || ph.start_date) !== ph.start_date) return false;
-  return ph.status === "in_progress" || !!ph.estimate_line_item_id || CLOCK_IN_NAMES.has(ph.name);
-}
-
 function barKind(eventType: string | null): BarKind {
   if (eventType === "crew") return "crew";
   if (eventType === "work") return "sub";
   return "plan";
 }
-
-const ALL_STATUSES = [
-  ...ONSITE_STATUSES,
-  ...STARTING_STATUSES,
-  ...PIPELINE_STATUSES,
-];
 
 // ── Date helpers (local time, YYYY-MM-DD keys) ───────────────────
 
@@ -282,15 +246,17 @@ export interface BoardJob {
    */
   received: number | null;
   spent: number | null;
-  /** in_progress with nothing on the calendar — the thing the old board hid. */
+  /** A project that needs a master plan but has none. Daily assignments do not count. */
   unscheduled: boolean;
+  scheduleIssues: ScheduleHealthIssue[];
+  workStartedStatusMismatch: boolean;
   /** The plan step running today, if any. */
   nowStep: { name: string; endDate: string } | null;
   /** The next plan step that hasn't started — and whether anyone confirmed it. */
   nextStep: { name: string; startDate: string; confirmed: boolean } | null;
   /** Master steps whose end date has passed and are still open. */
   overdueCount: number;
-  /** Nothing at all — plan, crew or sub — is on the calendar from today on. */
+  /** Unfinished master work exists but none is planned from today forward. */
   nothingAhead: boolean;
   /** Days inside the window somebody clocked in on this job (Eastern dates). */
   workedDays: string[];
@@ -312,6 +278,8 @@ export interface BoardData {
   onsite: BoardJob[];
   starting: BoardJob[];
   pipeline: BoardJob[];
+  /** Exceptions outside the normal board lanes; their saved status is unchanged. */
+  review: BoardJob[];
   /** Day-by-day weather for the whole window, per jobsite grid cell. */
   weather: Record<string, Record<string, DayWeather>>;
   /** Hour-by-hour for today, keyed the same way. Used by TV mode. */
@@ -349,6 +317,9 @@ interface PhaseRow {
   end_date: string | null;
   planned_start_date: string | null;
   planned_end_date: string | null;
+  sort_order: number | null;
+  is_manually_scheduled: boolean | null;
+  actual_completed_at: string | null;
   status: string;
   color: string | null;
   event_type: string | null;
@@ -473,12 +444,16 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     // string, and a concatenation widens it to `string`, which silently
     // degrades every field to an error type.
     .select("id, name, project_number, status, phase, city, latitude, longitude, contract_value, estimated_value, estimated_start_date, estimated_end_date, actual_start_date")
-    .in("status", ALL_STATUSES)
+    .neq("status", "cancelled")
     .eq("is_overhead", false)
     .order("created_at", { ascending: false });
 
   const projects = (projectRows ?? []) as ProjectRow[];
   const ids = projects.map((p) => p.id);
+  // Preserve the existing finance query scope while reading schedule exceptions
+  // from other statuses. Historic jobs must not crowd active rows out of a cap.
+  const financeIds = projects.filter((p) => BOARD_STATUSES.includes(p.status)).map((p) => p.id);
+  const financeIdSet = new Set(financeIds);
 
   const empty = { data: null } as const;
   const [
@@ -501,12 +476,13 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       ? fetchAllRows<PhaseRow>((from, to) =>
           supabase
             .from("schedule_phases")
-            .select("id, project_id, name, description, notes, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, estimate_line_item_id")
+            .select("id, project_id, name, description, notes, start_date, end_date, planned_start_date, planned_end_date, sort_order, is_manually_scheduled, actual_completed_at, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, estimate_line_item_id")
             .in("project_id", ids)
             .not("start_date", "is", null)
             .order("start_date")
             .order("id")
-            .range(from, to),
+            .range(from, to)
+            .throwOnError(),
         ).then((rows) => ({ data: rows }))
       : empty,
     ids.length
@@ -524,14 +500,15 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
           .eq("status", "open")
       : empty,
     ids.length
-      ? supabase
+      ? fetchAllRows<LogRow>((from, to) => supabase
           .from("daily_logs")
           .select("id, project_id, author_id, text, started_at, ended_at, status")
           .in("project_id", ids)
           // The whole window, so worked-day ticks reach as far back as it does.
           .gte("started_at", new Date(Date.now() - (DAYS_BACK + 1) * 86400000).toISOString())
           .order("started_at", { ascending: false })
-          .limit(1000)
+          .order("id")
+          .range(from, to).throwOnError()).then((rows) => ({ data: rows }))
       : empty,
     ids.length
       ? supabase
@@ -542,17 +519,17 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       : empty,
     supabase.from("employees").select("id, first_name, last_name, profile_id"),
     supabase.from("subcontractors").select("id, company_name"),
-    ids.length
-      ? supabase.from("invoices").select("project_id, amount, paid_amount").in("project_id", ids)
+    financeIds.length
+      ? supabase.from("invoices").select("project_id, amount, paid_amount").in("project_id", financeIds)
       : empty,
-    ids.length
-      ? supabase.from("payments_received").select("project_id, amount").in("project_id", ids)
+    financeIds.length
+      ? supabase.from("payments_received").select("project_id, amount").in("project_id", financeIds)
       : empty,
-    ids.length
+    financeIds.length
       ? supabase
           .from("project_payment_milestones")
           .select("id, project_id, label, stage_key, amount, percent, status, sort_order")
-          .in("project_id", ids)
+          .in("project_id", financeIds)
           .order("sort_order")
       : empty,
   ]);
@@ -645,6 +622,16 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     else logsByProject.set(l.project_id, [l]);
   }
 
+  for (const [projectId, rows] of phasesByProject) {
+    const effective = new Map(withEffectiveScheduleDates(rows.filter(isMasterPhase)).map((ph) => [ph.id, ph]));
+    phasesByProject.set(projectId, rows.map((ph) => effective.get(ph.id) ?? ph));
+  }
+  const scheduleHealthByProject = new Map(projects.map((p) => [p.id, deriveScheduleHealth({
+    status: p.status, phases: phasesByProject.get(p.id) ?? [], today: todayStr,
+    recentWorkDates: recentWorkDates(logsByProject.get(p.id) ?? [], todayStr),
+  })]));
+  const displayedProjects = projects.filter((p) => BOARD_STATUSES.includes(p.status) || scheduleHealthByProject.get(p.id)!.issues.length > 0);
+
   const openTodos = new Map<string, number>();
   const todosByCell = new Map<string, { id: string; description: string; due_date: string }[]>();
   for (const t of (todoRows ?? []) as {
@@ -693,7 +680,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
   // ── Weather, one round trip for every distinct site ────────────
 
   const forecasts: ForecastIndex = await getSiteForecasts(
-    projects.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+    displayedProjects.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
   );
 
   const weather: BoardData["weather"] = {};
@@ -899,29 +886,10 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     const live = phases.filter(
       (ph) => !isClockInRow(ph) && !(ph.event_type && NON_WORK_EVENTS.has(ph.event_type)),
     );
-    // The job's own sequence speaks first; on a job run only by crew days
-    // (no master schedule), the crew day IS what's on.
     const open = live.filter((ph) => ph.status !== "completed");
     const openPlan = open.filter((ph) => barKind(ph.event_type) === "plan");
-    const pickNow = (rows: PhaseRow[]) =>
-      rows
-        .filter((ph) => ph.start_date <= todayStr && (ph.end_date || ph.start_date) >= todayStr)
-        .sort((a, b) => (a.end_date || a.start_date).localeCompare(b.end_date || b.start_date))[0];
-    const pickNext = (rows: PhaseRow[]) =>
-      rows
-        .filter((ph) => ph.start_date > todayStr)
-        .sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
-    const nowPhase = pickNow(openPlan) ?? pickNow(open);
-    const nextPhase = pickNext(openPlan) ?? pickNext(open);
-    const overdueCount = live.filter(
-      (ph) =>
-        ph.phase_scope === "master" &&
-        ph.status !== "completed" &&
-        (ph.end_date || ph.start_date) < todayStr,
-    ).length;
-    const nothingAhead = !live.some(
-      (ph) => ph.status !== "completed" && (ph.end_date || ph.start_date) >= todayStr,
-    );
+    const { current: nowPhase, next: nextPhase } = deriveCurrentScheduleActivity(phases, todayStr);
+    const scheduleHealth = scheduleHealthByProject.get(p.id)!;
     // A real shift: still open, or closed after it started. Photo-only posts
     // carry a zero-length duration and are not attendance.
     const workedDays = Array.from(
@@ -968,17 +936,19 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       openTodoCount: openTodos.get(p.id) ?? 0,
       unsignedCoCount: unsignedCos.get(p.id) ?? 0,
       payments,
-      received: canSeeMoney ? Math.round(receivedByProject.get(p.id) ?? 0) : null,
-      spent: canSeeMoney ? Math.round(spentByProject.get(p.id) ?? 0) : null,
-      unscheduled: p.status === "in_progress" && mergedBars.length === 0,
+      received: canSeeMoney && financeIdSet.has(p.id) ? Math.round(receivedByProject.get(p.id) ?? 0) : null,
+      spent: canSeeMoney && financeIdSet.has(p.id) ? Math.round(spentByProject.get(p.id) ?? 0) : null,
+      unscheduled: scheduleHealth.missingMaster,
+      scheduleIssues: scheduleHealth.issues,
+      workStartedStatusMismatch: scheduleHealth.workStartedStatusMismatch,
       nowStep: nowPhase
         ? { name: nowPhase.name, endDate: nowPhase.end_date || nowPhase.start_date }
         : null,
       nextStep: nextPhase
         ? { name: nextPhase.name, startDate: nextPhase.start_date, confirmed: !!nextPhase.is_confirmed }
         : null,
-      overdueCount,
-      nothingAhead,
+      overdueCount: scheduleHealth.overdueCount,
+      nothingAhead: scheduleHealth.nothingAhead,
       workedDays,
       hiddenClockIns,
       spanStart,
@@ -987,7 +957,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     };
   }
 
-  const jobs = projects.map(buildJob);
+  const jobs = displayedProjects.map(buildJob);
 
   const onsite = jobs
     .filter((j) => (ONSITE_STATUSES as readonly string[]).includes(j.status))
@@ -1011,6 +981,9 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     .filter((j) => (PIPELINE_STATUSES as readonly string[]).includes(j.status))
     .sort((a, b) => (b.contractValue ?? 0) - (a.contractValue ?? 0) || a.name.localeCompare(b.name));
 
+  const laneIds = new Set([...onsite, ...starting, ...pipeline].map((j) => j.id));
+  const review = jobs.filter((j) => !laneIds.has(j.id) && j.scheduleIssues.length > 0);
+
   // Money still to collect that actually lands inside the visible window.
   const dueInWindow = [...onsite, ...starting].reduce(
     (sum, j) =>
@@ -1027,6 +1000,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     onsite,
     starting,
     pipeline,
+    review,
     weather,
     hourly,
     defaultSite: siteKey(null),

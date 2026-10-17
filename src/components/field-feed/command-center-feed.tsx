@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useVisibleRefresh } from "@/lib/hooks/use-visible-refresh";
 import Link from "next/link";
 import type { TodayPhase, FeedDailyLog, FeedPunchGroup, WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
@@ -27,7 +28,6 @@ import { CompanyPostCard } from "./company-post-card";
 import { ReceiptTile, DepositTile } from "./money-tiles";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import type { CompanyFeedPost } from "@/lib/actions/company-feed";
-import { Button } from "@/components/ui/button";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,10 +48,11 @@ export type Jobsite = {
   lead: PersonId | null;
   status: string;
   phase: string;
+  scheduleIssues?: string[];
   weather: string;
   color: string;
   /** Board lane: under construction vs signed-but-not-started. */
-  stage?: "active" | "precon";
+  stage?: "active" | "precon" | "review";
 };
 
 export type FeedLiveShift = {
@@ -805,6 +806,7 @@ function JobsiteCard({ site, live }: { site: Jobsite; live?: boolean }) {
         )}
       </div>
       <div className="text-[16px] font-semibold tracking-tight leading-tight mb-1" style={{ color: v("ink"), textWrap: "balance" }}>{site.project}</div>
+      {site.scheduleIssues?.map((issue) => <p key={issue} className="mb-1 text-[11px] leading-snug" style={{ color: v("accent") }}>{issue}</p>)}
       <div className="text-[12px] leading-snug mb-3" style={{ color: v("muted") }}>{site.address}</div>
       <div className="rounded-lg overflow-hidden mb-3" style={{ background: v("bg-2"), height: 72 }}>
         <MiniMap />
@@ -1326,25 +1328,21 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     // Day = since local midnight; Week = today plus the previous 6 days.
     const cutoff = updatesRange === "day" ? dayStart : dayStart - 6 * 86400000;
-    let any = false;
-    let visible = false;
+    const any = items.some((item) => updatePostTs(item) !== null);
     const kept = items.filter((item) => {
       const ts = updatePostTs(item);
       if (ts === null) return true;
-      any = true;
       // Always show the deep-linked post, even if it's older than the range —
       // otherwise a mention notification could land on an empty feed.
       if (focusPostId && feedItemPostId(item) === focusPostId) {
-        visible = true;
         return true;
       }
       if (Number.isNaN(ts) || ts >= cutoff) {
-        visible = true;
         return true;
       }
       return false;
     });
-    return { visibleItems: kept, hasVisibleUpdates: visible, hasAnyUpdates: any };
+    return { visibleItems: kept, hasVisibleUpdates: kept.some((item) => updatePostTs(item) !== null), hasAnyUpdates: any };
   }, [items, updatesRange, focusPostId]);
 
   const grouped = useMemo(() => groupActionStacks(visibleItems), [visibleItems]);
@@ -1624,6 +1622,7 @@ function RailJobsiteCard({ site, accent, live }: { site: Jobsite; accent: string
         )}
       </div>
       <div className="text-[11px] truncate" style={{ color: v("muted") }}>{site.address}</div>
+      {site.scheduleIssues?.map((issue) => <p key={issue} className="text-[11px] leading-snug" style={{ color: v("accent") }}>{issue}</p>)}
     </Link>
   );
 }
@@ -1637,6 +1636,7 @@ function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
     { key: "live", label: "On site now", accent: "#34d399", sites: jobsites.filter((s) => s.crew.length > 0) },
     { key: "active", label: "In progress", accent: "#D97706", sites: jobsites.filter((s) => s.crew.length === 0 && (s.stage ?? "active") === "active") },
     { key: "precon", label: "Pre-construction", accent: "#8A8378", sites: jobsites.filter((s) => s.crew.length === 0 && s.stage === "precon") },
+    { key: "review", label: "Schedule / status review", accent: "#D97706", sites: jobsites.filter((s) => s.crew.length === 0 && s.stage === "review") },
   ].filter((l) => l.sites.length > 0);
 
   return (
@@ -1844,6 +1844,7 @@ export function CommandCenterFeed({
   focusPostId?: string | null;
 }) {
   const router = useRouter();
+  useVisibleRefresh(router.refresh);
   const [isDesktop, setIsDesktop] = useState(false);
   // Company posts published this session, rendered at the top of the feed
   // immediately (with local photo previews) while router.refresh() fetches

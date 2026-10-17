@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
+import { isMasterPhase } from "@/lib/schedule/progress";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import type {
@@ -122,10 +123,10 @@ export async function loadPortalData(
       .single(),
     supabase
       .from("schedule_phases")
-      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color, event_type, client_completed_at")
+      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, is_manually_scheduled, sort_order, color, event_type, phase_scope, client_completed_at, actual_completed_at")
       .eq("project_id", projectId)
       // Master schedule only — daily crew plans are internal (phase_scope 'daily').
-      .eq("phase_scope", "master")
+      .or("phase_scope.eq.master,phase_scope.is.null")
       .order("sort_order", { ascending: true })
       .order("start_date", { ascending: true, nullsFirst: false }),
     supabase
@@ -193,7 +194,7 @@ export async function loadPortalData(
   if (!proj) return null;
 
   // ---- schedule (live cascade: confirmed phases firm, the rest estimated)
-  const rawPhases = (scheduleRes.data || []) as CascadeInput[];
+  const rawPhases = ((scheduleRes.data || []) as CascadeInput[]).filter(isMasterPhase);
   const cascade = cascadeSchedule(rawPhases);
   const schedule = rawPhases.map((p) => {
     const c = cascade.get(p.id);
@@ -209,6 +210,7 @@ export async function loadPortalData(
       start_date: c?.start_date ?? p.start_date,
       end_date: c?.end_date ?? p.end_date,
       firm: c?.firm ?? false,
+      actual_completion_date: c?.actual_completion_date ?? null,
       // The client marked it complete on their portal (board status unchanged).
       client_completed: !!row.client_completed_at,
     };
