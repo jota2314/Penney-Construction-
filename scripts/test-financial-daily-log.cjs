@@ -187,7 +187,7 @@ async function browserTest() {
       await expect(page.locator('article')).toHaveCount(4);
       await expect(page.getByRole('link',{name:'Previous month',exact:true})).toHaveAttribute('href','/finances?section=activity&month=2026-08');
       await expect(page.getByRole('link',{name:'Next month',exact:true})).toHaveAttribute('href','/finances?section=activity&month=2026-10');
-      await expect(page.getByRole('link',{name:'This month',exact:true})).toHaveAttribute('href','/finances?section=activity&month=2026-09');
+      await expect(page.getByRole('link',{name:'This month',exact:true,includeHidden:true})).toHaveAttribute('href','/finances?section=activity&month=2026-09');
       await expect(page.getByRole('link',{name:'Bills to pay',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=bills');
       await expect(monthTotal('Income received')).toContainText('$1,500.25');
       await expect(monthTotal('Expenses & bills')).toContainText('$74.85');
