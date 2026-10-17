@@ -22,7 +22,7 @@ function MoneyCard({ label, amount, detail, tone = "text-foreground" }: {
   </div>;
 }
 
-function RecordedActivity({ records, title, period }: { records: Records; title: string; period: string }) {
+function RecordedActivity({ records, title, period, payroll }: { records: Records; title: string; period: string; payroll?: CashFlow["payroll"] }) {
   return <section className="min-w-0 rounded-xl border border-amber-500/30 bg-card p-4 sm:p-5">
     <div className="flex flex-wrap items-baseline justify-between gap-2">
       <h2 className="text-sm font-semibold">{title}</h2>
@@ -30,11 +30,24 @@ function RecordedActivity({ records, title, period }: { records: Records; title:
     </div>
     <p className="mt-1 text-xs text-muted-foreground">{period}</p>
     <div className="mt-4 grid gap-3 sm:grid-cols-2">
-      <MoneyCard label="Receipts recorded" amount={records.received} tone="text-emerald-500"
+      <MoneyCard label="Money received · recorded" amount={records.received} tone="text-emerald-500"
         detail={records.receiptCount + " receipt entries, including recorded reversals"} />
-      <MoneyCard label="Bill payments recorded" amount={records.paidBills} tone="text-amber-500"
-        detail={records.paidBillCount + " bill entries · includes card purchases"} />
+      <MoneyCard label="Paid bill records" amount={records.paidBills} tone="text-amber-500"
+        detail={records.paidBillCount + " bill entries · includes card purchases" + (payroll ? "; payroll detail below" : "")} />
     </div>
+    {payroll && <div className="mt-4 rounded-lg border p-3 text-sm" data-testid="payroll-reconciliation">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-medium">Payroll awaiting bill matching</span>
+        <strong className="tabular-nums text-amber-500">{payroll.bankPayrollThrough ? formatMoney(payroll.additionalBankPayroll) : "Unavailable"}</strong>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {payroll.bankPayrollThrough ? <>Bank payroll with no ADP bill entries in the same months. Dates and overlap must be checked before adding it to the bill subtotal. Payroll bank records run through {dateLabel(payroll.bankPayrollThrough)}; {formatMoney(payroll.recordedADPpayroll)} of ADP payroll is already in the bills.</>
+          : "Payroll bank records are not available. The bill subtotal does not establish complete payroll spending."}
+      </p>
+      {payroll.uncertainOverlapMonths.length > 0 && <p className="mt-2 text-xs text-amber-500">
+        Payroll overlap needs review for {payroll.uncertainOverlapMonths.map(monthLabel).join(", ")}. No extra payroll from those months has been added.
+      </p>}
+    </div>}
     <dl className="mt-4 space-y-2 text-xs sm:text-sm">
       {[
         ["Checks, ACH and other direct payments", records.directPayments],
@@ -45,8 +58,8 @@ function RecordedActivity({ records, title, period }: { records: Records; title:
       </div>)}
     </dl>
     <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-      These records are already in Penney. Card purchases are separate because bank cash leaves when the card is paid.
-      Payroll, card repayments and payment clearance still need bank confirmation; these entries do not establish a current bank balance or complete net cash flow.
+      Includes all recorded receipts and paid bills in this period. Card purchases are included in the bill subtotal; their repayments are not added again.
+      Full cash paid out and net cash flow remain unreconciled. Later payroll, payment methods and bank clearance still need confirmation.
     </p>
     {records.estimatedDateCount > 0 && <p className="mt-2 text-xs text-muted-foreground">
       {records.estimatedDateCount} bill entries have known estimated payment dates. Other stored payment dates may also come from bill entry; bank clearance is unverified.
@@ -70,16 +83,32 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
 
   return <>
     <div>
-      <h2 className="text-lg font-semibold">Cash flow · {year}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {bank.through ? <>Eastern Bank activity imported through <strong className="text-foreground">{dateLabel(bank.through)}</strong>.</>
-          : "No Eastern Bank activity has been imported for this year."}
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">Current bank balance is not available from these records. Recorded receipts and bills are shown separately below.</p>
+      <h2 className="text-lg font-semibold">Recorded money · {year}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Year to date through {dateLabel(today)}, including {monthLabel(today.slice(0, 7))} records.</p>
     </div>
+    <div data-testid="recorded-ytd-summary">
+      <RecordedActivity records={cash.yearToDate} title="Year to date" period={dateLabel(year + "-01-01") + "–" + dateLabel(today)} payroll={cash.payroll} />
+    </div>
+    {showLater && bank.through && <details className="rounded-xl border p-4">
+      <summary className="cursor-pointer text-sm font-medium">Records after {dateLabel(bank.through)}</summary>
+      <div className="mt-4"><RecordedActivity records={cash.later.records}
+        title="Included in the year-to-date records above"
+        period={dateLabel(cash.later.from) + "–" + dateLabel(today)} /></div>
+    </details>}
+    {cash.later.records.undatedPayments > 0 && <p role="status" className="rounded-xl border border-amber-500/30 p-4 text-xs">
+      {cash.later.records.undatedPayments} paid bill entries have no usable payment or bill date ({formatMoney(cash.later.records.undatedPaymentAmount)}).
+      They cannot be assigned to a cash period until their dates are verified.
+    </p>}
+    {cash.later.records.unresolvedPaymentAmounts > 0 && <p role="status" className="rounded-xl border border-amber-500/30 p-4 text-xs">
+      {cash.later.records.unresolvedPaymentAmounts} partially paid bill entries have no valid payment amount. They need review and are excluded from the recorded payment totals.
+    </p>}
+    <details className="rounded-xl border p-4 sm:p-5" open={Boolean(month)} data-testid="bank-reconciliation">
+      <summary className="cursor-pointer text-sm font-medium">Bank reconciliation{bank.through ? " · through " + dateLabel(bank.through) : " · no imports"}</summary>
+      <div className="mt-4 flex flex-col gap-4">
+    <p className="text-xs text-muted-foreground">These bank totals cover the imported dates only. They are not current year-to-date business totals or your current bank balance.</p>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="bank-cash-summary">
-      <MoneyCard label="Money into Eastern" amount={bank.count ? bank.received : null} tone="text-emerald-500" detail="Credits in imported bank activity" />
-      <MoneyCard label="Money out of Eastern" amount={bank.count ? bank.spent : null} tone="text-amber-500" detail="Includes payroll, card repayments and returned deposits" />
+      <MoneyCard label="Imported bank credits" amount={bank.count ? bank.received : null} tone="text-emerald-500" detail="Credits in imported bank activity" />
+      <MoneyCard label="Imported bank debits" amount={bank.count ? bank.spent : null} tone="text-amber-500" detail="Includes payroll, card repayments and returned deposits" />
       <MoneyCard label="Net bank movement" amount={bank.count ? bank.net : null} tone={bank.net < 0 ? "text-red-400" : "text-foreground"}
         detail={bank.through ? "Imported activity through " + dateLabel(bank.through) : "Bank activity required"} />
     </div>
@@ -88,18 +117,8 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
       Net movement excludes the opening balance and is not profit or available cash.
       {bank.firstDate && <> Imported transaction dates: {dateLabel(bank.firstDate)}–{dateLabel(bank.through!)}. Import dates alone do not certify complete statement coverage.</>}
     </p>
-    {showLater && <RecordedActivity records={cash.later.records}
-      title={bank.through ? "Recorded since the last bank import" : "Recorded activity"}
-      period={dateLabel(cash.later.from) + "–" + dateLabel(today)} />}
     {!showLater && (!bank.through || bank.through < today) && <p className="rounded-xl border border-amber-500/30 p-4 text-sm text-muted-foreground">
       No later receipts or paid bills are recorded. Bank activity after {bank.through ? dateLabel(bank.through) : "the start of the year"} remains unverified.
-    </p>}
-    {cash.later.records.undatedPayments > 0 && <p role="status" className="rounded-xl border border-amber-500/30 p-4 text-xs">
-      {cash.later.records.undatedPayments} paid bill entries have no usable payment or bill date ({formatMoney(cash.later.records.undatedPaymentAmount)}).
-      They cannot be assigned to a cash period until their dates are verified.
-    </p>}
-    {cash.later.records.unresolvedPaymentAmounts > 0 && <p role="status" className="rounded-xl border border-amber-500/30 p-4 text-xs">
-      {cash.later.records.unresolvedPaymentAmounts} partially paid bill entries have no valid payment amount. They need review and are excluded from the recorded payment totals.
     </p>}
     {available.length > 0 && <section className="min-w-0 rounded-xl border bg-card p-4 sm:p-5">
       <h2 className="text-sm font-semibold">Monthly bank activity</h2>
@@ -137,5 +156,7 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
         </p>}
       </div>}
     </section>}
+      </div>
+    </details>
   </>;
 }

@@ -3,6 +3,8 @@ type Amount = number | string | null;
 export type CashReceipt = { id?: string; received_date: string | null; amount: Amount };
 export type CashBill = {
   id?: string;
+  vendor_name?: string | null;
+  source?: string | null;
   invoice_date: string | null;
   paid_date?: string | null;
   paid_date_source?: string | null;
@@ -55,12 +57,34 @@ export type ImportedBankActivity = {
 };
 export type CashFlowSummary = {
   bank: ImportedBankActivity;
-  months: { key: string; bank: ImportedBankActivity; records: RecordedActivity }[];
+  yearToDate: RecordedActivity;
+  payroll: PayrollReconciliation;
+  months: { key: string; bank: ImportedBankActivity; records: RecordedActivity; payroll: PayrollMonthReconciliation }[];
   later: { from: string; through: string; records: RecordedActivity };
+};
+export type PayrollMonthReconciliation = {
+  recordedADPpayroll: number;
+  /** Includes unresolved paid/partial ADP bill candidates, not just usable payment amounts. */
+  recordedBillCount: number;
+  bankPayroll: number;
+  bankPayrollCount: number;
+  /** Candidate additional payroll only: not automatically added to spending. */
+  additionalBankPayroll: number;
+  overlapUncertain: boolean;
+};
+export type PayrollReconciliation = {
+  recordedADPpayroll: number;
+  bankPayroll: number;
+  additionalBankPayroll: number;
+  uncertainOverlapMonths: string[];
+  bankPayrollThrough: string | null;
+  undatedBillCount: number;
 };
 
 const DIRECT_METHODS = new Set(["check", "ach", "cash", "wire", "debit_card"]);
 const CARD_METHODS = new Set(["capital_one", "credit_card", "amex"]);
+const isBankPayroll = (row: CashBankRow) => row.direction === "debit"
+  && /\bADP\b/i.test(row.description ?? "") && !/adpro/i.test(row.description ?? "");
 
 function isDay(value: string | null | undefined): value is string {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -168,7 +192,7 @@ function addBankRow(target: ImportedBankActivity, row: CashBankRow, cents: numbe
   if (row.direction === "credit") target.received += cents;
   else {
     target.spent += cents;
-    if (/\bADP\b/i.test(row.description ?? "") && !/adpro/i.test(row.description ?? "")) target.payroll += cents;
+    if (isBankPayroll(row)) target.payroll += cents;
     else if (row.category_key === "card_payoff") target.cardPayoff += cents;
     else if (row.check_number) target.checks += cents;
     else target.other += cents;
@@ -187,10 +211,23 @@ export function summarizeCashFlow(receipts: CashReceipt[], bills: CashBill[], ba
   const year = Number(today.slice(0, 4));
   const start = `${year}-01-01`;
   const bank = emptyBank();
+  const payrollBills = uniqueRows(bills, "bill").filter(row => /^ADP\b/i.test(row.vendor_name?.trim() ?? "")
+    && !row.duplicate_of_id && row.payment_method?.trim().toLowerCase() !== "internal"
+    && (row.payment_status === "paid" || row.payment_status === "partial"));
+  const billDay = (row: CashBill) => isDay(row.paid_date) ? row.paid_date : isDay(row.invoice_date) ? row.invoice_date : null;
+  const undatedPayrollBills = payrollBills.filter(row => !billDay(row)).length;
+  const bankPayrollDates: string[] = [];
   const months = Array.from({ length: 12 }, (_, index) => {
     const key = `${year}-${String(index + 1).padStart(2, "0")}`;
     const monthEnd = new Date(Date.UTC(year, index + 1, 0)).toISOString().slice(0, 10);
-    return { key, bank: emptyBank(), records: summarizeRecordedActivity(receipts, bills, `${key}-01`, monthEnd < today ? monthEnd : today) };
+    const end = monthEnd < today ? monthEnd : today;
+    const payrollRecords = summarizeRecordedActivity([], payrollBills, `${key}-01`, end);
+    const payroll: PayrollMonthReconciliation = {
+      recordedADPpayroll: payrollRecords.paidBills,
+      recordedBillCount: payrollBills.filter(row => { const day = billDay(row); return day !== null && day >= `${key}-01` && day <= end; }).length,
+      bankPayroll: 0, bankPayrollCount: 0, additionalBankPayroll: 0, overlapUncertain: false,
+    };
+    return { key, bank: emptyBank(), records: summarizeRecordedActivity(receipts, bills, `${key}-01`, end), payroll };
   });
   for (const row of uniqueRows(bankRows, "bank")) {
     if (!row.source.startsWith("eastern")) continue;
@@ -200,12 +237,47 @@ export function summarizeCashFlow(receipts: CashReceipt[], bills: CashBill[], ba
     if (amount < 0) throw new Error("Invalid bank transaction amount: direction carries the sign");
     if (row.direction !== "credit" && row.direction !== "debit") throw new Error("Invalid bank transaction direction");
     addBankRow(bank, row, amount);
-    addBankRow(months[Number(row.txn_date.slice(5, 7)) - 1].bank, row, amount);
+    const month = months[Number(row.txn_date.slice(5, 7)) - 1];
+    addBankRow(month.bank, row, amount);
+    if (isBankPayroll(row)) {
+      month.payroll.bankPayrollCount++;
+      bankPayrollDates.push(row.txn_date);
+    }
+  }
+  const uncertainOverlapMonths: string[] = [];
+  let additionalPayrollCents = 0;
+  for (const month of months) {
+    const p = month.payroll;
+    p.bankPayroll = month.bank.payroll / 100;
+    if (p.bankPayrollCount === 0) continue; // Missing bank payroll is not proof of zero payroll.
+    // Never add an aggregate difference when any bill candidates might represent the same run.
+    const unresolvedCandidate = payrollBills.some(row => {
+      const day = billDay(row);
+      return day !== null && day <= today && day.slice(0, 7) === month.key
+        && row.payment_status === "partial" && (!Number.isFinite(Number(row.paid_amount)) || Math.round(Number(row.paid_amount) * 100) <= 0);
+    });
+    p.overlapUncertain = undatedPayrollBills > 0 || unresolvedCandidate
+      || (p.recordedBillCount > 0 && toCents(p.recordedADPpayroll, "recorded payroll") !== month.bank.payroll);
+    if (p.overlapUncertain) uncertainOverlapMonths.push(month.key);
+    if (p.recordedBillCount === 0 && undatedPayrollBills === 0) {
+      p.additionalBankPayroll = p.bankPayroll;
+      additionalPayrollCents += month.bank.payroll;
+    }
   }
   // With no bank imports, all current-year records remain provisional.
   const laterStart = bank.through ? new Date(Date.parse(`${bank.through}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : start;
+  const bankPayrollAmount = bank.payroll / 100;
   return {
     bank: dollars(bank),
+    yearToDate: summarizeRecordedActivity(receipts, bills, start, today),
+    payroll: {
+      recordedADPpayroll: summarizeRecordedActivity([], payrollBills, start, today).paidBills,
+      bankPayroll: bankPayrollAmount,
+      additionalBankPayroll: additionalPayrollCents / 100,
+      uncertainOverlapMonths,
+      bankPayrollThrough: bankPayrollDates.sort().pop() ?? null,
+      undatedBillCount: undatedPayrollBills,
+    },
     months: months.map(month => ({ ...month, bank: dollars(month.bank) })),
     later: { from: laterStart, through: today, records: summarizeRecordedActivity(receipts, bills, laterStart, today) },
   };
