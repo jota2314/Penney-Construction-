@@ -7,6 +7,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { buildDailyLog, validMonth, type DailyExpense, type DailyIncome } from "@/lib/finance/daily-log";
+import { resolveDailyLogAttachments } from "@/lib/finance/daily-log-attachments";
 
 
 export default async function DailyLogPage({ searchParams }: { searchParams: Promise<{ month?: string; panel?: string; id?: string }> }) {
@@ -23,7 +24,7 @@ export default async function DailyLogPage({ searchParams }: { searchParams: Pro
     const rows: DailyExpense[] = [];
     for (let start = 0; ; start += 500) {
       const { data, error } = await db.from("invoices")
-        .select("id, project_id, vendor_name, amount, description, source, review_status, invoice_number, invoice_date, split_group_id, payment_status, payment_method, duplicate_of_id, projects(name, project_number)")
+        .select("id, project_id, vendor_name, amount, description, source, review_status, invoice_number, invoice_date, split_group_id, payment_status, payment_method, duplicate_of_id, attachment_storage_path, projects(name, project_number)")
         .is("duplicate_of_id", null).order("id").range(start, start + 499);
       if (error) throw new Error("Expenses could not be loaded");
       rows.push(...data as DailyExpense[]);
@@ -34,7 +35,7 @@ export default async function DailyLogPage({ searchParams }: { searchParams: Pro
     const rows: DailyIncome[] = [];
     for (let start = 0; ; start += 500) {
       const { data, error } = await db.from("payments_received")
-        .select("id, project_id, amount, description, source, review_status, payer_name, received_date, reference_number, method, projects(name, project_number)")
+        .select("id, project_id, amount, description, source, review_status, payer_name, received_date, reference_number, method, photo_storage_path, photo_bucket, projects(name, project_number)")
         .order("id").range(start, start + 499);
       if (error) throw new Error("Income could not be loaded");
       rows.push(...data as DailyIncome[]);
@@ -49,9 +50,10 @@ export default async function DailyLogPage({ searchParams }: { searchParams: Pro
   } catch {
     failed = true;
   }
+  const displayedRecords = await resolveDailyLogAttachments(db, records.filter(r => !r.date || r.date.startsWith(month)));
   return <>
     <div className="flex flex-col gap-5">
-      <FinancialDailyLog records={records.filter(r => !r.date || r.date.startsWith(month))} month={month} today={today} failed={failed} />
+      <FinancialDailyLog records={displayedRecords} month={month} today={today} failed={failed} />
       {panel && <DailyLogPanel title={WORKSPACE_TITLES[panel]} month={month}>
         <Suspense key={`${panel}:${params.id ?? ""}`} fallback={<p role="status">Loading workspace…</p>}>
           <DailyLogWorkspace panel={panel} id={params.id} month={month} records={records} failed={failed} />

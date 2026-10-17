@@ -8,6 +8,7 @@ import { BillDrop } from "@/components/invoices/bill-drop";
 import { DepositCapture } from "@/components/field-feed/deposit-capture";
 import { PCC_TOKENS } from "@/components/field-feed/tokens";
 import { logTotals, type LogTransaction } from "@/lib/finance/daily-log";
+import { DailyLogAttachments } from "@/components/finances/daily-log-attachments";
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const dayLabel = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
@@ -75,16 +76,16 @@ function LogContents({ records, month, today, failed }: { records: LogTransactio
 
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex w-full items-center justify-between gap-2 sm:w-auto">
-        <Link className={control} aria-label="Previous month" href={`?month=${moveMonth(month,-1)}`}><ChevronLeft className="h-5 w-5" /></Link>
+        <Link className={control} aria-label="Previous month" href={`/finances?section=activity&month=${moveMonth(month,-1)}`}><ChevronLeft className="h-5 w-5" /></Link>
         <span className="min-w-36 text-center font-semibold">{monthLabel(month)}</span>
-        <Link className={control} aria-label="Next month" href={`?month=${moveMonth(month,1)}`}><ChevronRight className="h-5 w-5" /></Link>
+        <Link className={control} aria-label="Next month" href={`/finances?section=activity&month=${moveMonth(month,1)}`}><ChevronRight className="h-5 w-5" /></Link>
       </div>
       <details className="group/month w-full sm:w-auto">
         <summary className={`flex min-h-11 cursor-pointer list-none items-center justify-center gap-2 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden ${focusRing}`}>Choose month <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 transition-transform group-open/month:rotate-180" /></summary>
         <form className="mt-2 flex flex-wrap gap-2" action="/finances/daily-log">
           <input aria-label="Choose month" type="month" name="month" defaultValue={month} min="1900-01" max="2200-12" className={`${control} min-w-0 flex-1`} required />
           <button className={control}>Go</button>
-          <Link className={`${control} inline-flex items-center`} href={`?month=${today.slice(0,7)}`}>This month</Link>
+          <Link className={`${control} inline-flex items-center`} href={`/finances?section=activity&month=${today.slice(0,7)}`}>This month</Link>
         </form>
       </details>
     </div>
@@ -180,9 +181,10 @@ function LogContents({ records, month, today, failed }: { records: LogTransactio
                   <Link scroll={false} href={transactionHref(r)} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-500/20 dark:text-amber-400 ${focusRing}`}>{r.kind === "expense" ? "Manage expense" : "Manage payment"}<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></Link>
                   {r.kind === "expense" && <Link scroll={false} href={workspaceHref("review-expenses", r.recordIds[0])} className={`inline-flex min-h-11 items-center rounded-lg border px-3 py-2 text-xs font-medium hover:bg-muted ${focusRing}`}>Review & assign</Link>}
                 </div>
-                {r.kind === "expense" && <p className="text-[11px] text-muted-foreground">Open Manage expense for bill details, attachments and payment controls.</p>}
+                {r.kind === "expense" && <p className="text-[11px] text-muted-foreground">Open Manage expense for bill details and payment controls.</p>}
               </div>
             </details>
+            <DailyLogAttachments transaction={r} />
           </article>)}</div>
         </section>;
       })}
