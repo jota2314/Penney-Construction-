@@ -54,13 +54,24 @@ async function browserTest() {
     { ...base, id: 'credit', invoice_number: 'credit', amount: -25.15, invoice_date: '2026-09-17' },
     { ...base, id: 'review', invoice_number: 'review', amount: 222, review_status: 'needs_review', vendor_name: 'Review supplier' },
   ], [payment]);
+  // Stress only the presentation: the ordinary fixture keeps its original
+  // credit and review totals, and all records stay inside this local preview.
+  const longVendor = 'Metropolitan Architectural Restoration and Specialized Construction Supply Company';
+  const stressFixture = buildDailyLog([{
+    ...base, id: 'large', invoice_number: 'LARGE-100', amount: 12345678.90,
+    invoice_date: '2026-09-16', vendor_name: longVendor,
+    projects: { name: 'A very long waterfront addition and complete historic property restoration', project_number: 'DEMO-LONG-01' },
+    description: 'Special-order materials and installation for the complete property restoration.',
+  }], []);
+  assert.deepEqual(logTotals(fixture), { income: 1500.25, expenses: 74.85, difference: 1425.40, review: 1 });
   fs.writeFileSync(path.join(dir, 'entry.jsx'), `
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import { FinancialDailyLog } from '@/components/finances/financial-daily-log';
     import { FinanceTabs } from '@/components/finances/finance-tabs';
     import { DailyLogPanel } from '@/components/finances/daily-log-panel';
     import { PaymentReviewList } from '@/components/projects/payment-review-list';
-    createRoot(document.getElementById('root')).render(<main className="p-4 flex flex-col gap-5 max-w-6xl mx-auto"><FinanceTabs current="daily"/><FinancialDailyLog records={${JSON.stringify(fixture)}} month="2026-09" today="2026-09-19" failed={location.search.includes('failed')}/>{location.search.includes('payment') && <DailyLogPanel title="Manage income payment" month="2026-09"><PaymentReviewList manage payments={[${JSON.stringify({...payment, payment_type:'progress', project_label:'Sample addition', photo_url:null, review_reason:null, created_at:null})}]} jobs={[{id:'job', label:'Sample addition'}]}/></DailyLogPanel>}</main>);
+    const records = location.search.includes('stress') ? [...${JSON.stringify(fixture)}, ...${JSON.stringify(stressFixture)}] : ${JSON.stringify(fixture)};
+    createRoot(document.getElementById('root')).render(<main className="p-4 flex flex-col gap-5 max-w-6xl mx-auto"><FinanceTabs current="daily"/><FinancialDailyLog records={records} month="2026-09" today="2026-09-19" failed={location.search.includes('failed')}/>{location.search.includes('payment') && <DailyLogPanel title="Manage income payment" month="2026-09"><PaymentReviewList manage payments={[${JSON.stringify({...payment, payment_type:'progress', project_label:'Sample addition', photo_url:null, review_reason:null, created_at:null})}]} jobs={[{id:'job', label:'Sample addition'}]}/></DailyLogPanel>}</main>);
   `);
   fs.writeFileSync(path.join(dir, 'mocks.jsx'), `import React from 'react'; export default function Link({href,children,scroll,...props}) {return <a href={href} {...props}>{children}</a>}; export const useRouter=()=>({refresh(){window.refreshed=true},replace(url){window.closedUrl=url}}); export const BillDrop=()=> <p>Existing bill workflow</p>; export const DepositCapture=()=> <p>Existing income workflow</p>; export async function resolvePayment(input){window.savedPayment=input;return {}}; export async function discardPayment(){throw Error('Unexpected discard')};`);
   await esbuild.build({ entryPoints: [path.join(dir, 'entry.jsx')], bundle: true, outfile: path.join(dir,'bundle.js'), jsx: 'automatic', alias: { '@': path.resolve('src') }, plugins: [{ name: 'read-only-fixture', setup(build) { build.onResolve({ filter: /^(next\/(link|navigation)|@\/lib\/actions\/deposit-capture|@\/components\/(invoices\/bill-drop|field-feed\/deposit-capture))$/ }, () => ({path: path.join(dir,'mocks.jsx')})); } }] });
@@ -77,29 +88,100 @@ async function browserTest() {
     const page = await browser.newPage();
     const errors=[]; page.on('pageerror',e=>errors.push(e.message));
     const url=`http://127.0.0.1:${server.address().port}`;
-    for (const width of [390,1280]) {
+    const noOverflow = async () => {
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
+        `Page overflows at ${page.viewportSize().width}px`);
+    };
+    const monthTotal = label => page.getByText(label, {exact:true}).locator('..');
+    const filterSummary = () => page.locator('summary').filter({hasText:/^Filters/});
+    const openFilters = async () => {
+      const summary = filterSummary();
+      if (!await summary.locator('..').evaluate(node => node.open)) await summary.click();
+      await expect(page.getByLabel('Specific day')).toBeVisible();
+    };
+    for (const width of [320,390,1280]) {
       await page.setViewportSize({width,height:1000}); await page.goto(url);
       await expect(page.getByRole('heading',{name:'Financial Daily Log'})).toBeVisible();
+      await expect(page.locator('article')).toHaveCount(4);
       await expect(page.getByRole('link',{name:'Bills to pay',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=bills');
-      await expect(page.getByRole('link',{name:'Manage payment',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=income&id=income');
-      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
+      await expect(monthTotal('Income received')).toContainText('$1,500.25');
+      await expect(monthTotal('Expenses & bills')).toContainText('$74.85');
+      await expect(monthTotal('Income less expenses')).toContainText('$1,425.40');
+      await expect(page.getByText('1 transaction needs review · excluded from totals.',{exact:true})).toBeVisible();
+      await noOverflow();
       await page.screenshot({path:path.join(dir,`daily-log-${width}.png`),fullPage:true});
+
+      const incomeArticle = page.locator('article').filter({hasText:'Sample customer'});
+      const incomeDetails = incomeArticle.locator(':scope > details');
+      const incomeSummary = incomeDetails.locator(':scope > summary');
+      await expect(incomeDetails).toHaveJSProperty('open',false);
+      await expect(incomeSummary).toContainText('Sample customer');
+      await expect(incomeSummary).toContainText('$1,500.25');
+      await expect(incomeArticle.getByRole('link',{name:'Manage payment',exact:true})).toBeHidden();
+      // Native summary controls must work without a pointer and expose their
+      // existing management links only when the row is expanded.
+      await incomeSummary.focus();
+      await page.keyboard.press('Enter');
+      await expect(incomeDetails).toHaveJSProperty('open',true);
+      await expect(incomeArticle.getByRole('link',{name:'Manage payment',exact:true})).toBeVisible();
+      await expect(incomeArticle.getByRole('link',{name:'Manage payment',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=income&id=income');
+      await expect(incomeArticle).toContainText('123');
+      await noOverflow();
+      await incomeSummary.focus();
+      await page.keyboard.press('Space');
+      await expect(incomeDetails).toHaveJSProperty('open',false);
+      await expect(incomeArticle.getByRole('link',{name:'Manage payment',exact:true})).toBeHidden();
+
+      const reviewArticle = page.locator('article').filter({hasText:'Review supplier'});
+      await expect(reviewArticle.locator('summary')).toContainText(/Needs review/i);
+      await expect(reviewArticle.getByRole('link',{name:'Review & assign',exact:true})).toBeHidden();
+      await reviewArticle.locator('summary').click();
+      await expect(reviewArticle.getByRole('link',{name:'Review & assign',exact:true})).toBeVisible();
+      await expect(reviewArticle.getByRole('link',{name:'Review & assign',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=review-expenses&id=review');
+      await expect(monthTotal('Expenses & bills')).toContainText('$74.85');
+      await noOverflow();
+
+      await expect(page.getByLabel('Specific day')).toBeHidden();
+      await expect(page.getByLabel('Job',{exact:true})).toBeHidden();
+      await filterSummary().focus();
+      await page.keyboard.press('Enter');
+      await expect(filterSummary().locator('..')).toHaveJSProperty('open',true);
+      await expect(page.getByLabel('Specific day')).toBeVisible();
+      await noOverflow();
       await page.getByLabel('Transaction type').selectOption('income');
       await expect(page.locator('article')).toHaveCount(1);
+      await expect(monthTotal('Income received')).toContainText('$1,500.25');
+      await expect(monthTotal('Expenses & bills')).toContainText('$0.00');
       await page.getByRole('button',{name:'Clear filters'}).click();
       await page.getByLabel('Search', {exact:true}).fill('Review supplier');
       await expect(page.locator('article')).toHaveCount(1);
+      await expect(monthTotal('Expenses & bills')).toContainText('$0.00');
       await page.getByRole('button',{name:'Clear filters'}).click();
+      await openFilters();
       await page.getByLabel('Specific day').fill('2026-09-17');
       await expect(page.locator('article')).toHaveCount(1);
       await expect(page.locator('article')).toContainText('-$25.15');
+      await expect(page.locator('article summary')).toContainText('Expense credit');
+      await expect(monthTotal('Expenses & bills')).toContainText('-$25.15');
+      await expect(monthTotal('Income less expenses')).toContainText('$25.15');
       await page.getByRole('button',{name:'Clear filters'}).click();
+      await openFilters();
       await page.getByLabel('Job',{exact:true}).selectOption('unassigned');
       await expect(page.getByText('No transactions for this selection')).toBeVisible();
       await page.getByRole('button',{name:'+ Add expense',exact:true}).click();
       await expect(page.getByText('Existing bill workflow')).toBeVisible();
       await page.getByRole('button',{name:'+ Record income',exact:true}).click();
       await expect(page.getByText('Existing income workflow')).toBeVisible();
+
+      await page.goto(url+'?stress');
+      const largeArticle = page.locator('article').filter({hasText:longVendor});
+      await expect(largeArticle.locator('summary')).toContainText(longVendor);
+      await expect(largeArticle.locator('summary')).toContainText('$12,345,678.90');
+      await noOverflow();
+      await largeArticle.locator('summary').click();
+      await expect(largeArticle).toContainText('Special-order materials');
+      await noOverflow();
+      await page.screenshot({path:path.join(dir,`daily-log-stress-${width}.png`),fullPage:true});
     }
     await page.goto(url+'?failed');
     await expect(page.getByRole('alert')).toContainText('couldn’t load');
@@ -119,6 +201,6 @@ async function browserTest() {
     await page.getByRole('button',{name:'Close',exact:true}).click();
     assert.equal(await page.evaluate(()=>window.closedUrl),'/finances/daily-log?month=2026-09');
     assert.deepEqual(errors,[]);
-    console.log('PASS: mobile/desktop overflow, filters, empty/error states, capture entry points. Screenshots: .finance-preview/');
+    console.log('PASS: 320/390/1280px overflow, keyboard transaction expansion, collapsed actions and filters, unchanged credits/review totals, long-name/large-amount layout, empty/error states and capture entry points. Screenshots: .finance-preview/');
   } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }
 }
