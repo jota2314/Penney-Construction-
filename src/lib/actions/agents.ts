@@ -7,7 +7,10 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
+import { SelectionError } from "@/lib/selections/service";
+import { applySelectionSuggestion, SELECTION_SUGGESTION_KIND } from "@/lib/selections/suggestions";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { resolveVendorType } from "@/lib/finance/spend-category";
@@ -96,6 +99,10 @@ export async function reviewSuggestion(
       .eq("id", id)
       .single();
 
+    if (suggestion?.kind === SELECTION_SUGGESTION_KIND) {
+      return approveSelectionSuggestion(supabase, id, user.id);
+    }
+
     if (suggestion && suggestion.status === "pending" && suggestion.kind === "invoice") {
       const acted = await logInvoiceFromPayload(
         supabase,
@@ -116,6 +123,56 @@ export async function reviewSuggestion(
     .eq("id", id);
 
   if (error) return { error: error.message };
+  revalidatePath("/command-center/agents");
+  return {};
+}
+
+/**
+ * Approving an email suggestion for the selections log applies it through the
+ * selections service (the same rules and history row as any other update).
+ * It is claimed first so a double click or two people can't apply it twice;
+ * if the ladder refuses it, it goes back to pending and the refusal is shown.
+ */
+async function approveSelectionSuggestion(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+  userId: string
+): Promise<{ error?: string }> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("full_name, email, role")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!profile || profile.role === "field") {
+    return { error: "Only the office can approve selections changes." };
+  }
+
+  const { data: claimed } = await supabase
+    .from("agent_suggestions")
+    .update({ status: "approved", reviewed_at: new Date().toISOString(), reviewed_by: userId })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("project_id, payload")
+    .maybeSingle();
+  if (!claimed) return { error: "This suggestion was already reviewed." };
+
+  try {
+    await applySelectionSuggestion(createAdminClient(), claimed, {
+      name: profile.full_name || profile.email,
+      profileId: userId,
+    });
+  } catch (err) {
+    await supabase
+      .from("agent_suggestions")
+      .update({ status: "pending", reviewed_at: null, reviewed_by: null })
+      .eq("id", id);
+    return {
+      error: err instanceof SelectionError
+        ? err.message
+        : "Couldn't apply it. Check the selections log before trying again.",
+    };
+  }
+
   revalidatePath("/command-center/agents");
   return {};
 }

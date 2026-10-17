@@ -25,6 +25,9 @@ interface CrewData {
 export function AgentCrew({ initial }: { initial: CrewData }) {
   const [data, setData] = useState<CrewData>(initial);
   const [busy, setBusy] = useState<string | null>(null);
+  // An approve that does work (log a bill, apply a selections change) can be
+  // refused; say why instead of silently leaving the card in place.
+  const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     const fresh = await getAgentCrew();
@@ -64,7 +67,13 @@ export function AgentCrew({ initial }: { initial: CrewData }) {
 
   const review = async (id: string, decision: "approved" | "dismissed") => {
     setBusy(id);
-    await reviewSuggestion(id, decision);
+    const res = await reviewSuggestion(id, decision);
+    setReviewErrors((e) => {
+      const next = { ...e };
+      if (res.error) next[id] = res.error;
+      else delete next[id];
+      return next;
+    });
     await refresh();
     setBusy(null);
   };
@@ -113,6 +122,11 @@ export function AgentCrew({ initial }: { initial: CrewData }) {
                         {s.detail && (
                           <p className="text-xs text-muted-foreground">
                             {s.detail}
+                          </p>
+                        )}
+                        {reviewErrors[s.id] && (
+                          <p className="mt-1 rounded bg-rose-500/10 p-1.5 text-xs text-rose-500">
+                            {reviewErrors[s.id]}
                           </p>
                         )}
                       </div>

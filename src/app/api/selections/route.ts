@@ -12,6 +12,7 @@ import {
   updateSelectionItem,
   type Actor,
 } from "@/lib/selections/service";
+import { listPendingSelectionSuggestions } from "@/lib/selections/suggestions";
 
 export const runtime = "nodejs";
 
@@ -67,9 +68,12 @@ export async function POST(request: NextRequest) {
 
     let result: unknown;
     switch (input.action) {
-      case "list":
-        result = { project, ...(await listSelections(admin, project.id, { includeRemoved: input.include_removed })) };
+      case "list": {
+        const log = await listSelections(admin, project.id, { includeRemoved: input.include_removed });
+        // Email suggestions waiting for a person; approving happens in the app.
+        result = { project, ...log, suggestions: await listPendingSelectionSuggestions(admin, project.id, log.items) };
         break;
+      }
       case "allowance":
         result = { project, ...(await allowanceCheck(admin, project.id)) };
         break;
