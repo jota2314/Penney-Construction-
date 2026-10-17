@@ -27,7 +27,7 @@ export async function getInspectionSchedule(projectId: string): Promise<{
     const { supabase } = await officeClient();
     const [inspections, milestones, history] = await Promise.all([
       supabase.from("project_inspections").select("id,project_id,name,status,schedule_phase_id,scheduled_for,completed_at,notes,is_final,updated_at").eq("project_id", projectId).order("sort_order"),
-      supabase.from("schedule_phases").select("id,name,status,start_date,end_date,actual_completed_at").eq("project_id", projectId).or("phase_scope.eq.master,phase_scope.is.null").eq("event_type", "inspection").order("sort_order"),
+      supabase.from("schedule_phases").select("id,name,status,start_date,end_date,actual_completed_at,updated_at").eq("project_id", projectId).or("phase_scope.eq.master,phase_scope.is.null").eq("event_type", "inspection").order("sort_order"),
       supabase.from("inspection_schedule_history").select("id,inspection_id,created_at,source,before_record,after_record").eq("project_id", projectId).order("created_at", { ascending: false }).limit(100),
     ]);
     for (const result of [inspections, milestones, history]) if (result.error) throw new Error(result.error.message);
@@ -59,14 +59,14 @@ export async function saveInspectionSchedule(input: {
 }
 
 export async function linkInspectionSchedule(input: {
-  id: string; projectId: string; phaseId: string | null; authority: "inspection" | "schedule"; expectedUpdatedAt: string;
+  id: string; projectId: string; phaseId: string | null; authority: "inspection" | "schedule"; expectedUpdatedAt: string; phaseExpectedUpdatedAt: string | null;
 }) {
   try {
-    const parsed = z.object({ id: uuid, projectId: uuid, phaseId: uuid.nullable(), authority: z.enum(["inspection", "schedule"]), expectedUpdatedAt: z.string().datetime({ offset: true }) }).parse(input);
+    const parsed = z.object({ id: uuid, projectId: uuid, phaseId: uuid.nullable(), authority: z.enum(["inspection", "schedule"]), expectedUpdatedAt: z.string().datetime({ offset: true }), phaseExpectedUpdatedAt: z.string().datetime({ offset: true }).nullable() }).parse(input);
     const { supabase } = await officeClient();
     const { data: row } = await supabase.from("project_inspections").select("id").eq("id", parsed.id).eq("project_id", parsed.projectId).single();
     if (!row) throw new Error("Inspection not found on this project.");
-    const { error } = await supabase.rpc("link_project_inspection_schedule", { p_inspection_id: parsed.id, p_phase_id: parsed.phaseId, p_authority: parsed.authority, p_expected_updated_at: parsed.expectedUpdatedAt });
+    const { error } = await supabase.rpc("link_project_inspection_schedule", { p_inspection_id: parsed.id, p_phase_id: parsed.phaseId, p_authority: parsed.authority, p_expected_updated_at: parsed.expectedUpdatedAt, p_phase_expected_updated_at: parsed.phaseExpectedUpdatedAt });
     if (error) throw new Error(error.message);
     revalidateSchedule(parsed.projectId);
     return { error: null };

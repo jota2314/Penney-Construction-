@@ -143,7 +143,7 @@ function InspectionEditor({ row, milestones, history, onSaved }: {
           </label>
           <p className="text-xs text-muted-foreground">Linking reconciles the two records using your choice. Historical entries are never matched by their names.</p>
         </>}
-        <button type="button" className={button} disabled={busy || (!phaseId && !row.schedule_phase_id)} onClick={() => void mutate(() => linkInspectionSchedule({ id: row.id, projectId: row.project_id, phaseId: phaseId || null, authority, expectedUpdatedAt: row.updated_at }))}>{phaseId ? "Link and reconcile" : "Remove link"}</button>
+        <button type="button" className={button} disabled={busy || (!phaseId && !row.schedule_phase_id)} onClick={() => void mutate(() => linkInspectionSchedule({ id: row.id, projectId: row.project_id, phaseId: phaseId || null, authority, expectedUpdatedAt: row.updated_at, phaseExpectedUpdatedAt: selectedPhase?.updated_at ?? null }))}>{phaseId ? "Link and reconcile" : "Remove link"}</button>
         {!row.schedule_phase_id && <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <label className="space-y-1 text-xs">If no milestone exists, choose its date
             <input className={control} type="date" value={newDate} disabled={busy} onChange={event => setNewDate(event.target.value)} />

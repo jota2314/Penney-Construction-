@@ -18,6 +18,7 @@ export interface InspectionMilestone {
   start_date: string;
   end_date: string;
   actual_completed_at: string | null;
+  updated_at: string;
 }
 export interface InspectionHistory {
   id: string;

@@ -18,6 +18,7 @@ select set_config('request.jwt.claim.sub','${owner}',false);
 select set_config('request.jwt.claim.role','authenticated',false);
 `);
 await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261017003312_inspection_schedule_lifecycle.sql', import.meta.url), 'utf8'));
+await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261017005636_inspection_link_concurrency.sql', import.meta.url), 'utf8'));
 after(async () => db.close());
 
 const one = async (sql, params=[]) => {
@@ -26,7 +27,7 @@ const one = async (sql, params=[]) => {
     ? (['start_date','end_date','planned_start_date','planned_end_date','scheduled_for'].includes(key) ? value.toISOString().slice(0,10) : value.toISOString()) : value]));
 };
 const inspection = id => one('select *,updated_at::text as updated_at from public.project_inspections where id=$1',[id]);
-const phase = id => one('select * from public.schedule_phases where id=$1',[id]);
+const phase = id => one('select *,updated_at::text as updated_at from public.schedule_phases where id=$1',[id]);
 const iso = value => value == null ? null : new Date(value).toISOString();
 async function createPhase(name='Inspection — Rough Plumbing', options={}) {
   return one(`insert into public.schedule_phases(project_id,name,start_date,end_date,planned_start_date,planned_end_date,event_type,phase_scope,created_by)
@@ -48,7 +49,8 @@ async function update(id,patch,expected) {
 }
 async function link(id,phaseId,authority='inspection') {
   const row=await inspection(id);
-  return one('select * from public.link_project_inspection_schedule($1,$2,$3,$4)',[id,phaseId,authority,row.updated_at]);
+  const target=phaseId ? await phase(phaseId) : null;
+  return one('select * from public.link_project_inspection_schedule($1,$2,$3,$4,$5)',[id,phaseId,authority,row.updated_at,target?.updated_at ?? null]);
 }
 
 test('new master inspection creates an exact linked checklist, never name-matches history',async()=>{
@@ -124,6 +126,33 @@ test('office can create a missing milestone without duplicate checklist rows',as
   assert.equal((await one('select count(*)::int n from public.project_inspections')).n,count.n);
 });
 
+test('historical linking rejects a newer milestone and a missing version without losing completion',async()=>{
+  const p=await historicalPhase(), i=await createInspection();
+  const stale=await phase(p.id);
+  await db.query("update public.schedule_phases set status='completed',updated_at=clock_timestamp() where id=$1",[p.id]);
+  const completed=await phase(p.id);
+  for (const authority of ['inspection','schedule']) {
+    await assert.rejects(()=>db.query('select * from public.link_project_inspection_schedule($1,$2,$3,$4,$5)',[i.id,p.id,authority,i.updated_at,stale.updated_at]),/Milestone changed/);
+  }
+  await assert.rejects(()=>db.query("select * from public.link_project_inspection_schedule($1,$2,'inspection',$3)",[i.id,p.id,i.updated_at]),/Milestone changed/);
+  assert.deepEqual(await phase(p.id),completed); assert.equal((await inspection(i.id)).schedule_phase_id,null);
+  await link(i.id,p.id,'schedule');
+  assert.equal((await inspection(i.id)).status,'passed'); assert.deepEqual(await phase(p.id),completed);
+});
+
+test('keeping schedule authority preserves its hold, date range, confirmation and baseline exactly',async()=>{
+  const p=await historicalPhase(), i=await createInspection('Previously passed',{status:'passed',completedAt:'2026-10-12T14:00:00Z'});
+  await db.query("update public.schedule_phases set status='on_hold',start_date='2026-10-18',end_date='2026-10-19',is_confirmed=true,is_manually_scheduled=true where id=$1",[p.id]);
+  const held=await phase(p.id);
+  await link(i.id,p.id,'schedule');
+  assert.deepEqual(await phase(p.id),held);
+  const linked=await inspection(i.id); assert.equal(linked.status,'pending'); assert.equal(linked.completed_at,null); assert.equal(linked.scheduled_for,'2026-10-18');
+  await update(i.id,{notes:'Waiting for access'});
+  const afterNote=await phase(p.id); assert.equal(afterNote.status,'on_hold'); assert.equal(afterNote.end_date,'2026-10-19');
+  await update(i.id,{status:'failed'}); await update(i.id,{status:'pending'});
+  assert.equal((await phase(p.id)).status,'not_started');
+});
+
 test('cross-project, daily and duplicate links are rejected with no partial edits',async()=>{
   const i=await createInspection(); const other=await historicalPhase('Other',{project:otherProject});
   await assert.rejects(()=>link(i.id,other.id),/this project/);
@@ -138,11 +167,13 @@ test('database guards deny field and anonymous writes; history cannot be edited'
   const p=await createPhase();
   const i=await one('select * from public.project_inspections where schedule_phase_id=$1',[p.id]);
   assert.equal((await one("select has_function_privilege('anon','public.update_project_inspection_lifecycle(uuid,jsonb,timestamptz,text,uuid)','execute') allowed")).allowed,false);
+  assert.equal((await one("select has_function_privilege('anon','public.link_project_inspection_schedule(uuid,uuid,text,timestamptz,timestamptz)','execute') allowed")).allowed,false);
   await db.exec(`set role authenticated;select set_config('request.jwt.claim.sub','${field}',false)`);
   try {
     await assert.rejects(()=>db.query("insert into public.project_inspections(project_id,name) values($1,'Unauthorized')",[project]),/row-level security|Office schedule access/);
     await assert.rejects(()=>db.query("update public.schedule_phases set status='completed' where id=$1",[p.id]),/Office schedule access/);
     await assert.rejects(()=>db.query('select public.update_project_inspection_lifecycle($1,$2,$3)',[i.id,'{"status":"passed"}',i.updated_at]),/Office schedule access/);
+    await assert.rejects(()=>db.query("select public.link_project_inspection_schedule($1,null,'inspection',$2,null)",[i.id,i.updated_at]),/Office schedule access/);
   } finally { await db.exec(`reset role;select set_config('request.jwt.claim.sub','${owner}',false)`); }
   await db.exec('set role authenticated');
   try {
