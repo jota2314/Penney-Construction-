@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { applyClientTap } from "@/lib/selections/service";
 
 export const runtime = "nodejs";
 
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
     // Items on a PUBLISHED sheet of this project only.
     const { data: item } = await supabase
       .from("client_selection_items")
-      .select("id, name, client_selection_sheets!inner(project_id, published_at, title, revision)")
+      .select("id, name, log_item_id, client_selection_sheets!inner(project_id, published_at, title, revision)")
       .eq("id", id)
       .eq("client_selection_sheets.project_id", portal.project_id)
       .not("client_selection_sheets.published_at", "is", null)
@@ -90,6 +91,15 @@ export async function POST(request: NextRequest) {
       .update({ client_action: value, client_action_at: value ? now : null, client_action_by: value ? who : null, updated_at: now })
       .eq("id", item.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // The same tap updates the selections log row this sheet item came from,
+    // recorded as a client_tap (best effort: the client's tap is already saved).
+    if (item.log_item_id) {
+      try {
+        await applyClientTap(supabase, item.log_item_id as string, action as "approve" | "remove" | "clear", who);
+      } catch (e) {
+        console.error("[portal/action] selections log update failed", e);
+      }
+    }
     note = action === "approve"
       ? `Client approved "${item.name}" on the selection sheet.`
       : action === "remove"

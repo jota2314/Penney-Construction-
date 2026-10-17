@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Eye, EyeOff, FileText, Loader2, Plus, Send, Undo2, Trash2, ListChecks } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { SelectionsLogPanel } from "./selections-log-panel";
 
 // What the client sees on the portal, and the switch that puts it there.
 // Selection sheets and documents are STAGED until someone presses Publish;
@@ -184,6 +185,8 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
       <a href={`/portal-preview/${projectId}`} target="_blank" rel="noreferrer" className="block">
         <Button variant="outline" className="w-full gap-2"><Eye className="h-4 w-4" /> Preview as client (drafts included)</Button>
       </a>
+
+      <SelectionsLogPanel projectId={projectId} onDrafted={load} />
 
       {/* What the client changed from their phone */}
       {clientChanges > 0 && (
