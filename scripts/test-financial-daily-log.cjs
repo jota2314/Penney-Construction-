@@ -7,6 +7,7 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, filename);
 const { buildDailyLog, logTotals, validMonth } = require('../src/lib/finance/daily-log.ts');
+const { resolveDailyLogAttachments } = require('../src/lib/finance/daily-log-attachments.ts');
 const { canAccessPath } = require('../src/lib/auth/role-access.ts');
 const base = { id: 'a', project_id: 'job', amount: 100, description: 'Materials', source: 'office_entry', review_status: 'ok', projects: { name: 'Sample addition', project_number: 'DEMO-01' }, vendor_name: 'Sample supplier', invoice_number: '100', invoice_date: '2026-09-18', split_group_id: null, payment_status: 'unpaid', payment_method: 'check', duplicate_of_id: null };
 const payment = { id: 'income', project_id: 'job', amount: 1500.25, description: 'Progress payment', source: 'manual', review_status: 'ok', projects: base.projects, payer_name: 'Sample customer', received_date: '2026-09-18', reference_number: '123', method: 'check' };
@@ -21,6 +22,21 @@ let rows = buildDailyLog([
 assert.equal(rows.length, 3);
 assert.equal(rows.find(r => r.id === 'expense:a').allocations, 2);
 assert.deepEqual(logTotals(rows), { income: 1500.25, expenses: 74.85, difference: 1425.40, review: 0 });
+const attachmentRows = buildDailyLog([
+  { ...base, split_group_id: 'with-files', amount: 50 },
+  { ...base, id: 'split-photo', split_group_id: 'with-files', amount: 25, attachment_storage_path: 'receipts/shared.jpg' },
+  { ...base, id: 'split-photo-copy', split_group_id: 'with-files', amount: 25, attachment_storage_path: 'receipts/shared.jpg' },
+  { ...base, id: 'split-pdf', split_group_id: 'with-files', amount: 0, attachment_storage_path: 'receipts/invoice.pdf' },
+], [{ ...payment, photo_storage_path: 'payments/check.jpg', photo_bucket: 'field-captures' }]);
+assert.deepEqual(attachmentRows.find(r => r.kind === 'expense').attachments, [
+  { path: 'receipts/shared.jpg', bucket: null, url: null },
+  { path: 'receipts/invoice.pdf', bucket: null, url: null },
+]);
+assert.deepEqual(attachmentRows.find(r => r.kind === 'income').attachments, [
+  { path: 'payments/check.jpg', bucket: 'field-captures', url: null },
+]);
+assert.deepEqual(logTotals(attachmentRows), { income: 1500.25, expenses: 100, difference: 1400.25, review: 0 });
+assert.deepEqual(buildDailyLog([base], [payment]).map(r => r.attachments), [[], []]);
 rows = buildDailyLog([base, { ...base, id: 'repeat' }], []);
 assert.equal(rows.length, 1);
 assert.equal(rows[0].amount, 100);
@@ -39,9 +55,63 @@ assert.equal(validMonth('2026-13', '2026-09-19'), '2026-09');
 assert.equal(validMonth('2024-02', '2026-09-19'), '2024-02');
 for (const role of ['field', 'project_manager', null]) assert.equal(canAccessPath({ role }, '/finances/daily-log'), false);
 assert.equal(canAccessPath({ role: 'owner' }, '/finances/daily-log'), true);
-console.log('PASS: splits, credits, duplicate/conflicting submissions, exclusions, review, missing dates, month validation and access');
+console.log('PASS: splits, credits, grouped attachment preservation/deduplication, duplicate/conflicting submissions, exclusions, review, missing dates, month validation and access');
 
-if (process.argv.includes('--browser')) browserTest().catch(e => { console.error(e); process.exitCode = 1; });
+attachmentResolutionTest().then(() => process.argv.includes('--browser') ? browserTest() : undefined).catch(e => { console.error(e); process.exitCode = 1; });
+
+async function attachmentResolutionTest() {
+  const expense = attachmentRows.find(r => r.kind === 'expense');
+  const income = attachmentRows.find(r => r.kind === 'income');
+  const records = [expense, { ...expense, id:'expense:shared-file', attachments:[expense.attachments[0]] }, income];
+  const original = JSON.stringify(records);
+  const calls = [];
+  const db = { storage: { from: bucket => ({ createSignedUrls: async (paths, ttl) => {
+    calls.push({bucket,paths,ttl});
+    return { data: paths.map(file => {
+      const found = (bucket === 'email-attachments' && file === 'receipts/shared.jpg')
+        || (bucket === 'project-files' && file === 'receipts/invoice.pdf')
+        || (bucket === 'field-captures' && file === 'payments/check.jpg');
+      return found ? {path:file,signedUrl:`https://files.test/${bucket}/${file}`} : {path:file,error:'Object not found'};
+    }) };
+  } }) } };
+  const resolved = await resolveDailyLogAttachments(db, records);
+  assert.equal(JSON.stringify(records), original, 'Signing must not mutate source records');
+  assert.deepEqual(logTotals(resolved), logTotals(records));
+  assert.deepEqual(resolved[0].attachments.map(a => a.bucket), ['email-attachments','project-files']);
+  assert.equal(resolved[0].attachments[0].url, resolved[1].attachments[0].url);
+  assert.equal(resolved[2].attachments[0].bucket, 'field-captures');
+  assert.ok(resolved.every(r => r.attachments.every(a => a.url)));
+  assert.deepEqual(calls.map(c => [c.bucket,c.paths]), [
+    ['email-attachments',['receipts/shared.jpg','receipts/invoice.pdf']],
+    ['project-files',['receipts/invoice.pdf']],
+    ['field-captures',['payments/check.jpg']],
+  ]);
+  assert.ok(calls.every(call => call.ttl === 3600));
+
+  const paymentFailures = [
+    { ...income, attachments:[{path:'receipts/shared.jpg',bucket:null,url:null}] },
+    { ...income, id:'income:explicit-bucket', attachments:[{path:'receipts/shared.jpg',bucket:'payment-proofs',url:null}] },
+  ];
+  calls.length = 0;
+  const noFallback = await resolveDailyLogAttachments(db, paymentFailures);
+  assert.ok(noFallback.every(r => r.attachments[0].url === null));
+  assert.deepEqual(calls.map(c => c.bucket), ['payment-proofs'], 'Income files must only use their recorded bucket');
+
+  const outage = { storage: { from: () => ({ createSignedUrls: async () => { throw Error('Storage unavailable'); } }) } };
+  const unavailable = await resolveDailyLogAttachments(outage, resolved);
+  assert.ok(unavailable.every(r => r.attachments.every(a => a.url === null)));
+  assert.deepEqual(logTotals(unavailable), logTotals(records), 'Storage outages must not hide or change financial activity');
+
+  const many = [{ ...expense, attachments:Array.from({length:105}, (_,i) => ({path:`receipts/${i}.jpg`,bucket:null,url:null})) }];
+  const batches = [];
+  await resolveDailyLogAttachments({ storage:{ from:bucket => ({createSignedUrls:async paths => {
+    batches.push({bucket,count:paths.length});
+    return {data:paths.map(file => ({path:file,signedUrl:`https://files.test/${file}`}))};
+  }})}}, many);
+  assert.deepEqual(batches, [{bucket:'email-attachments',count:100},{bucket:'email-attachments',count:5}]);
+  console.log('PASS: private attachment bucket fallback, per-bucket deduplication/batching, explicit payment buckets, signing outages and unchanged financial totals');
+}
+
 async function browserTest() {
   // npm install --prefix .finance-preview --no-save esbuild
   const esbuild = require(process.env.ESBUILD_PATH || '../.finance-preview/node_modules/esbuild');
@@ -50,10 +120,16 @@ async function browserTest() {
   const dir = path.resolve('.finance-preview');
   fs.mkdirSync(dir, { recursive: true });
   const fixture = buildDailyLog([
-    base,
-    { ...base, id: 'credit', invoice_number: 'credit', amount: -25.15, invoice_date: '2026-09-17' },
-    { ...base, id: 'review', invoice_number: 'review', amount: 222, review_status: 'needs_review', vendor_name: 'Review supplier' },
-  ], [payment]);
+    { ...base, attachment_storage_path: 'receipts/invoice-photo.jpg' },
+    { ...base, id: 'credit', invoice_number: 'credit', amount: -25.15, invoice_date: '2026-09-17', attachment_storage_path: 'receipts/invoice.pdf' },
+    { ...base, id: 'review', invoice_number: 'review', amount: 222, review_status: 'needs_review', vendor_name: 'Review supplier', attachment_storage_path: 'receipts/unavailable.jpg' },
+  ], [{ ...payment, photo_storage_path: 'payments/check.jpg', photo_bucket: 'field-captures' }]).map(record => ({
+    ...record,
+    attachments: record.attachments.map(attachment => ({
+      ...attachment,
+      url: attachment.path.includes('unavailable') ? null : attachment.path.endsWith('.pdf') ? '/invoice.pdf' : '/invoice-photo.svg',
+    })),
+  }));
   // Stress only the presentation: the ordinary fixture keeps its original
   // credit and review totals, and all records stay inside this local preview.
   const longVendor = 'Metropolitan Architectural Restoration and Specialized Construction Supply Company';
@@ -77,8 +153,14 @@ async function browserTest() {
   await esbuild.build({ entryPoints: [path.join(dir, 'entry.jsx')], bundle: true, outfile: path.join(dir,'bundle.js'), jsx: 'automatic', alias: { '@': path.resolve('src') }, plugins: [{ name: 'read-only-fixture', setup(build) { build.onResolve({ filter: /^(next\/(link|navigation)|@\/lib\/actions\/deposit-capture|@\/components\/(invoices\/bill-drop|field-feed\/deposit-capture))$/ }, () => ({path: path.join(dir,'mocks.jsx')})); } }] });
   const css = await require('postcss')([require('@tailwindcss/postcss')()]).process(fs.readFileSync('src/app/globals.css','utf8'), {from: path.resolve('src/app/globals.css')});
   fs.writeFileSync(path.join(dir,'style.css'),css.css);
+  // Serve the real PDF.js modules and actual documents, so opening a preview
+  // proves the viewer rendered a file rather than only mounting a mock dialog.
+  const pdf = fixturePdf();
   const server = http.createServer((req,res) => {
-    if (req.url.startsWith('/bundle.js') || req.url.startsWith('/style.css')) {res.setHeader('Content-Type', req.url.includes('.css') ? 'text/css' : 'application/javascript'); res.end(fs.readFileSync(path.join(dir,req.url.slice(1))));}
+    if (req.url === '/invoice.pdf') {res.setHeader('Content-Type','application/pdf');res.end(pdf);}
+    else if (req.url === '/invoice-photo.svg') {res.setHeader('Content-Type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800"><rect width="600" height="800" fill="white"/><text x="40" y="80" font-size="30">Sample invoice photo</text><text x="40" y="145" font-size="24">Sample supplier</text><text x="40" y="205" font-size="24">Materials $100.00</text></svg>');}
+    else if (['/pdf-5.4.296.min.mjs','/pdf.worker.min.mjs'].includes(req.url)) {res.setHeader('Content-Type','application/javascript');res.end(fs.readFileSync(path.resolve('public',req.url.slice(1))));}
+    else if (req.url.startsWith('/bundle.js') || req.url.startsWith('/style.css')) {res.setHeader('Content-Type', req.url.includes('.css') ? 'text/css' : 'application/javascript'); res.end(fs.readFileSync(path.join(dir,req.url.slice(1))));}
     else {res.setHeader('Content-Type','text/html');res.end('<!doctype html><html class="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');}
   });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
@@ -103,6 +185,9 @@ async function browserTest() {
       await page.setViewportSize({width,height:1000}); await page.goto(url);
       await expect(page.getByRole('heading',{name:'Financial Daily Log'})).toBeVisible();
       await expect(page.locator('article')).toHaveCount(4);
+      await expect(page.getByRole('link',{name:'Previous month',exact:true})).toHaveAttribute('href','/finances?section=activity&month=2026-08');
+      await expect(page.getByRole('link',{name:'Next month',exact:true})).toHaveAttribute('href','/finances?section=activity&month=2026-10');
+      await expect(page.getByRole('link',{name:'This month',exact:true})).toHaveAttribute('href','/finances?section=activity&month=2026-09');
       await expect(page.getByRole('link',{name:'Bills to pay',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=bills');
       await expect(monthTotal('Income received')).toContainText('$1,500.25');
       await expect(monthTotal('Expenses & bills')).toContainText('$74.85');
@@ -111,6 +196,51 @@ async function browserTest() {
       await noOverflow();
       await page.screenshot({path:path.join(dir,`daily-log-${width}.png`),fullPage:true});
 
+      // Each original document opens with one tap while its financial details
+      // remain collapsed. Closing the viewer keeps the current search intact.
+      await page.getByLabel('Search', {exact:true}).fill('Sample supplier');
+      await expect(page.locator('article')).toHaveCount(2);
+      const photoButton = page.getByRole('button',{name:'View invoice photo for Sample supplier',exact:true});
+      await expect(photoButton).toBeVisible();
+      const photoArticle = page.locator('article').filter({has:photoButton});
+      await expect(photoArticle.locator(':scope > details')).toHaveJSProperty('open',false);
+      await photoButton.click();
+      const imageDialog = page.getByRole('dialog');
+      await expect(imageDialog).toBeVisible();
+      await expect(imageDialog.locator('img')).toBeVisible();
+      await expect.poll(() => imageDialog.locator('img').evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+      await noOverflow();
+      if (width === 390) await page.screenshot({path:path.join(dir,'invoice-photo-390.png'),fullPage:true});
+      await page.getByRole('button',{name:'Close image',exact:true}).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(photoButton).toBeFocused();
+      await expect(page.getByLabel('Search', {exact:true})).toHaveValue('Sample supplier');
+      await expect(photoArticle.locator(':scope > details')).toHaveJSProperty('open',false);
+      const pdfButton = page.getByRole('button',{name:'View invoice PDF for Sample supplier',exact:true});
+      const pdfArticle = page.locator('article').filter({has:pdfButton});
+      await expect(pdfArticle.locator(':scope > details')).toHaveJSProperty('open',false);
+      await pdfButton.click();
+      const pdfDialog = page.getByRole('dialog');
+      await expect(pdfDialog).toBeVisible();
+      await expect(pdfDialog.locator('canvas')).toBeVisible();
+      await expect(pdfDialog.locator('[aria-busy="false"]')).toHaveCount(1);
+      await expect.poll(() => pdfDialog.locator('canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0)).toBe(true);
+      await noOverflow();
+      if (width === 390) await page.screenshot({path:path.join(dir,'invoice-pdf-390.png'),fullPage:true});
+      await page.getByRole('button',{name:'Close PDF',exact:true}).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(pdfButton).toBeFocused();
+      await expect(page.getByLabel('Search', {exact:true})).toHaveValue('Sample supplier');
+      await expect(pdfArticle.locator(':scope > details')).toHaveJSProperty('open',false);
+      await page.getByRole('button',{name:'Clear filters'}).click();
+      await expect(monthTotal('Expenses & bills')).toContainText('$74.85');
+
+      const unavailableArticle = page.locator('article').filter({hasText:'Review supplier'});
+      await expect(unavailableArticle.getByText('Invoice preview unavailable',{exact:true})).toBeVisible();
+      await expect(unavailableArticle.locator(':scope > details')).toHaveJSProperty('open',false);
+      await unavailableArticle.getByRole('button',{name:'Refresh preview',exact:true}).click();
+      assert.equal(await page.evaluate(()=>window.refreshed),true);
+
       const incomeArticle = page.locator('article').filter({hasText:'Sample customer'});
       const incomeDetails = incomeArticle.locator(':scope > details');
       const incomeSummary = incomeDetails.locator(':scope > summary');
@@ -118,6 +248,10 @@ async function browserTest() {
       await expect(incomeSummary).toContainText('Sample customer');
       await expect(incomeSummary).toContainText('$1,500.25');
       await expect(incomeArticle.getByRole('link',{name:'Manage payment',exact:true})).toBeHidden();
+      await incomeArticle.getByRole('button',{name:'View payment photo for Sample customer',exact:true}).click();
+      await expect(page.getByRole('dialog').locator('img')).toBeVisible();
+      await page.getByRole('button',{name:'Close image',exact:true}).click();
+      await expect(incomeDetails).toHaveJSProperty('open',false);
       // Native summary controls must work without a pointer and expose their
       // existing management links only when the row is expanded.
       await incomeSummary.focus();
@@ -177,6 +311,7 @@ async function browserTest() {
       const largeArticle = page.locator('article').filter({hasText:longVendor});
       await expect(largeArticle.locator('summary')).toContainText(longVendor);
       await expect(largeArticle.locator('summary')).toContainText('$12,345,678.90');
+      await expect(largeArticle.getByText('No invoice attached',{exact:true})).toBeVisible();
       await noOverflow();
       await largeArticle.locator('summary').click();
       await expect(largeArticle).toContainText('Special-order materials');
@@ -201,6 +336,28 @@ async function browserTest() {
     await page.getByRole('button',{name:'Close',exact:true}).click();
     assert.equal(await page.evaluate(()=>window.closedUrl),'/finances/daily-log?month=2026-09');
     assert.deepEqual(errors,[]);
-    console.log('PASS: 320/390/1280px overflow, keyboard transaction expansion, collapsed actions and filters, unchanged credits/review totals, long-name/large-amount layout, empty/error states and capture entry points. Screenshots: .finance-preview/');
+    console.log('PASS: 320/390/1280px overflow, one-tap photo and real PDF rendering, retained filters/collapsed details, unavailable/missing attachments, keyboard transaction expansion, unchanged credits/review totals, long-name/large-amount layout, empty/error states and capture entry points. Screenshots: .finance-preview/');
   } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }
+}
+
+function fixturePdf() {
+  const stream = 'BT /F1 22 Tf 35 235 Td (Sample supplier invoice) Tj 0 -42 Td (Materials: $100.00) Tj ET';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+  pdf += offsets.slice(1).map(offset => `${String(offset).padStart(10,'0')} 00000 n \n`).join('');
+  pdf += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf);
 }

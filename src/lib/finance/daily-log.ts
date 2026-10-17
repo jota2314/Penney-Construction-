@@ -10,10 +10,15 @@ export type DailyExpense = Common & {
   vendor_name: string; invoice_number: string | null; invoice_date: string | null;
   split_group_id: string | null; payment_status: string | null;
   payment_method: string | null; duplicate_of_id: string | null;
+  attachment_storage_path?: string | null;
 };
 export type DailyIncome = Common & {
   payer_name: string | null; received_date: string | null;
   reference_number: string | null; method: string | null;
+  photo_storage_path?: string | null; photo_bucket?: string | null;
+};
+export type LogAttachment = {
+  path: string; bucket: string | null; url: string | null;
 };
 export type LogTransaction = {
   id: string; date: string | null; kind: "income" | "expense"; name: string;
@@ -22,6 +27,7 @@ export type LogTransaction = {
   projects: { id: string; label: string }[]; href: string;
   allocations: number; submissions: number;
   recordIds: string[];
+  attachments: LogAttachment[];
 };
 
 function projectsFor(rows: Common[]) {
@@ -50,6 +56,9 @@ export function buildDailyLog(expenses: DailyExpense[], income: DailyIncome[]): 
       source: r.source ?? "Penney record", method: r.payment_method, projects: projectsFor(g.rows),
       href: `/spent/${r.id}`, allocations: g.allocationCount, submissions: g.submissionCount,
       recordIds: g.rows.map(row => row.id),
+      // A split's first allocation may have no file; retain every original
+      // attachment without showing the same receipt once per allocation.
+      attachments: [...new Set(g.rows.map(row => row.attachment_storage_path).filter((path): path is string => Boolean(path)))].map(path => ({ path, bucket: null, url: null })),
     };
   });
   for (const r of income.filter(r => !fromQuickBooks(r.source))) {
@@ -61,6 +70,7 @@ export function buildDailyLog(expenses: DailyExpense[], income: DailyIncome[]): 
       href: r.review_status === "needs_review" ? "/payments/review" : r.project_id ? `/projects/${r.project_id}?tab=finances` : "/payments",
       allocations: 1, submissions: 1,
       recordIds: [r.id],
+      attachments: r.photo_storage_path ? [{ path: r.photo_storage_path, bucket: r.photo_bucket ?? null, url: null }] : [],
     });
   }
   return result.sort((a,b) => (b.date ?? "").localeCompare(a.date ?? "") || a.id.localeCompare(b.id));
