@@ -5,18 +5,22 @@ import { Button } from "@/components/ui/button";
 import { ClipboardList, FilePlus2, History, Loader2 } from "lucide-react";
 import { PRICE_SOURCE_LABEL, STAGE_LABEL, type PriceSource, type Stage } from "@/lib/selections/ladder";
 import type { AllowanceLine, SelectionItem } from "@/lib/selections/service";
+import type { PendingSelectionSuggestion } from "@/lib/selections/suggestions";
+import { SelectionSuggestions } from "./selection-suggestions";
 
 // The job's selections log, as the team sees it: every product with its step
 // on the ladder, its price and where that price came from, and the allowance
 // check. Updates come from Claude sessions through the Penney MCP (the
-// /selections skill); this panel reads, and drafts sheet revisions for the
-// portal (drafts stay hidden until someone publishes them below).
+// /selections skill) and from the job's email as suggestions a person
+// approves here; this panel reads, reviews those, and drafts sheet revisions
+// for the portal (drafts stay hidden until someone publishes them below).
 
 interface LogData {
   items: SelectionItem[];
   counts: Record<string, number>;
   allowances: { estimate_id: string | null; lines: AllowanceLine[] };
   recent_changes: { item_id: string; at: string; actor: string; action: string; changes: Record<string, [unknown, unknown]>; source: string | null; note: string | null }[];
+  suggestions: PendingSelectionSuggestion[];
 }
 
 const STAGE_COLOR: Record<Stage, string> = {
@@ -55,6 +59,10 @@ export function SelectionsLogPanel({ projectId, onDrafted }: { projectId: string
     let alive = true;
     fetchLog().then((d) => { if (alive) setData(d); }).catch((e) => { if (alive) setError(String(e.message || e)); });
     return () => { alive = false; };
+  }, [fetchLog]);
+
+  const reload = useCallback(() => {
+    fetchLog().then(setData).catch((e) => setError(String(e.message || e)));
   }, [fetchLog]);
 
   async function draftSheet() {
@@ -98,9 +106,10 @@ export function SelectionsLogPanel({ projectId, onDrafted }: { projectId: string
         )}
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
-        One record per product. Updated through Claude (the /selections skill and Penney MCP); every change keeps who, when and the source.
+        One record per product. Updated through Claude (the /selections skill and Penney MCP) and approved email suggestions; every change keeps who, when and the source.
       </p>
       {message && <p className="mb-2 rounded bg-muted/50 p-2 text-xs">{message}</p>}
+      <SelectionSuggestions suggestions={data.suggestions ?? []} onChanged={reload} />
 
       {data.items.length === 0 ? (
         <p className="text-xs text-muted-foreground">No items yet. Ask Claude to load this job&apos;s selections.</p>

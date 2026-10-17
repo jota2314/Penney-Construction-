@@ -5,6 +5,7 @@ import { GmailRateLimitError, recordGmailThrottle } from "@/lib/google/throttle"
 import { syncAndNotifyUser } from "@/lib/email/sync-and-notify";
 import { classifyPendingInbound } from "@/lib/email/classify";
 import { runEstimatingIntake } from "@/lib/email/estimating-intake";
+import { runSelectionSuggestions } from "@/lib/selections/email-suggestions";
 
 export const maxDuration = 60;
 
@@ -16,6 +17,9 @@ const TIME_BUDGET_MS = 45_000;
 // ate the tick. It stops early enough to leave estimating intake its window.
 const CATCH_UP_MIN_MS = 8_000;
 const ESTIMATING_RESERVE_MS = 8_000;
+// Selections suggestions read a quote PDF per call; they take what's left
+// after classification and wait for a quieter tick otherwise.
+const SELECTIONS_MIN_MS = 12_000;
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
@@ -123,6 +127,18 @@ export async function GET(request: Request) {
     }
   }
 
+  // Job mail with picks, quotes, orders or deliveries becomes SUGGESTED
+  // selections-log updates for a person to approve. Never applied here.
+  let selections = null;
+  const selectionsDeadline = startedAt + TIME_BUDGET_MS - ESTIMATING_RESERVE_MS;
+  if (selectionsDeadline - Date.now() >= SELECTIONS_MIN_MS) {
+    try {
+      selections = await runSelectionSuggestions(supabase, { deadlineMs: selectionsDeadline });
+    } catch (err) {
+      selections = { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   let estimating = null;
   if (timeLeft() > 3000) {
     try { estimating = await runEstimatingIntake(supabase, Date.now() + Math.min(timeLeft() - 1000, 8000)); }
@@ -133,6 +149,7 @@ export async function GET(request: Request) {
     totalStored,
     results,
     classified,
+    selections,
     estimating,
   });
 }

@@ -46,7 +46,7 @@ export type EditableField = (typeof EDITABLE)[number];
 export type ItemPatch = Partial<Pick<SelectionItem, EditableField>>;
 
 const num = (v: unknown) => (v == null ? null : Number(v));
-function normalize(row: Record<string, unknown>): SelectionItem {
+export function normalize(row: Record<string, unknown>): SelectionItem {
   return { ...(row as unknown as SelectionItem), quantity: num(row.quantity), unit_price: num(row.unit_price), ext_price: num(row.ext_price) };
 }
 
