@@ -2,6 +2,11 @@ import { sendEmailWithAccessToken } from "@/lib/google/gmail";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerGmailAccessToken } from "@/lib/notifications/tagged-mentions";
+import {
+  TEST_MODE_RECIPIENT_EMAILS,
+  isNotificationTestMode,
+  testModeSubject,
+} from "@/lib/notifications/test-mode";
 
 export type ScheduleNotifyKind = "confirmed" | "updated";
 
@@ -21,6 +26,9 @@ const SCHEDULE_CC = [
   "jbetancur@penneyconstructioninc.com",
   "rpenney@penneyconstructioninc.com",
 ];
+
+/** The sub portal, on the host whose cookie the login sets (the apex 307s). */
+const SUB_PORTAL_URL = "https://www.penneyconstruction.build/sub/portal";
 
 type EmployeeRecipient = {
   id: string;
@@ -184,15 +192,20 @@ export async function notifySchedulePhaseAssignees(opts: {
         lines.push(`Dates: ${range}`);
       }
       if (addressLine) lines.push(`Address: ${addressLine}`);
-      if (opts.kind === "confirmed" && phase.notes) lines.push(`Notes: ${phase.notes}`);
+      // Phase notes are written for the crew and the office ("Marcio is on
+      // Jackling 10/26-11/3: confirm"), so they never go to a sub.
+      if (opts.kind === "confirmed" && phase.notes && !isSub) lines.push(`Notes: ${phase.notes}`);
       if (opts.kind === "confirmed" && phase.confirmed_with)
         lines.push(`Confirmed with: ${phase.confirmed_with}`);
       if (isSub) {
-        // Subs answer from their portal — one tap, no reply needed.
+        // Subs answer from their portal — one tap, no reply needed. The link
+        // opens this job's screen; the www host keeps his login cookie.
         lines.push(
           "",
           "Please open your portal and tap Confirm (or Can't make it) so the office knows:",
-          "https://www.penneyconstruction.build/sub",
+          phase.project_id
+            ? `${SUB_PORTAL_URL}?job=${encodeURIComponent(phase.project_id)}`
+            : SUB_PORTAL_URL,
         );
       }
       lines.push("", "Questions? Reply to this email or call the office.");
@@ -216,11 +229,15 @@ export async function notifySchedulePhaseAssignees(opts: {
       .maybeSingle();
     const fromEmail = actorProfile?.email ?? SCHEDULE_CC[0];
 
+    // Test mode: every schedule email goes to the tester alone, marked, with
+    // no CC and no push, so a TEST walk-through never reaches a real person.
+    const testMode = await isNotificationTestMode(admin);
+
     const seenEmails = new Set<string>();
     await Promise.allSettled(
       recipients.map(async (recipient) => {
         // Push to crew with a linked profile regardless of email.
-        if (recipient.profileId) {
+        if (recipient.profileId && !testMode) {
           try {
             const delivered = await sendPushToUser(admin, recipient.profileId, {
               title: subject,
@@ -246,21 +263,23 @@ export async function notifySchedulePhaseAssignees(opts: {
         seenEmails.add(emailKey);
         if (!accessToken) return;
 
+        const to = testMode ? TEST_MODE_RECIPIENT_EMAILS[0] : recipient.email;
+        const sentSubject = testMode ? testModeSubject(`${subject} (for ${recipient.email})`) : subject;
         try {
           await sendEmailWithAccessToken(
             {
-              to: recipient.email,
-              cc: SCHEDULE_CC.filter((cc) => cc.toLowerCase() !== emailKey).join(", "),
-              subject,
+              to,
+              cc: testMode ? "" : SCHEDULE_CC.filter((cc) => cc.toLowerCase() !== emailKey).join(", "),
+              subject: sentSubject,
               body: buildBody(recipient.greeting, recipient.isSub),
             },
             accessToken,
           );
-          result.emailed.push(recipient.name);
+          result.emailed.push(testMode ? `${recipient.name} (test mode: sent to ${to})` : recipient.name);
           await admin.from("email_logs").insert({
-            subject,
+            subject: sentSubject,
             from_email: fromEmail,
-            to_email: recipient.email,
+            to_email: to,
             direction: "outbound",
             category: "internal",
             project_id: phase.project_id,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarOff,
@@ -101,6 +101,49 @@ interface Pending {
 
 const EMPTY_PENDING: Pending = { adds: {}, hides: new Set() };
 
+// Sub rows added by hand stay on this computer's board ("+ Sub row") until
+// unpinned, so a sub doesn't vanish between adding the row and booking him.
+// Stored per browser; a blocked localStorage falls back to this tab's memory.
+const PINNED_SUBS_KEY = "penney:crew-board:sub-rows";
+const PINNED_SUBS_EVENT = "penney:crew-board-sub-rows";
+let pinnedSubsMemory = "[]";
+
+function subscribePinnedSubs(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(PINNED_SUBS_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(PINNED_SUBS_EVENT, onChange);
+  };
+}
+
+function pinnedSubsSnapshot(): string {
+  try {
+    return window.localStorage.getItem(PINNED_SUBS_KEY) ?? pinnedSubsMemory;
+  } catch {
+    return pinnedSubsMemory;
+  }
+}
+
+function savePinnedSubs(ids: string[]) {
+  pinnedSubsMemory = JSON.stringify(Array.from(new Set(ids)));
+  try {
+    window.localStorage.setItem(PINNED_SUBS_KEY, pinnedSubsMemory);
+  } catch {
+    /* private window or blocked storage: memory only */
+  }
+  window.dispatchEvent(new Event(PINNED_SUBS_EVENT));
+}
+
+function parsePinnedSubs(raw: string): string[] {
+  try {
+    const v: unknown = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function cellKey(person: CrewPerson, date: string) {
   return `${person.key}|${date}`;
 }
@@ -129,7 +172,15 @@ export function BoardCrew({ data }: Props) {
   const [confirmNew, setConfirmNew] = useState(true);
   const [query, setQuery] = useState("");
   const [jobQuery, setJobQuery] = useState("");
-  const [extraSubs, setExtraSubs] = useState<CrewPerson[]>([]);
+  const pinnedRaw = useSyncExternalStore(subscribePinnedSubs, pinnedSubsSnapshot, () => "[]");
+  const pinnedSubIds = useMemo(() => parsePinnedSubs(pinnedRaw), [pinnedRaw]);
+  const extraSubs = useMemo<CrewPerson[]>(() => {
+    const byId = new Map(data.subs.map((s) => [s.id, s]));
+    return pinnedSubIds.flatMap((id) => {
+      const s = byId.get(id);
+      return s ? [{ key: `sub:${s.id}`, kind: "sub" as const, id: s.id, name: s.name, title: "Sub" }] : [];
+    });
+  }, [pinnedSubIds, data.subs]);
   const [editing, setEditing] = useState<{ person: CrewPerson; date: string } | null>(null);
   const [addingSub, setAddingSub] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -628,7 +679,7 @@ export function BoardCrew({ data }: Props) {
           {subChoices.length > 0 && (
             <Button variant="outline" size="sm" className="h-8" onClick={() => setAddingSub(true)}>
               <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
-              Add sub
+              Sub row
             </Button>
           )}
         </div>
@@ -725,6 +776,17 @@ export function BoardCrew({ data }: Props) {
                     <div className="flex items-center gap-1.5 text-[13px] font-medium leading-tight">
                       {person.kind === "sub" && <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />}
                       <span className="truncate">{person.name}</span>
+                      {person.kind === "sub" && pinnedSubIds.includes(person.id) && (
+                        <button
+                          type="button"
+                          onClick={() => savePinnedSubs(pinnedSubIds.filter((id) => id !== person.id))}
+                          className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                          title="Take this sub row off the board (any scheduled days stay)"
+                          aria-label={`Remove the ${person.name} row`}
+                        >
+                          <X className="h-3 w-3" aria-hidden />
+                        </button>
+                      )}
                     </div>
                     {person.title && <div className="truncate text-[10px] text-muted-foreground">{person.title}</div>}
                   </td>
@@ -905,7 +967,7 @@ export function BoardCrew({ data }: Props) {
         choices={subChoices}
         onClose={() => setAddingSub(false)}
         onPick={(s) => {
-          setExtraSubs((prev) => [...prev, { key: `sub:${s.id}`, kind: "sub", id: s.id, name: s.name, title: "Sub" }]);
+          savePinnedSubs([...pinnedSubIds, s.id]);
           setAddingSub(false);
         }}
       />
@@ -1064,7 +1126,8 @@ function AddSubDialog({
         <DialogHeader>
           <DialogTitle>Add a sub to the board</DialogTitle>
           <DialogDescription>
-            They get a row so you can schedule them by the day. The row sticks once they have work on it.
+            They get a row on this computer&apos;s board so you can schedule them by the day. Dragging a job onto their
+            row never emails them.
           </DialogDescription>
         </DialogHeader>
         <Command className="rounded-md border border-border">

@@ -1,319 +1,47 @@
-import { NextRequest, NextResponse } from "next/server";
-import { SUB_PORTAL_COOKIE, getSubPortalClient } from "@/lib/sub-portal/auth";
-import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
-import { fieldVisibleFiles } from "@/lib/crew/crew-visibility";
+import { NextRequest, NextResponse, after } from "next/server";
+import { resolveSubAccessResult } from "@/lib/sub-portal/access";
+import { refuseStaffBrowser } from "@/lib/sub-portal/staff-guard";
+import { loadSubHome } from "@/lib/sub-portal/load-sub-portal-data";
 
 export const runtime = "nodejs";
 
-const FILE_TTL = 60 * 60 * 4;
-// What a sub is allowed to see from the project file cabinet. Pricing,
-// contracts, client invoices, photos, etc. never leave here.
-const SUB_FILE_CATEGORIES = ["construction_drawings", "specs", "permits"];
-
-interface SignedFile {
-  id: string;
-  project_id: string;
-  filename: string;
-  category: string;
-  url: string;
-}
+// A "visit" is a GET at least this long after the last one, so a phone that
+// refetches on every wake (and dev strict mode's double fetch) counts once.
+const VIEW_GAP_MS = 30 * 60 * 1000;
 
 /**
- * GET /api/sub-portal
- * Loads the sub-facing view for one subcontractor, resolved from the login
- * cookie (or ?token= for a direct link). Everything is scoped to that sub:
- * their phases, their quotes/awards (their dollars only), and the drawings,
- * specs and selections for the jobs they're on. No client pricing, no
- * payments, no other subs' numbers — ever.
+ * GET /api/sub-portal → SubHomePayload (src/lib/sub-portal/payload.ts).
+ *
+ * The signed-in sub's Today, Dates, Money and Needed, resolved from the login
+ * cookie. Light on purpose: posts and photos load per job from
+ * /api/sub-portal/job/[id]. Everything is scoped to his company by the
+ * loader: no client pricing, no other subs' numbers.
  */
 export async function GET(request: NextRequest) {
-  const token =
-    request.cookies.get(SUB_PORTAL_COOKIE)?.value ||
-    new URL(request.url).searchParams.get("token");
-  if (!token) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  const staff = await refuseStaffBrowser(request);
+  if (staff) return staff;
 
-  const supabase = getSubPortalClient();
+  const resolved = await resolveSubAccessResult(request);
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const { supabase, subId, accessId, lastViewedAt, viewCount } = resolved.access;
 
-  const { data: access } = await supabase
-    .from("sub_portal_access")
-    .select("id, subcontractor_id, enabled, view_count")
-    .eq("token", token)
-    .maybeSingle();
-  if (!access) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  if (!access.enabled) {
-    return NextResponse.json(
-      { error: "Portal access has been turned off. Contact Penney Construction." },
-      { status: 403 }
-    );
+  const data = await loadSubHome({ subId, accessId, mode: "sub", supabase });
+  if (!data) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  // Count a real visit at most once per 30 minutes. The WHERE re-checks the
+  // gap, so two GETs at once can't both bump it.
+  const lastMs = lastViewedAt ? new Date(lastViewedAt).getTime() : 0;
+  if (!lastViewedAt || Number.isNaN(lastMs) || Date.now() - lastMs > VIEW_GAP_MS) {
+    const cutoff = new Date(Date.now() - VIEW_GAP_MS).toISOString();
+    after(async () => {
+      const { error } = await supabase
+        .from("sub_portal_access")
+        .update({ last_viewed_at: new Date().toISOString(), view_count: viewCount + 1 })
+        .eq("id", accessId)
+        .or(`last_viewed_at.is.null,last_viewed_at.lt."${cutoff}"`);
+      if (error) console.error("[sub-portal] view count update failed", error.message);
+    });
   }
 
-  const subId = access.subcontractor_id;
-
-  await supabase
-    .from("sub_portal_access")
-    .update({
-      last_viewed_at: new Date().toISOString(),
-      view_count: (access.view_count || 0) + 1,
-    })
-    .eq("id", access.id);
-
-  const [subRes, phasesRes, quotesRes, bidsRes, awardedRes, invoiceProjectsRes, projSubsRes] = await Promise.all([
-    supabase
-      .from("subcontractors")
-      .select("company_name, contact_name")
-      .eq("id", subId)
-      .single(),
-    supabase
-      .from("schedule_phases")
-      .select(
-        "id, project_id, name, description, start_date, end_date, status, event_type, notes, is_confirmed, sub_response, sub_responded_at, created_by_sub_id",
-      )
-      .contains("assigned_sub_ids", [subId])
-      .order("start_date", { ascending: true, nullsFirst: false }),
-    supabase
-      .from("quote_requests")
-      .select("id, project_id, project_name, trade, scope_description, amount, status, document_type, attachment_storage_path, sent_at, received_at")
-      .eq("subcontractor_id", subId),
-    supabase
-      .from("subcontractor_bids")
-      .select("id, amount, status, attachment_storage_path, bid_packages(project_id, name, trade, scope_of_work)")
-      .eq("subcontractor_id", subId)
-      .in("status", ["invited", "submitted", "accepted"]),
-    supabase
-      .from("estimate_line_items")
-      .select("id, description, proposal_description, awarded_cost, estimates!inner(project_id)")
-      .eq("awarded_subcontractor_id", subId),
-    // Their billing history and per-project contract rows also mark a job as
-    // theirs — most legacy work is only recorded as invoices. These are the
-    // sub's OWN bills to us, so they see their own dollars: what they billed,
-    // what we've paid, what's still open. Never another sub's, never client
-    // pricing.
-    supabase
-      .from("invoices")
-      .select("id, project_id, invoice_number, invoice_date, description, amount, paid_amount, payment_status, paid_date")
-      .eq("subcontractor_id", subId)
-      .not("project_id", "is", null)
-      .order("invoice_date", { ascending: false }),
-    supabase
-      .from("project_subcontractors")
-      .select("project_id")
-      .eq("subcontractor_id", subId),
-  ]);
-
-  const sub = subRes.data;
-  if (!sub) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-
-  type BidPkg = { project_id: string; name: string; trade: string | null; scope_of_work: string | null };
-  const bids = (bidsRes.data || []).map((b) => ({
-    id: b.id as string,
-    amount: b.amount as number | null,
-    status: b.status as string,
-    attachment_storage_path: b.attachment_storage_path as string | null,
-    pkg: (Array.isArray(b.bid_packages) ? b.bid_packages[0] : b.bid_packages) as BidPkg | null,
-  }));
-  const awarded = (awardedRes.data || []).map((li) => ({
-    id: li.id as string,
-    description: li.description as string,
-    scope: (li.proposal_description as string | null) ?? null,
-    amount: (li.awarded_cost as number | null) ?? null,
-    project_id: (Array.isArray(li.estimates) ? li.estimates[0] : li.estimates)?.project_id as string,
-  }));
-
-  // Every project this sub touches, from any direction.
-  const projectIds = new Set<string>();
-  (phasesRes.data || []).forEach((p) => projectIds.add(p.project_id));
-  (quotesRes.data || []).forEach((q) => q.project_id && projectIds.add(q.project_id));
-  bids.forEach((b) => b.pkg?.project_id && projectIds.add(b.pkg.project_id));
-  awarded.forEach((a) => a.project_id && projectIds.add(a.project_id));
-  (invoiceProjectsRes.data || []).forEach((i) => i.project_id && projectIds.add(i.project_id));
-  (projSubsRes.data || []).forEach((ps) => ps.project_id && projectIds.add(ps.project_id));
-  const ids = Array.from(projectIds);
-
-  const [projectsRes, filesRes, dismissedRes, overridesRes, selectionsRes, inspectionsRes, scopeRes] = await Promise.all([
-    ids.length
-      ? supabase
-          .from("projects")
-          .select("id, name, project_number, address, city, state, status")
-          .in("id", ids)
-      : Promise.resolve({ data: [] as never[] }),
-    ids.length
-      ? supabase
-          .from("project_files")
-          .select("id, project_id, filename, category, mime_type, size, storage_path, storage_bucket")
-          .in("project_id", ids)
-          .in("category", SUB_FILE_CATEGORIES)
-          .order("created_at", { ascending: false })
-      : Promise.resolve({ data: [] as never[] }),
-    ids.length
-      ? supabase.from("project_dismissed_files").select("project_id, file_key").in("project_id", ids)
-      : Promise.resolve({ data: [] as never[] }),
-    ids.length
-      ? supabase
-          .from("project_file_overrides")
-          .select("project_id, file_key, category, display_name")
-          .in("project_id", ids)
-      : Promise.resolve({ data: [] as never[] }),
-    ids.length
-      ? supabase
-          .from("client_selections")
-          .select("id, project_id, category, description, status, selected_value")
-          .in("project_id", ids)
-          .order("sort_order", { ascending: true })
-      : Promise.resolve({ data: [] as never[] }),
-    ids.length
-      ? supabase
-          .from("project_inspections")
-          .select("id, project_id, name, status, completed_at, is_final, notes")
-          .in("project_id", ids)
-          .order("sort_order", { ascending: true })
-      : Promise.resolve({ data: [] as never[] }),
-    // The sub's trades on each job's current estimate — scope text only, the
-    // function returns no pricing columns by design.
-    ids.length
-      ? supabase.rpc("sub_portal_trade_scope", { p_sub_id: subId, p_project_ids: ids })
-      : Promise.resolve({ data: [] as never[] }),
-  ]);
-
-  // Same rules as the crew Job Folder, job by job: the office Files tab's
-  // removals and renames, no money or paperwork, and only the latest revision
-  // of each drawing set (Jorge 10/16 — Weidlein showed R1 through R7).
-  type FileRow = {
-    id: string;
-    project_id: string;
-    filename: string;
-    category: string;
-    mime_type: string | null;
-    size: number | null;
-    storage_path: string;
-    storage_bucket: string | null;
-  };
-  type OverrideRow = { project_id: string; file_key: string; category: string | null; display_name: string | null };
-  const byProject = <R extends { project_id: string }>(rows: R[]) => {
-    const map = new Map<string, R[]>();
-    rows.forEach((r) => map.set(r.project_id, [...(map.get(r.project_id) ?? []), r]));
-    return map;
-  };
-  const dismissedByProject = byProject((dismissedRes.data || []) as { project_id: string; file_key: string }[]);
-  const overridesByProject = byProject((overridesRes.data || []) as OverrideRow[]);
-  const fileRows = Array.from(byProject((filesRes.data || []) as FileRow[])).flatMap(([projectId, rows]) =>
-    fieldVisibleFiles(
-      rows,
-      (dismissedByProject.get(projectId) ?? []).map((d) => d.file_key),
-      overridesByProject.get(projectId) ?? [],
-    ).filter((f) => SUB_FILE_CATEGORIES.includes(f.category)),
-  );
-
-  // Sign them, honoring each row's bucket (rows without storage_bucket live in
-  // project-files — the 7/30 backfill default).
-  const signedFiles: SignedFile[] = [];
-  await Promise.all(
-    ["project-files", "email-attachments"].map(async (bucket) => {
-      const rows = fileRows.filter(
-        (f) => (f.storage_bucket ?? "project-files") === bucket && f.storage_path
-      );
-      if (!rows.length) return;
-      const { data } = await cachedSignedUrls(
-        supabase,
-        bucket,
-        rows.map((r) => r.storage_path),
-        FILE_TTL,
-      );
-      const urlByPath = new Map(
-        (data || []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]),
-      );
-      rows.forEach((r) => {
-        const url = urlByPath.get(r.storage_path);
-        if (url) {
-          signedFiles.push({ id: r.id, project_id: r.project_id, filename: r.filename, category: r.category, url });
-        }
-      });
-    })
-  );
-
-  // Their own quote/bid PDFs (uploaded quotes land in email-attachments).
-  const signPdf = async (path: string | null) => {
-    if (!path) return null;
-    const { data } = await supabase.storage.from("email-attachments").createSignedUrl(path, FILE_TTL);
-    return data?.signedUrl ?? null;
-  };
-  const quotes = await Promise.all(
-    (quotesRes.data || []).map(async (q) => ({
-      id: q.id,
-      project_id: q.project_id,
-      project_name: q.project_name,
-      trade: q.trade,
-      scope: q.scope_description,
-      amount: q.amount === null ? null : Number(q.amount),
-      status: q.status,
-      document_type: q.document_type,
-      received_at: q.received_at ?? q.sent_at ?? null,
-      pdf_url: await signPdf(q.attachment_storage_path),
-    }))
-  );
-  const bidCards = await Promise.all(
-    bids.map(async (b) => ({
-      id: b.id,
-      project_id: b.pkg?.project_id ?? null,
-      package_name: b.pkg?.name ?? null,
-      trade: b.pkg?.trade ?? null,
-      scope: b.pkg?.scope_of_work ?? null,
-      amount: b.amount === null ? null : Number(b.amount),
-      status: b.status,
-      pdf_url: await signPdf(b.attachment_storage_path),
-    }))
-  );
-
-  return NextResponse.json({
-    sub: { company_name: sub.company_name, contact_name: sub.contact_name },
-    projects: (projectsRes.data || []).map((p) => ({
-      id: p.id,
-      name: p.name,
-      project_number: p.project_number,
-      address: [p.address, p.city, p.state].filter(Boolean).join(", "),
-      status: p.status,
-    })),
-    phases: (phasesRes.data || []).map((p) => ({
-      id: p.id,
-      project_id: p.project_id,
-      name: p.name,
-      description: p.description,
-      start_date: p.start_date,
-      end_date: p.end_date,
-      status: p.status,
-      notes: p.notes ?? null,
-      // Office put it live (the "you're scheduled" email went out) — until
-      // then it's tentative and the sub isn't asked to answer.
-      is_confirmed: !!p.is_confirmed,
-      sub_response: (p.sub_response as "confirmed" | "declined" | null) ?? null,
-      sub_responded_at: p.sub_responded_at ?? null,
-      mine: p.created_by_sub_id === subId,
-    })),
-    quotes,
-    bids: bidCards,
-    awarded: awarded.map((a) => ({
-      ...a,
-      amount: a.amount === null ? null : Number(a.amount),
-    })),
-    files: signedFiles,
-    selections: selectionsRes.data || [],
-    inspections: inspectionsRes.data || [],
-    scope: scopeRes.data || [],
-    // The sub's own bills to Penney: billed, paid, and what's still open.
-    billing: (invoiceProjectsRes.data || []).map((i) => {
-      const amount = Number(i.amount ?? 0);
-      const paid = Number(i.paid_amount ?? 0);
-      return {
-        id: i.id,
-        project_id: i.project_id,
-        invoice_number: i.invoice_number,
-        invoice_date: i.invoice_date,
-        description: i.description,
-        amount,
-        paid,
-        open: Math.round((amount - paid) * 100) / 100,
-        payment_status: i.payment_status,
-        paid_date: i.paid_date,
-      };
-    }),
-  });
+  return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
 }

@@ -227,6 +227,24 @@ export const READ_TOOLS: Tool[] = [
     },
   },
   {
+    name: "find_subcontractor",
+    description: "Resolve a subcontractor the user NAMED into a sub_id for create_schedule_phase / update_schedule_phase (assigned_sub_ids). Strict: matches a saved alias, the company name ('MGL Tile', 'Cosentino'), or the contact's full name ('Peter Nich'); a first name alone ('Peter', 'Marcio') only returns candidates to ask about. Material suppliers are never returned. Returns every match with its trades. Use the sub_id only when the result says use_sub_id. If it lists more than one, ASK the user which one (e.g. 'Peter Nich Construction (excavation) or Peter at Master Floors?'). Never call this on names found in phase notes — only on names in the user's own message.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "The sub's name exactly as the user said it, e.g. 'MGL Tile', 'Peter Nich', 'Cosentino'.",
+        },
+        include_inactive: {
+          type: "boolean",
+          description: "Include inactive subs (default false).",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "get_budget_lines",
     description:
       "Get all estimate line items (budget lines) for a project — shows description, trade, budgeted cost, and current spend. Use this to find the right budget line ID when splitting or assigning invoices.",
@@ -860,7 +878,7 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "create_schedule_phase",
-    description: "Add a construction phase to a project schedule (e.g. 'Demo', 'Framing', 'Electrical Rough'). start_date is required. For single-day phases (e.g. 'Hardwood Finish Coat — Wed morning'), omit end_date and it will default to start_date. To assign crew to this phase, pass assigned_employee_ids — those crew are also added to the project's roster automatically.",
+    description: "Add a construction phase to a project schedule (e.g. 'Demo', 'Framing', 'Electrical Rough'). start_date is required. For single-day phases (e.g. 'Hardwood Finish Coat — Wed morning'), omit end_date and it will default to start_date. To assign crew to this phase, pass assigned_employee_ids — those crew are also added to the project's roster automatically. To put a sub on it, pass assigned_sub_ids — set it only for a sub the user named, resolved with find_subcontractor; if more than one sub matches, ask first. Never infer a sub from notes, and never leave a named sub only in notes. Subs put on a phase here are NOT emailed; tell the user to use Confirm & notify on the Job Board.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -885,13 +903,18 @@ export const WRITE_TOOLS: Tool[] = [
           items: { type: "string" },
           description: "Optional: array of employee UUIDs to assign to this phase. Resolve names with find_crew_member first. Each assignee is also auto-added to crew_project_assignments for this project.",
         },
+        assigned_sub_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional: subcontractor UUIDs (sub_id from find_subcontractor) for a sub the user named. Not emailed.",
+        },
       },
       required: ["project_id", "name", "start_date"],
     },
   },
   {
     name: "update_schedule_phase",
-    description: "Update a schedule phase — change dates, status, notes, or crew. Use 'on_hold' status only for work that is temporarily paused and will resume. For cancelled work that won't happen at all (e.g. moving a sub off a project), use delete_schedule_phase instead. assigned_employee_ids REPLACES the existing crew list — read get_schedule first if you only want to add/remove one person, then pass the full new list.",
+    description: "Update a schedule phase — change dates, status, notes, crew, or subs. Use 'on_hold' status only for work that is temporarily paused and will resume. For cancelled work that won't happen at all (e.g. moving a sub off a project), use delete_schedule_phase instead. assigned_employee_ids and assigned_sub_ids each REPLACE the existing list — read get_schedule first if you only want to add/remove one, then pass the full new list. Set assigned_sub_ids only for a sub the user named, resolved with find_subcontractor (ask when more than one matches); never infer a sub from notes. Subs added here are NOT emailed — tell the user to use Confirm & notify on the Job Board. Subs already on a confirmed phase get the date-change email when its dates move.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -904,6 +927,11 @@ export const WRITE_TOOLS: Tool[] = [
           type: "array",
           items: { type: "string" },
           description: "Full replacement list of employee UUIDs assigned to this phase. Pass [] to unassign everyone. Resolve names with find_crew_member first. New assignees are auto-added to the project roster (existing roster entries are never removed here).",
+        },
+        assigned_sub_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Full replacement list of subcontractor UUIDs on this phase (sub_id from find_subcontractor). Pass [] to take every sub off. Not emailed.",
         },
       },
       required: ["phase_id"],

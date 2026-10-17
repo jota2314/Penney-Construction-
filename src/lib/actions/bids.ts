@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { subContractLockMessage } from "@/lib/subs/agreements";
+import { subContractLockedMessage } from "@/lib/sub-portal/statuses";
 import type { BidPackageStatus, SubBidStatus } from "@/types/database";
 
 // ── Queries ──────────────────────────────
@@ -173,6 +175,12 @@ export async function markBidResent(bidId: string) {
 
 // ── Award ──────────────────────────────
 
+/**
+ * Award a bid. Refused, before anything changes, once a signed work order
+ * has locked that sub's amount on the job ("Locked by WO-046-01; use a sub
+ * change order"); the job link is written first so a refusal there leaves
+ * the package untouched.
+ */
 export async function awardBid(bidId: string, bidPackageId: string) {
   const supabase = await createClient();
 
@@ -191,6 +199,22 @@ export async function awardBid(bidId: string, bidPackageId: string) {
     .eq("id", bidPackageId)
     .single();
   if (!pkg) return { error: "Bid package not found" };
+
+  // The job link (contract amount) first: a signed work order's lock refuses it.
+  if (bid.amount && pkg.project_id && bid.subcontractor_id) {
+    const locked = await subContractLockMessage(supabase, pkg.project_id, bid.subcontractor_id);
+    if (locked) return { error: locked };
+    const { error: linkError } = await supabase.from("project_subcontractors").upsert(
+      {
+        project_id: pkg.project_id,
+        subcontractor_id: bid.subcontractor_id,
+        contract_amount: bid.amount,
+        status: "active",
+      },
+      { onConflict: "project_id,subcontractor_id" }
+    );
+    if (linkError) return { error: subContractLockedMessage(linkError) ?? linkError.message };
+  }
 
   // Mark this bid as selected
   const { error: selectError } = await supabase
@@ -212,18 +236,6 @@ export async function awardBid(bidId: string, bidPackageId: string) {
     .from("bid_packages")
     .update({ status: "awarded" })
     .eq("id", bidPackageId);
-
-  // Upsert project_subcontractors with contract amount
-  if (bid.amount) {
-    await supabase.from("project_subcontractors").upsert(
-      {
-        project_id: pkg.project_id,
-        subcontractor_id: bid.subcontractor_id,
-        contract_amount: bid.amount,
-      },
-      { onConflict: "project_id,subcontractor_id" }
-    );
-  }
 
   // Write the awarded outcome back to the line item (the spine).
   // After this, the estimate row knows which sub won, at what price, when.

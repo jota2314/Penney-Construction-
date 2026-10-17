@@ -7,6 +7,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { deriveCurrentScheduleActivity, deriveScheduleHealth, isClockInRow, recentWorkDates, type ScheduleHealthIssue } from "@/lib/schedule/health";
 import { isMasterPhase } from "@/lib/schedule/progress";
 import { withEffectiveScheduleDates } from "@/lib/schedule/cascade";
+import { subDisplayName } from "@/lib/notifications/sub-field-notify";
 export { isClockInRow } from "@/lib/schedule/health";
 import {
   getSiteForecasts,
@@ -205,10 +206,13 @@ export interface BoardPayment {
 }
 
 export interface BoardCrew {
+  /** The author's profile id, or `sub:{subcontractor_id}` for a sub company. */
   id: string;
   name: string;
   initials: string;
   clockedIn: boolean;
+  /** A sub company (posted, clocked in or checked in at the sign), not a crew member. */
+  isSub?: boolean;
 }
 
 export interface BoardJob {
@@ -336,6 +340,8 @@ interface LogRow {
   id: string;
   project_id: string | null;
   author_id: string | null;
+  /** Set on sub posts and shifts, which have no author_id. */
+  subcontractor_id: string | null;
   text: string | null;
   started_at: string;
   ended_at: string | null;
@@ -502,7 +508,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     ids.length
       ? fetchAllRows<LogRow>((from, to) => supabase
           .from("daily_logs")
-          .select("id, project_id, author_id, text, started_at, ended_at, status")
+          .select("id, project_id, author_id, subcontractor_id, text, started_at, ended_at, status")
           .in("project_id", ids)
           // The whole window, so worked-day ticks reach as far back as it does.
           .gte("started_at", new Date(Date.now() - (DAYS_BACK + 1) * 86400000).toISOString())
@@ -518,7 +524,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
           .not("status", "in", '("approved","rejected","cancelled")')
       : empty,
     supabase.from("employees").select("id, first_name, last_name, profile_id"),
-    supabase.from("subcontractors").select("id, company_name"),
+    supabase.from("subcontractors").select("id, company_name, contact_name"),
     financeIds.length
       ? supabase.from("invoices").select("project_id, amount, paid_amount").in("project_id", financeIds)
       : empty,
@@ -587,11 +593,25 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
   }
 
   const subName = new Map<string, string>();
-  for (const sc of (subRows ?? []) as { id: string; company_name: string | null }[]) {
+  // "MGL Tile Inc (Marcio)": how a sub's post is signed on the board.
+  const subLabel = new Map<string, string>();
+  for (const sc of (subRows ?? []) as { id: string; company_name: string | null; contact_name: string | null }[]) {
     subName.set(sc.id, sc.company_name ?? "");
+    if (sc.company_name) subLabel.set(sc.id, subDisplayName({ company_name: sc.company_name, contact_name: sc.contact_name }));
   }
 
+  // Subs who checked in at the sign today, read alongside the author names
+  // (`.then` starts the request now). Office-read by RLS, which is exactly
+  // who sees the board.
+  const visitsPromise = supabase
+    .from("sub_site_visits")
+    .select("project_id, subcontractor_id")
+    .eq("visit_date", todayStr)
+    .then((res) => (res.data ?? []) as { project_id: string; subcontractor_id: string }[]);
+
   // Author names for field logs come from profiles; one small extra read.
+  // Sub posts have no author_id, and the null filter keeps them out of the
+  // `.in()` (an `in.(null)` took /projects down: 3058dad).
   const authorIds = Array.from(
     new Set(((logRows ?? []) as LogRow[]).map((l) => l.author_id).filter(Boolean) as string[]),
   );
@@ -605,6 +625,20 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       authorName.set(p.id, p.full_name ?? "");
     }
   }
+
+  const visitsByProject = new Map<string, string[]>();
+  for (const v of await visitsPromise) {
+    visitsByProject.set(v.project_id, [...(visitsByProject.get(v.project_id) ?? []), v.subcontractor_id]);
+  }
+
+  /** Who a log is from: the crew member, or the sub company (sub logs have no author). */
+  const logPerson = (l: LogRow): { key: string; name: string; isSub: boolean } | null => {
+    if (l.author_id) return { key: l.author_id, name: authorName.get(l.author_id) || "Crew", isSub: false };
+    if (l.subcontractor_id) {
+      return { key: `sub:${l.subcontractor_id}`, name: subName.get(l.subcontractor_id) || "Sub", isSub: true };
+    }
+    return null;
+  };
 
   const phasesByProject = new Map<string, PhaseRow[]>();
   for (const ph of (phaseRows ?? []) as PhaseRow[]) {
@@ -797,24 +831,32 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       });
     }
 
-    // Who was on site today — a log started today, still open or completed.
+    // Who was on site today — a log started today, still open or completed,
+    // and any sub who checked in at the sign. Subs are keyed on the company.
     const crewSeen = new Map<string, BoardCrew>();
     for (const l of logs) {
       if (easternDate(l.started_at) !== todayStr) continue;
-      if (!l.author_id) continue;
-      const name = authorName.get(l.author_id) || "Crew";
-      const existing = crewSeen.get(l.author_id);
+      const who = logPerson(l);
+      if (!who) continue;
+      const existing = crewSeen.get(who.key);
       const clockedIn = !l.ended_at;
       if (existing) {
         existing.clockedIn = existing.clockedIn || clockedIn;
       } else {
-        crewSeen.set(l.author_id, {
-          id: l.author_id,
-          name,
-          initials: initialsOf(name) || "··",
+        crewSeen.set(who.key, {
+          id: who.key,
+          name: who.name,
+          initials: initialsOf(who.name) || "··",
           clockedIn,
+          ...(who.isSub ? { isSub: true } : {}),
         });
       }
+    }
+    for (const subId of visitsByProject.get(p.id) ?? []) {
+      const key = `sub:${subId}`;
+      if (crewSeen.has(key)) continue;
+      const name = subName.get(subId) || "Sub";
+      crewSeen.set(key, { id: key, name, initials: initialsOf(name) || "··", clockedIn: false, isSub: true });
     }
 
     const lastNarrative = logs.find((l) => l.text && l.text.trim().length > 10);
@@ -929,7 +971,11 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
         ? {
             text: lastNarrative.text!.slice(0, 220),
             at: lastNarrative.started_at,
-            author: authorName.get(lastNarrative.author_id ?? "") || "Crew",
+            author: lastNarrative.author_id
+              ? authorName.get(lastNarrative.author_id) || "Crew"
+              : lastNarrative.subcontractor_id
+                ? subLabel.get(lastNarrative.subcontractor_id) || "Sub"
+                : "Crew",
           }
         : null,
       daysSinceLastLog,

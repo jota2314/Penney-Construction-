@@ -323,7 +323,8 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
 /**
  * The plan comes from the estimate: one master phase per visible line item of
  * the current estimate (admin/permit lines excluded), skipping lines already
- * linked to a phase. Material lines become "Order — …" steps. New steps land
+ * linked to a phase. Material lines become "Order — …" steps. A line awarded to
+ * a sub carries that sub. New steps land
  * at the end of the current plan on the same date, unconfirmed — the portal
  * keeps its completion estimate and shows them as Estimated until they're
  * actually scheduled.
@@ -354,7 +355,7 @@ export async function buildPlanFromEstimate(
   const [{ data: lines }, { data: existing }] = await Promise.all([
     supabase
       .from("estimate_line_items")
-      .select("id, description, sort_order")
+      .select("id, description, sort_order, awarded_subcontractor_id")
       .eq("estimate_id", current.id)
       .eq("is_visible_on_proposal", true)
       .eq("is_section_header", false)
@@ -389,6 +390,10 @@ export async function buildPlanFromEstimate(
       status: "not_started",
       phase_scope: "master",
       estimate_line_item_id: l.id,
+      // The sub awarded the line is who does it. The step lands unconfirmed,
+      // so nobody is emailed until the office confirms it.
+      assigned_sub_ids:
+        l.awarded_subcontractor_id && !isMaterial(l.description) ? [l.awarded_subcontractor_id] : [],
       sort_order: ++sort,
       color: "#3b82f6",
       created_by: user.id,

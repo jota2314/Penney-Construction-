@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
@@ -57,6 +58,7 @@ export default async function SubcontractorsPage() {
       <>
         <Header title="Subcontractors" backHref="/command-center" />
         <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
+          <RolloutLink />
           <SubcontractorListConstruction
             subcontractors={subcontractors}
             schedulePhases={schedulePhases}
@@ -78,8 +80,26 @@ export default async function SubcontractorsPage() {
     <>
       <Header title="Subcontractors" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
+        <RolloutLink />
         <SubcontractorListPrecon subcontractors={subcontractors ?? []} />
       </div>
     </>
+  );
+}
+
+const OFFICE_LINK =
+  "rounded-lg border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-amber-500/60 hover:text-foreground";
+
+/** Into the sub portal rollout list (invites, cells, who shows up) and the agreement templates. */
+function RolloutLink() {
+  return (
+    <div className="flex flex-wrap gap-2 self-start">
+      <Link href="/subcontractors/rollout" className={OFFICE_LINK}>
+        Sub portal rollout ›
+      </Link>
+      <Link href="/subcontractors/agreements" className={OFFICE_LINK}>
+        Agreements ›
+      </Link>
+    </div>
   );
 }

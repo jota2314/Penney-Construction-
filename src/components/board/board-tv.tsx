@@ -339,7 +339,7 @@ function NeedsYou({
       <div className="flex items-center gap-3 border-t border-border pt-2 text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <Users className="h-3 w-3" aria-hidden />
-          {data.onsite.reduce((n, j) => n + j.crewToday.length, 0)} clocked in
+          {data.onsite.reduce((n, j) => n + j.crewToday.length, 0)} on site
         </span>
         <span className="flex items-center gap-1">
           <Package className="h-3 w-3" aria-hidden />

@@ -4,7 +4,15 @@ export interface SavedPhoto {
   file: Blob;
   /** Already shrunk to upload size before it was stored. */
   shrunk?: boolean;
+  /**
+   * The upload route this photo goes to. The crew app and the sub portal
+   * share this store; each restores only its own photos. Photos saved before
+   * this field existed have none and are crew photos (/api/crew/daily-log-photo).
+   */
+  endpoint?: string;
 }
+// Same database and version as before: a new field needs no upgrade, and a
+// version bump would be blocked by any tab still open on an older bundle.
 const DATABASE = "penney-daily-log-photos";
 const STORE = "pending";
 

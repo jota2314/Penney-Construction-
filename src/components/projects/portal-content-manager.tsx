@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Eye, EyeOff, FileText, Loader2, Plus, Send, Undo2, Trash2, ListChecks } from "lucide-react";
+import { Camera, Eye, EyeOff, FileText, Loader2, Plus, Send, Undo2, Trash2, ListChecks } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { setLogClientHidden } from "@/lib/actions/portal-photos";
 import { SelectionsLogPanel } from "./selections-log-panel";
 
 // What the client sees on the portal, and the switch that puts it there.
 // Selection sheets and documents are STAGED until someone presses Publish;
-// decisions (client_selections) can be hidden per row. "Preview as client"
-// shows the whole portal, drafts included, without touching the client's
-// view count.
+// decisions (client_selections) can be hidden per row. Sub photos are shared
+// by default; a sub post's photos can be hidden from the homeowner per post.
+// "Preview as client" shows the whole portal, drafts included, without
+// touching the client's view count.
 
 interface SheetRow {
   id: string; title: string; revision: string | null; sheet_date: string | null;
@@ -22,6 +24,7 @@ interface DecisionRow { id: string; category: string; status: string; client_vis
 interface ClientItemRow { id: string; name: string; client_action: "approved" | "removed"; client_action_at: string | null; client_selection_sheets: { project_id: string } }
 interface ClientPhaseRow { id: string; name: string; client_completed_at: string | null }
 interface FileRow { id: string; filename: string; storage_bucket: string | null; storage_path: string; created_at: string }
+interface SubPhotoRow { id: string; started_at: string; photo_storage_paths: string[] | null; client_hidden_at: string | null; subcontractors: { company_name: string | null } | null }
 
 const DOC_KINDS: [string, string][] = [
   ["design", "Design presentation"],
@@ -40,6 +43,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
   const [files, setFiles] = useState<FileRow[]>([]);
   const [clientItems, setClientItems] = useState<ClientItemRow[]>([]);
   const [clientPhases, setClientPhases] = useState<ClientPhaseRow[]>([]);
+  const [subPhotos, setSubPhotos] = useState<SubPhotoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   // Two-step confirm (no window.confirm — the browser pane auto-dismisses it).
@@ -50,7 +54,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
 
   const fetchAll = useCallback(async () => {
     const supabase = createClient();
-    const [s, d, c, f, ci, cp] = await Promise.all([
+    const [s, d, c, f, ci, cp, sp] = await Promise.all([
       supabase.from("client_selection_sheets")
         .select("id, title, revision, sheet_date, show_prices, show_allowances, published_at, created_at, client_selection_items(count)")
         .eq("project_id", projectId).order("created_at", { ascending: false }),
@@ -72,6 +76,12 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
         .select("id, name, client_completed_at")
         .eq("project_id", projectId).not("client_completed_at", "is", null)
         .order("client_completed_at", { ascending: false }),
+      // Sub posts with photos: those photos are on the homeowner's Photos tab
+      // unless the office hid them.
+      supabase.from("daily_logs")
+        .select("id, started_at, photo_storage_paths, client_hidden_at, subcontractors(company_name)")
+        .eq("project_id", projectId).not("subcontractor_id", "is", null).not("photo_storage_paths", "eq", "{}")
+        .order("started_at", { ascending: false }).limit(100),
     ]);
     return {
       sheets: (s.data as SheetRow[]) ?? [],
@@ -80,6 +90,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
       files: (f.data as FileRow[]) ?? [],
       clientItems: (ci.data as unknown as ClientItemRow[]) ?? [],
       clientPhases: (cp.data as ClientPhaseRow[]) ?? [],
+      subPhotos: ((sp.data as unknown as SubPhotoRow[]) ?? []).filter((l) => (l.photo_storage_paths?.length ?? 0) > 0),
     };
   }, [projectId]);
 
@@ -90,6 +101,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
     setFiles(r.files);
     setClientItems(r.clientItems);
     setClientPhases(r.clientPhases);
+    setSubPhotos(r.subPhotos);
     setLoading(false);
   };
   const load = () => fetchAll().then(apply);
@@ -151,6 +163,13 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
     return run(row.id, () => supabase.from("schedule_phases")
       .update({ client_completed_at: null, client_completed_by: null }).eq("id", row.id));
   }
+  // One tap, no confirm: Show puts the photos straight back.
+  function toggleSubPhotos(row: SubPhotoRow) {
+    return run(`subphotos-${row.id}`, async () => {
+      const r = await setLogClientHidden(row.id, !row.client_hidden_at);
+      return { error: r.error ? { message: r.error } : null };
+    });
+  }
 
   function addDocument() {
     const f = files.find((x) => x.id === addFileId);
@@ -179,6 +198,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
 
   const clientDecisions = decisions.filter((d) => d.client_done_at || d.client_dismissed_at);
   const clientChanges = clientItems.length + clientDecisions.length + clientPhases.length;
+  const subPhotosHidden = subPhotos.filter((l) => l.client_hidden_at).length;
 
   return (
     <div className="space-y-4">
@@ -338,6 +358,37 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
           )}
         </div>
       </section>
+
+      {/* Sub photos (shared by default, hidden per post) */}
+      {subPhotos.length > 0 && (
+        <section className="rounded-lg border p-3">
+          <div className="mb-1 flex items-center gap-2">
+            <Camera className="h-4 w-4 text-amber-500" />
+            <h4 className="text-sm font-semibold">
+              Sub photos on the homeowner&apos;s page ({subPhotos.length}{subPhotosHidden > 0 ? `, ${subPhotosHidden} hidden` : ""})
+            </h4>
+          </div>
+          <p className="mb-2 text-xs text-muted-foreground">Photos a sub posts show on the homeowner&apos;s Photos tab. Only the photos, never the note or the company. Hide a post that shouldn&apos;t be there.</p>
+          <ul className="divide-y">
+            {subPhotos.map((l) => {
+              const hidden = !!l.client_hidden_at;
+              const count = l.photo_storage_paths?.length ?? 0;
+              return (
+                <li key={l.id} className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="min-w-0 truncate text-sm">
+                    <span className={hidden ? "text-muted-foreground line-through" : ""}>{l.subcontractors?.company_name || "Sub"}</span>{" "}
+                    <span className="text-xs text-muted-foreground">· {fmtDay(l.started_at)} · {count} {count === 1 ? "photo" : "photos"}{hidden ? " · hidden" : ""}</span>
+                  </span>
+                  <Button size="sm" variant="ghost" className="shrink-0 gap-1.5" disabled={!!busy} onClick={() => toggleSubPhotos(l)}>
+                    {busy === `subphotos-${l.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                    {hidden ? "Show" : "Hide"}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       {/* Decisions */}
       {decisions.length > 0 && (

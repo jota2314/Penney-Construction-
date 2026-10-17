@@ -60,6 +60,7 @@ import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
 import { QuoteSplitDialog } from "./quote-split-dialog";
 import { QuoteScanDialog } from "./quote-scan-dialog";
 import { QuoteCoverageView } from "@/components/estimates/quote-coverage-view";
+import { ProjectWorkOrders } from "./work-order-sheet";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -184,6 +185,8 @@ export function ProjectSubsTab({
   const [awardBusy, setAwardBusy] = useState(false);
   const [awardError, setAwardError] = useState<string | null>(null);
   const [awardedJustNow, setAwardedJustNow] = useState<QuoteRequest | null>(null);
+  // "Draft work order" in the post-award dialog: the Work orders card drafts it and opens it.
+  const [workOrderRequest, setWorkOrderRequest] = useState<{ subId: string; key: number } | null>(null);
 
   // Quick add ("easy enter")
   const [addOpen, setAddOpen] = useState(false);
@@ -1120,6 +1123,9 @@ export function ProjectSubsTab({
         </div>
       </div>
 
+      {/* Work orders: drafted from awards here, signed by Ryan, signed by the sub in his portal */}
+      <ProjectWorkOrders projectId={projectId} subDirectory={subDirectory} requestDraft={workOrderRequest} />
+
       {/* Quotes that still need a trade */}
       {noTradeQuotes.length > 0 && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
@@ -1353,8 +1359,21 @@ export function ProjectSubsTab({
               {awardedJustNow?.trade ? tradeKeyLabel(normalizeTradeKey(awardedJustNow.trade)) : ""} sub. Want to let them know?
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center justify-end gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => setAwardedJustNow(null)}>Not now</Button>
+            {awardedJustNow && (awardedJustNow.subcontractor_id || findDirectorySub(awardedJustNow)) && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const q = awardedJustNow;
+                  const subId = q.subcontractor_id || findDirectorySub(q)?.id;
+                  setAwardedJustNow(null);
+                  if (subId) setWorkOrderRequest({ subId, key: Date.now() });
+                }}
+              >
+                Draft work order
+              </Button>
+            )}
             <Button
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={() => {

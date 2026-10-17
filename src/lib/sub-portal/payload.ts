@@ -53,9 +53,9 @@ export interface SubIdentity {
 export interface SubPortalFlags {
   /** Money tab + money fields present (company login only). */
   show_money: boolean;
-  /** "Send an invoice" is live (NEXT_PUBLIC_SUB_BILLS, W7). */
+  /** "Send an invoice" is live (W7). On unless NEXT_PUBLIC_SUB_BILLS is 0/false/off (flags.ts). */
   bills_enabled: boolean;
-  /** Agreement rows and signing are live (NEXT_PUBLIC_SUB_AGREEMENTS, W9). */
+  /** Agreement rows and signing are live (W9). On unless NEXT_PUBLIC_SUB_AGREEMENTS is 0/false/off (flags.ts). */
   agreements_enabled: boolean;
   /** app_settings.sub_portal_loom_url; null when blank (hide "Watch how"). */
   loom_url: string | null;
@@ -124,7 +124,7 @@ export interface SubJobRow {
   phase: SubJobPhaseRef | null;
   /** Newest visit or post of his on this job. Sorts "Other open jobs". */
   last_activity_at: Timestamp | null;
-  /** He has a visit here today. */
+  /** He scanned the sign here today (a post or clock-in alone doesn't count). */
   here_now: boolean;
 }
 
@@ -334,6 +334,7 @@ export interface SubMoneyByJob {
   agreed: SubAgreedAmount;
   billed: number;
   paid: number;
+  /** Σ (amount − paid) over bills with review_status <> 'needs_review' (same rule as Owed to you). */
   open: number;
 }
 
@@ -385,7 +386,7 @@ export interface SubHomePayload {
   today: DayString;
   sub: SubIdentity;
   flags: SubPortalFlags;
-  /** His most recent visit today (the Here-now card); null when he hasn't scanned/posted today. */
+  /** His most recent SCANNED visit today (the Here-now card); null when he hasn't scanned a sign today. */
   here_now: SubVisitSummary | null;
   /** All his visits today (rarely more than one). */
   visits_today: SubVisitSummary[];
@@ -423,7 +424,7 @@ export interface SubJobHeader {
   directions_url: string | null;
   /** "Your Penney contact: Ryan" + call button; null when the job has no PM. */
   pm: SubJobContact | null;
-  /** Today's visit here, for the "✓ Checked in 7:12 AM" chip. */
+  /** Today's visit here when he scanned the sign (scans > 0), for the "✓ Checked in 7:12 AM" chip. */
   visit_today: SubVisitSummary | null;
 }
 
@@ -564,6 +565,12 @@ export interface SubJobPayload {
   generated_at: Timestamp;
   today: DayString;
   job: SubJobHeader;
+  /**
+   * isSubOnJob: the capture routes (post, clock in, inspections) accept
+   * writes here. False on a closed job, or one he only billed: the screen
+   * opens read-only (an open shift can still be clocked out).
+   */
+  can_post: boolean;
   posts: SubPostsPage;
   files: SubDocumentGroup[];
   scope: SubScopeLine[];
@@ -729,6 +736,17 @@ export interface SubPostCreateRequest {
   exceptions: SubExceptionChip[];
   /** Photos that will follow through /logs/photo. */
   pendingPhotoCount: number;
+  /**
+   * When he tapped Post (the outbox entry's createdAt), sent on every try so
+   * a late send is dated when he posted. Old shells send none: the server
+   * uses now. Clamped server-side (~2 min ahead, 7 days back).
+   */
+  postedAt?: Timestamp;
+  /**
+   * The company the phone saved it under (the outbox stamps it). The route
+   * answers 409 when the signed-in company is another one.
+   */
+  subId?: string;
 }
 
 /** The answer to SubPostCreateRequest. `created: false` = the row already existed (a retry). */
@@ -757,6 +775,8 @@ export type SubClockRequest =
       exceptions?: SubExceptionChip[];
       pendingPhotoCount?: number;
       endedAt?: Timestamp;
+      /** The company the phone saved it under; another signed-in company gets 409. */
+      subId?: string;
     };
 
 /** The clock answer: the shift's id, its start (in) or its hours (out). */
@@ -764,8 +784,8 @@ export type SubClockResponse = SubActionResponse<{ logId: string; started_at?: T
 
 /**
  * POST /api/sub-portal/schedule, the Dates buttons (W3a → the schedule
- * route). Same shapes the route takes today; this replaces ScheduleAction in
- * src/components/sub-portal/types.ts, which goes at cutover with its users.
+ * route). Same shapes the route takes today; this replaced ScheduleAction in
+ * the old src/components/sub-portal/types.ts (deleted at cutover).
  */
 export type SubScheduleAction =
   /** "Confirm": he'll be there. */

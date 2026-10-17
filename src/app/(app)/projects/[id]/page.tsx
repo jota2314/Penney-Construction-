@@ -100,6 +100,9 @@ export default async function ProjectDetailPage({
       .from("project_subcontractors")
       .select("*, subcontractor:subcontractors(company_name)")
       .eq("project_id", id)
+      // A QR check-in's 'visit_only' link isn't an award; the feed below says "assigned".
+      // (status is NOT NULL, default 'active', so neq drops no legacy rows.)
+      .neq("status", "visit_only")
       .order("created_at", { ascending: false })
       .limit(10),
     supabase

@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeTradeKey } from "@/lib/trade-key";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { subContractLockMessage } from "@/lib/subs/agreements";
+import { subContractLockedMessage } from "@/lib/sub-portal/statuses";
 import type { QuoteRequest } from "@/types/database";
 
 // Server actions behind the project Subs tab: quick manual quote entry,
@@ -61,6 +63,12 @@ export async function quickAddQuote(input: QuickAddQuoteInput) {
  * the sub's contract amount on project_subcontractors when the quote is
  * linked to a directory sub. "Approve as Bill" (status `approved`) stays a
  * separate, later step — that's when the invoice actually lands.
+ *
+ * Once a signed work order locks that sub's amount on the job, the award is
+ * refused with "Locked by WO-046-01; use a sub change order" before anything
+ * changes. The job link is written first, so a refusal (or any failure)
+ * there leaves the quote and its rivals exactly as they were, instead of
+ * reading "awarded" while the amount never moved.
  */
 export async function awardQuote(quoteId: string, declineOthers: boolean) {
   const supabase = await createClient();
@@ -75,6 +83,23 @@ export async function awardQuote(quoteId: string, declineOthers: boolean) {
     .eq("id", quoteId)
     .single();
   if (!quote) return { error: "Quote not found", declinedIds: [] };
+
+  if (quote.project_id && quote.subcontractor_id && quote.amount) {
+    const locked = await subContractLockMessage(supabase, quote.project_id, quote.subcontractor_id);
+    if (locked) return { error: locked, declinedIds: [] };
+    const { error: linkError } = await supabase.from("project_subcontractors").upsert(
+      {
+        project_id: quote.project_id,
+        subcontractor_id: quote.subcontractor_id,
+        contract_amount: quote.amount,
+        // An award puts him on the job for Weekly Close, even if a QR
+        // check-in had linked him as visit_only first.
+        status: "active",
+      },
+      { onConflict: "project_id,subcontractor_id" }
+    );
+    if (linkError) return { error: subContractLockedMessage(linkError) ?? linkError.message, declinedIds: [] };
+  }
 
   const updates: Record<string, unknown> = { status: "accepted" };
   if (!quote.received_at) updates.received_at = new Date().toISOString();
@@ -104,17 +129,6 @@ export async function awardQuote(quoteId: string, declineOthers: boolean) {
         .update({ status: "declined" })
         .in("id", declinedIds);
     }
-  }
-
-  if (quote.project_id && quote.subcontractor_id && quote.amount) {
-    await supabase.from("project_subcontractors").upsert(
-      {
-        project_id: quote.project_id,
-        subcontractor_id: quote.subcontractor_id,
-        contract_amount: quote.amount,
-      },
-      { onConflict: "project_id,subcontractor_id" }
-    );
   }
 
   if (quote.project_id) revalidatePath(`/projects/${quote.project_id}`);

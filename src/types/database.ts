@@ -77,6 +77,9 @@ export interface Project {
   walkthrough_assigned_to: string | null;
   latitude: number | null;
   longitude: number | null;
+  /** The job's site QR sign is up (sub portal v3), and who ticked it. */
+  site_sign_posted_at?: string | null;
+  site_sign_posted_by?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -280,10 +283,16 @@ export interface Subcontractor {
   notes: string | null;
   is_active: boolean;
   vetting_status: VettingStatus;
+  /** Other names the office calls him ("Marcio" for MGL Tile); matched strictly. */
+  aliases: string[];
+  /** Hidden from the sub portal rollout list (suppliers, one-offs). */
+  portal_excluded_at: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
 }
+
+export type ProjectSubcontractorStatus = "active" | "visit_only" | "done" | "removed";
 
 export interface ProjectSubcontractor {
   id: string;
@@ -291,6 +300,15 @@ export interface ProjectSubcontractor {
   subcontractor_id: string;
   contract_amount: number;
   notes: string | null;
+  /** 'visit_only' = he scanned in on a job he had no award on; never an amount. */
+  status: ProjectSubcontractorStatus;
+  /** The signed work order that locked this row (sub_agreements.id). */
+  agreement_id: string | null;
+  contract_locked_at: string | null;
+  scope_summary: string | null;
+  /** What the row said before the first signed work order locked it. */
+  pre_lock_amount: number | null;
+  pre_lock_status: ProjectSubcontractorStatus | null;
   created_at: string;
   updated_at: string;
 }

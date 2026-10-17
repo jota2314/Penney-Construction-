@@ -150,6 +150,7 @@ export async function loadPortalData(
       .select("id, photo_storage_paths, started_at, created_at")
       .eq("project_id", projectId)
       .not("photo_storage_paths", "is", null)
+      .is("client_hidden_at", null) // the office tapped Hide on the project's Portal tab
       .order("created_at", { ascending: false })
       .limit(200),
     // Today's confirmed crew rows — their NAME is client-facing (see the

@@ -288,9 +288,15 @@ export function ProjectScheduleTab({
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
+      // What the server actually did (or the question it needs answered):
+      // which job and phase changed, who was emailed, "which one?".
+      const executed = Array.isArray(data.executed)
+        ? (data.executed as unknown[]).map((e) => String(e ?? "").trim()).filter(Boolean)
+        : [];
+      const baseText = data.message || "Here's what I suggest:";
       const assistantMsg: AiChatMsg = {
         role: "assistant",
-        content: data.message || "Here's what I suggest:",
+        content: executed.length ? `${baseText}\n\n${executed.map((e) => `• ${e}`).join("\n")}` : baseText,
         proposedPhases: data.schedule_actions?.filter(
           (a: Record<string, unknown>) => a.action === "create"
         ),

@@ -309,7 +309,7 @@ export function ProjectDetailTabs({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <ProjectStatusBadge status={project.status} projectId={project.id} editable />
-            {/* Job-site QR sign: subs scan it to clock in, post photos, or sign up. */}
+            {/* Job-site QR sign: subs scan it to check in and post photos, or sign up. */}
             <Link
               href={`/job-qr/${project.id}`}
               aria-label="Job QR for subs"

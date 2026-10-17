@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  LEGACY_SUB_PORTAL_COOKIE,
   SUB_PORTAL_COOKIE,
   getSubPortalClient,
   hashPin,
@@ -80,9 +81,10 @@ export async function POST(request: NextRequest) {
   return res;
 }
 
-/** DELETE /api/sub-portal/login — sign out (clears the cookie). */
+/** DELETE /api/sub-portal/login — sign out (clears the cookie, and any pre-v3 one). */
 export async function DELETE() {
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SUB_PORTAL_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
+  res.cookies.set(LEGACY_SUB_PORTAL_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
   return res;
 }

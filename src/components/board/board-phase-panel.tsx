@@ -26,7 +26,10 @@ import {
   X,
 } from "lucide-react";
 import { getPhaseFormOptions, updateSchedulePhase } from "@/lib/actions/schedule";
+import { getAliasOffer, getPhaseSubSuggestions } from "@/lib/actions/sub-assign";
 import type { BoardBar } from "@/lib/board/board-data";
+import type { PhaseSuggestions, SubSuggestion } from "@/lib/schedule/suggest-subs";
+import { AliasOffer } from "./subs-needed-sheet";
 
 /**
  * The phase panel — what opens when you click a bar.
@@ -75,6 +78,28 @@ export function BoardPhasePanel({
   );
   const [saving, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Suggestion chips above the picker, and what's waiting on a confirm tap.
+  // Keyed by bar id so switching phases drops them without an effect.
+  const [suggested, setSuggested] = useState<{ barId: string; result: PhaseSuggestions } | null>(null);
+  const [pendingSub, setPendingSub] = useState<{ barId: string; pick: SubSuggestion } | null>(null);
+  const [aliasOffer, setAliasOffer] = useState<{ barId: string; offer: { subId: string; subName: string; alias: string } } | null>(null);
+
+  const barId = bar?.id ?? null;
+  const wantsSuggestions = !!bar && bar.kind !== "crew" && !bar.isMilestone;
+  useEffect(() => {
+    if (!barId || !wantsSuggestions) return;
+    let cancelled = false;
+    getPhaseSubSuggestions({ phaseId: barId })
+      .then((result) => {
+        if (!cancelled && !result.error) setSuggested({ barId, result });
+      })
+      .catch(() => {
+        /* chips are a help; the picker below still works */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [barId, wantsSuggestions]);
 
   useEffect(() => {
     if (!bar || loadedOptions) return;
@@ -125,7 +150,7 @@ export function BoardPhasePanel({
   const togglePicker = (kind: "crew" | "sub") =>
     setPickingFor(picking === kind ? null : { barId: bar.id, kind });
 
-  const save = (employeeIds: string[], subIds: string[]) => {
+  const save = (employeeIds: string[], subIds: string[], onSaved?: () => void) => {
     setError(null);
     onAssigned(bar.id, employeeIds, subIds);
     startSaving(async () => {
@@ -138,8 +163,32 @@ export function BoardPhasePanel({
         setError(res.error);
         // Not the pre-toggle list — that may itself be unsaved. The server's.
         onAssignFailed?.(bar.id);
+      } else {
+        onSaved?.();
       }
     });
+  };
+
+  /** After a sub goes on: offer "Remember: 'Marcio' in notes means MGL Tile Inc" when the notes used his first name. */
+  const offerAlias = (phaseId: string, subId: string) => {
+    getAliasOffer({ phaseId, subId })
+      .then((r) => {
+        if (r.alias && r.subName) setAliasOffer({ barId: phaseId, offer: { subId, subName: r.subName, alias: r.alias } });
+      })
+      .catch(() => {});
+  };
+
+  const addSub = (id: string) => {
+    if (bar.assignedSubIds.includes(id)) return;
+    const phaseId = bar.id;
+    setPendingSub(null);
+    save(bar.assignedEmployeeIds, [...bar.assignedSubIds, id], () => offerAlias(phaseId, id));
+  };
+
+  // A confirmed phase emails whoever is added, so a chip there asks first.
+  const pickSuggestion = (s: SubSuggestion) => {
+    if (bar.isConfirmed) setPendingSub({ barId: bar.id, pick: s });
+    else addSub(s.subId);
   };
 
   const toggleEmployee = (id: string) => {
@@ -150,13 +199,22 @@ export function BoardPhasePanel({
   };
 
   const toggleSub = (id: string) => {
-    const next = bar.assignedSubIds.includes(id)
-      ? bar.assignedSubIds.filter((x) => x !== id)
-      : [...bar.assignedSubIds, id];
-    save(bar.assignedEmployeeIds, next);
+    if (!bar.assignedSubIds.includes(id)) return addSub(id);
+    save(bar.assignedEmployeeIds, bar.assignedSubIds.filter((x) => x !== id));
   };
 
   const nameOf = (list: Option[], id: string) => list.find((o) => o.id === id)?.label ?? "…";
+
+  const suggestions =
+    suggested?.barId === bar.id
+      ? suggested.result.suggestions.filter((s) => !bar.assignedSubIds.includes(s.subId))
+      : [];
+  const notesHint =
+    suggested?.barId === bar.id && suggested.result.notesHint && !bar.assignedSubIds.includes(suggested.result.notesHint.subId)
+      ? suggested.result.notesHint
+      : null;
+  const pending = pendingSub?.barId === bar.id ? pendingSub.pick : null;
+  const alias = aliasOffer?.barId === bar.id ? aliasOffer.offer : null;
 
   const days = spanDays(bar.startDate, bar.endDate);
   const onPortal = bar.phaseScope === "master";
@@ -305,6 +363,52 @@ export function BoardPhasePanel({
 
           {/* ── Subs ── */}
           <Section icon={Truck} title="Subs">
+            {suggestions.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Suggested{suggested?.result.tradeLabel ? ` for ${suggested.result.tradeLabel.toLowerCase()}` : ""}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.subId}
+                      type="button"
+                      onClick={() => pickSuggestion(s)}
+                      disabled={saving}
+                      title={s.reason}
+                      className={`flex min-h-11 flex-col items-start justify-center rounded-lg border px-3 py-1.5 text-left hover:border-primary ${
+                        pending?.subId === s.subId ? "border-primary bg-primary/10" : "border-border"
+                      }`}
+                    >
+                      <span className="text-sm">{s.name}</span>
+                      <span className="text-xs text-muted-foreground">{s.reason}</span>
+                    </button>
+                  ))}
+                </div>
+                {pending && (
+                  <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+                    <p className="text-sm">
+                      {pending.hasEmail
+                        ? `Saving emails ${pending.name} “You're scheduled”.`
+                        : `No email on file for ${pending.name}, so saving emails nobody.`}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="h-9" onClick={() => addSub(pending.subId)} disabled={saving}>
+                        Save
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-9" onClick={() => setPendingSub(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {notesHint && !suggestions.some((s) => s.subId === notesHint.subId) && (
+              <p className="text-xs text-muted-foreground">
+                Notes say “{notesHint.matched}” → {notesHint.subName}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {bar.assignedSubIds.map((id) => (
                 <button
@@ -330,6 +434,12 @@ export function BoardPhasePanel({
             {bar.assignedSubIds.length === 0 && !picking && (
               <p className="text-sm text-muted-foreground">No sub on this phase.</p>
             )}
+            {bar.isConfirmed && picking === "sub" && (
+              <p className="text-xs text-muted-foreground">
+                This phase is confirmed: a sub you add here is emailed “You&apos;re scheduled”.
+              </p>
+            )}
+            {alias && <AliasOffer key={`${alias.subId}:${alias.alias}`} offer={alias} />}
             {picking === "sub" && (
               <Picker
                 options={subs}

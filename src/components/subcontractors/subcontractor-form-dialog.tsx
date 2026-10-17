@@ -53,6 +53,8 @@ export function SubcontractorFormDialog({
   const [city, setCity] = useState(subcontractor?.city ?? "");
   const [state, setState] = useState(subcontractor?.state ?? "");
   const [zip, setZip] = useState(subcontractor?.zip ?? "");
+  // A row read without the column (older selects) has no aliases.
+  const savedAliases = subcontractor?.aliases ?? [];
   const isEditing = !!subcontractor;
 
   function toggleTrade(trade: string) {
@@ -84,6 +86,10 @@ export function SubcontractorFormDialog({
       notes: form.get("notes") as string,
       is_active: form.get("is_active") === "on",
       vetting_status: vettingStatus,
+      aliases: String(form.get("aliases") ?? "")
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean),
     };
 
     const result = isEditing
@@ -140,6 +146,21 @@ export function SubcontractorFormDialog({
                 defaultValue={subcontractor?.phone ?? ""}
               />
             </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="aliases">Also called</Label>
+            <Input
+              id="aliases"
+              name="aliases"
+              placeholder="Marcio, MGL"
+              autoComplete="off"
+              defaultValue={savedAliases.join(", ")}
+            />
+            <p className="text-xs text-muted-foreground">
+              Names the schedule notes use for this sub, separated by commas. A phase whose notes say one of
+              these words suggests this sub. A first name on its own only counts once it&apos;s listed here.
+              A first name another sub also has, or a trade word like &quot;Tile&quot;, is refused.
+            </p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="email">Email</Label>

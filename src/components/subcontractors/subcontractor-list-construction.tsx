@@ -100,6 +100,7 @@ function ContractAmountDialog({
 }) {
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Initialize amounts when dialog opens with new sub
   const key = state?.subId ?? "";
@@ -110,6 +111,7 @@ function ContractAmountDialog({
         initial[p.id] = p.amount > 0 ? String(p.amount) : "";
       }
       setAmounts(initial);
+      setError(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -119,11 +121,23 @@ function ContractAmountDialog({
   async function handleSave() {
     if (!state) return;
     setSaving(true);
+    setError(null);
+    // A signed work order locks its amount; say which job refused and keep
+    // the dialog open instead of closing as if it saved.
+    const failed: string[] = [];
     for (const p of state.projects) {
       const val = parseFloat(amounts[p.id] || "0");
-      await upsertContractAmount(p.id, state.subId, val);
+      // An untouched job is left alone: no $0 row, no status change, and no
+      // write against an amount a signed work order locked.
+      if (Math.abs(val - (Number(p.amount) || 0)) < 0.005) continue;
+      const result = await upsertContractAmount(p.id, state.subId, val);
+      if (result.error) failed.push(`${p.project_number} — ${p.name}: ${result.error}`);
     }
     setSaving(false);
+    if (failed.length) {
+      setError(failed.join("\n"));
+      return;
+    }
     onClose();
   }
 
@@ -154,6 +168,7 @@ function ContractAmountDialog({
               </div>
             </div>
           ))}
+          {error && <p className="whitespace-pre-line text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>
               Cancel

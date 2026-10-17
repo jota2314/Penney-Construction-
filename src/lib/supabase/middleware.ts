@@ -26,6 +26,9 @@ const OFFICE_PREFIXES = [
   "/hiring",
   "/guides",
   "/portal-preview",
+  "/sub-preview",
+  // Printing job signs (the QR itself points at /sub/j/{code}, which stays public).
+  "/job-qr",
 ];
 
 const CREW_PREFIXES = ["/crew/", "/crew"];

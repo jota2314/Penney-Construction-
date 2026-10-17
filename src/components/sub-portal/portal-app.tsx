@@ -1,454 +1,141 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogOut, Phone } from "lucide-react";
-import { AWARDED_STATUSES, LIVE_STATUSES } from "./types";
-import type { FieldData, JobRollup, PortalData, ScheduleAction, Tab } from "./types";
-import { BottomNav, DISPLAY, MONO, OFFICE_PHONE, Shell, Skeleton } from "./ui";
-import { HomeTab } from "./home-tab";
-import { ScheduleTab } from "./schedule-tab";
-import { JobsTab } from "./jobs-tab";
-import { MoneyTab } from "./money-tab";
-import { FieldTab, getLocation, readFieldJob, uploadPhotos, writeFieldJob } from "./field-tab";
-import { ClockOutSheet, type ClockOutPayload } from "./clock-out-sheet";
-import { workTagsFor } from "./work-tags";
+import { PortalHeader, PortalTheme } from "@/components/portal-kit";
+import { telHref } from "@/lib/portal-kit/format";
+import type { SubHomePayload } from "@/lib/sub-portal/payload";
+import { resumeSubOutbox, setSubOutboxOwner } from "./post-outbox";
+import { SubPortalView } from "./sub-portal-view";
 
-const TAB_KEY = "sub_portal_tab";
-const STATUS_RANK: Record<string, number> = { in_progress: 0, on_hold: 1, contracted: 2 };
+const OFFICE_PHONE = "978-621-4387";
+// Coming back to the app refetches only when the screen is older than this.
+const STALE_MS = 2 * 60_000;
 
 /**
- * /sub/portal — the signed-in sub's app. Loads both portal payloads once,
- * derives the per-job rollup, and hands it to the five tabs. All data is
- * already scoped to this sub by the API.
+ * /sub/portal: the signed-in sub's app, as a thin shell around
+ * SubPortalView. It loads the light home payload (GET /api/sub-portal, his
+ * cookie), restarts the post outbox so photos left on the phone finish
+ * uploading (its saved posts go once the GET says who is signed in:
+ * setSubOutboxOwner), and refetches when he comes back to the app after more
+ * than two minutes. Each job loads on its own when he opens it (job-screen.tsx).
+ *
+ * Signed out (401) goes to /sub, carrying a QR's ?job=…&compose=1 along so
+ * he lands on that job after the PIN. Turned off (403) shows the server's
+ * reason instead of the login.
  */
 export function SubPortalApp() {
   const router = useRouter();
-  const [data, setData] = useState<PortalData | null>(null);
+  const [data, setData] = useState<SubHomePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [field, setField] = useState<FieldData | null>(null);
-  // A job's site QR lands here as /sub/portal?job={projectId}: open straight
-  // onto that job's log (clock in, photos). Read once on mount.
-  const [linkedJob] = useState<string | null>(() => {
-    try {
-      return new URLSearchParams(window.location.search).get("job");
-    } catch {
-      return null;
+  const loadedAt = useRef(0);
+  const inFlight = useRef(false);
+  // A reload asked for while one is running (a tap during a background
+  // refresh) runs again afterwards, so the screen never shows the older read.
+  const again = useRef(false);
+
+  const load = useCallback(async () => {
+    if (inFlight.current) {
+      again.current = true;
+      return;
     }
-  });
-  // Remember the last tab on this phone — a sub who lives in Field stays
-  // there. Safe as a lazy initializer because the page mounts client-only.
-  const [tab, setTabState] = useState<Tab>(() => {
-    if (linkedJob) return "field";
+    inFlight.current = true;
     try {
-      const saved = window.localStorage.getItem(TAB_KEY) as Tab | null;
-      if (saved && ["home", "schedule", "jobs", "money", "field"].includes(saved)) return saved;
-    } catch {
-      /* storage blocked — start on Home */
-    }
-    return "home";
-  });
-  const [openJob, setOpenJob] = useState<string | null>(null);
-  const [clockBusy, setClockBusy] = useState(false);
-  const [clockOutOpen, setClockOutOpen] = useState(false);
-  // Which job the Field tab shows (null = the job list). Lives here so the
-  // Home tab's "Daily log" button can open a job's log in one tap.
-  const [fieldJob, setFieldJobState] = useState<string | null>(() => linkedJob ?? readFieldJob());
-  const setFieldJob = useCallback((id: string | null) => {
-    setFieldJobState(id);
-    writeFieldJob(id);
-  }, []);
-
-  // Keep the QR's job as this phone's open job, then drop ?job= so a
-  // refresh or Home Screen launch doesn't keep forcing it.
-  useEffect(() => {
-    if (!linkedJob) return;
-    writeFieldJob(linkedJob);
-    try {
-      window.localStorage.setItem(TAB_KEY, "field");
-    } catch {
-      /* convenience only */
-    }
-    router.replace("/sub/portal");
-  }, [linkedJob, router]);
-  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-
-  // "What got done" chips — plumbing words for a plumber, electrical for an
-  // electrician — from the trades on the sub's directory record.
-  const workTags = useMemo(() => workTagsFor(field?.trades ?? []), [field?.trades]);
-
-  const setTab = useCallback((t: Tab) => {
-    setTabState(t);
-    try {
-      window.localStorage.setItem(TAB_KEY, t);
-    } catch {
-      /* convenience only */
-    }
-    window.scrollTo({ top: 0 });
-  }, []);
-
-  const loadField = useCallback(() => {
-    fetch("/api/sub-portal/logs")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d && !d.error) setField(d);
-      })
-      .catch(() => {});
-  }, []);
-
-  const loadPortal = useCallback(() => {
-    fetch("/api/sub-portal")
-      .then((r) => {
-        if (r.status === 401) {
-          router.replace("/sub");
-          return null;
+      do {
+        again.current = false;
+        let res: Response;
+        try {
+          res = await fetch("/api/sub-portal", { cache: "no-store", credentials: "same-origin" });
+        } catch {
+          setError("No connection. Check your signal and try again.");
+          return;
         }
-        return r.json();
-      })
-      .then((d) => {
-        if (!d) return;
-        if (d.error) setError(d.error);
-        else setData(d);
-      })
-      .catch(() => setError("We couldn't load your portal. Try again."));
+        if (res.status === 401) {
+          // Nobody signed in: hold what's on the phone for whoever signs in next.
+          setSubOutboxOwner(null);
+          const here = `${window.location.pathname}${window.location.search}`;
+          router.replace(here.startsWith("/sub/portal?") ? `/sub?next=${encodeURIComponent(here)}` : "/sub");
+          return;
+        }
+        if (res.status === 403) {
+          // Turned off by the office (or a staff browser): a PIN won't help, so say why.
+          // Drop the screen he had: a turned-off sub must see why, not the old payload.
+          const refused = (await res.json().catch(() => null)) as { error?: string } | null;
+          setSubOutboxOwner(null);
+          setData(null);
+          setError(refused?.error || "Portal access has been turned off. Contact Penney Construction.");
+          return;
+        }
+        const body = (await res.json().catch(() => null)) as (SubHomePayload & { error?: string }) | null;
+        if (!res.ok || !body || body.error) {
+          setError(body?.error || "We couldn't load your portal. Try again.");
+          return;
+        }
+        loadedAt.current = Date.now();
+        // The outbox sends (and counts) only this company's saved posts, so a
+        // phone shared with another company never posts theirs under this login.
+        setSubOutboxOwner(body.sub.sub_id);
+        setError(null);
+        setData(body);
+      } while (again.current);
+    } finally {
+      inFlight.current = false;
+    }
   }, [router]);
 
-  useEffect(() => {
-    loadPortal();
-    loadField();
-  }, [loadPortal, loadField]);
+  const reload = useCallback(() => {
+    void load();
+  }, [load]);
 
-  // Refresh when the phone comes back to the app — the office may have
-  // awarded, scheduled, or paid something since the last look.
+  useEffect(() => {
+    resumeSubOutbox();
+    void load();
+  }, [load]);
+
+  // Back to the app: finish any queued uploads, and refresh if it's been a
+  // while (the office may have booked, confirmed or paid something).
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        loadPortal();
-        loadField();
-      }
+      if (document.visibilityState !== "visible") return;
+      resumeSubOutbox();
+      if (Date.now() - loadedAt.current > STALE_MS) void load();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [loadPortal, loadField]);
+  }, [load]);
 
-  const flash = useCallback((kind: "ok" | "err", text: string) => {
-    setNotice({ kind, text });
-    setTimeout(() => setNotice(null), 6000);
-  }, []);
-
-  async function clockIn(projectId: string) {
-    if (!projectId) return;
-    setClockBusy(true);
-    const loc = await getLocation();
-    const res = await fetch("/api/sub-portal/clock", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "in", projectId, loc }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setClockBusy(false);
-    if (!res.ok) return flash("err", d.error || "Couldn't clock in. Try again.");
-    flash("ok", "You're on the clock.");
-    loadField();
-  }
-
-  // Clock out opens the sheet (what got done, photos, fix the time); the
-  // sheet's submit is the only thing that actually closes the shift.
-  function clockOut() {
-    if (field?.clock) setClockOutOpen(true);
-  }
-
-  async function submitClockOut(p: ClockOutPayload) {
-    setClockBusy(true);
-    const res = await fetch("/api/sub-portal/clock", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "out", tags: p.tags, note: p.note, endedAt: p.endedAt }),
-    });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setClockBusy(false);
-      return flash("err", d.error || "Couldn't clock out. Try again.");
-    }
-    const failed = d.logId && p.photos.length > 0 ? await uploadPhotos(d.logId, p.photos) : 0;
-    setClockBusy(false);
-    setClockOutOpen(false);
-    const posted = p.tags.length > 0 || p.note || p.photos.length > 0;
-    flash(
-      failed > 0 ? "err" : "ok",
-      failed > 0
-        ? `Clocked out — ${d.hours} h, but ${failed} photo(s) didn't upload.`
-        : `Clocked out — ${d.hours} h.${posted ? " The office has your update." : " Thanks!"}`,
-    );
-    loadField();
-  }
-
-  async function signOut() {
-    await fetch("/api/sub-portal/login", { method: "DELETE" });
-    router.replace("/sub");
-  }
-
-  // ── Derived ──────────────────────────────────────────────────────────────
-  const derived = useMemo(() => {
-    if (!data) return null;
-    const projectById = new Map(data.projects.map((p) => [p.id, p]));
-    const today = new Date().toISOString().slice(0, 10);
-    const upcoming = data.phases.filter((p) => !p.end_date || p.end_date >= today);
-    const past = data.phases.filter((p) => p.end_date && p.end_date < today);
-
-    const allJobs: JobRollup[] = data.projects.map((proj) => {
-      const awarded = data.awarded.filter((a) => a.project_id === proj.id);
-      const quotes = data.quotes.filter((q) => q.project_id === proj.id);
-      const bids = data.bids.filter((b) => b.project_id === proj.id);
-      const rows = (data.billing || []).filter((b) => b.project_id === proj.id);
-      // "Do we have a price on this job?" — an awarded line or an accepted
-      // quote is a real price; an open quote/bid is a number he's put in
-      // that we haven't come back on.
-      const agreed =
-        awarded.reduce((s, a) => s + (a.amount || 0), 0) +
-        quotes.filter((q) => AWARDED_STATUSES.includes(q.status)).reduce((s, q) => s + (q.amount || 0), 0) +
-        bids.filter((b) => b.status === "accepted").reduce((s, b) => s + (b.amount || 0), 0);
-      const pendingPrice =
-        quotes.filter((q) => !AWARDED_STATUSES.includes(q.status) && q.status !== "declined" && q.amount != null).length +
-        bids.filter((b) => b.status !== "accepted" && b.status !== "rejected" && b.amount != null).length;
-      return {
-        proj,
-        awarded,
-        quotes,
-        bids,
-        files: data.files.filter((f) => f.project_id === proj.id),
-        selections: data.selections.filter((s) => s.project_id === proj.id),
-        phases: data.phases.filter((p) => p.project_id === proj.id),
-        inspections: (data.inspections || []).filter((i) => i.project_id === proj.id),
-        scope: (data.scope || []).filter((s) => s.project_id === proj.id),
-        billing: {
-          rows,
-          billed: rows.reduce((s, b) => s + b.amount, 0),
-          paid: rows.reduce((s, b) => s + b.paid, 0),
-          open: rows.reduce((s, b) => s + b.open, 0),
-        },
-        agreed,
-        pendingPrice,
-        declined: quotes.filter((q) => q.status === "declined").length,
-        isLive: LIVE_STATUSES.includes(proj.status),
-      };
-    });
-
-    // Live list is a WHITELIST: jobs we're building and jobs signed and
-    // coming up. Everything else folds under "Past jobs" so a long billing
-    // history doesn't bury today's work.
-    const jobs = allJobs
-      .filter((j) => j.isLive)
-      .sort(
-        (a, b) =>
-          (STATUS_RANK[a.proj.status] ?? 9) - (STATUS_RANK[b.proj.status] ?? 9) ||
-          b.agreed - a.agreed ||
-          a.proj.project_number.localeCompare(b.proj.project_number),
-      );
-    const pastJobs = allJobs
-      .filter((j) => !j.isLive)
-      .sort((a, b) => b.billing.open - a.billing.open || b.proj.project_number.localeCompare(a.proj.project_number));
-    const openTotal = allJobs.reduce((s, j) => s + j.billing.open, 0);
-    return { projectById, upcoming, past, allJobs, jobs, pastJobs, openTotal };
-  }, [data]);
-
-  // Field posts and inspection updates touch both payloads (logs + the
-  // inspections list), so refresh both.
-  const reloadAll = useCallback(() => {
-    loadPortal();
-    loadField();
-  }, [loadPortal, loadField]);
-
-  const openJobFromElsewhere = (projectId: string) => {
-    setOpenJob(projectId);
-    setTab("jobs");
-  };
-
-  // Home → the job's log screen on Field (photos, inspections, feed).
-  const openDailyLog = (projectId: string | null) => {
-    setFieldJob(projectId);
-    setTab("field");
-  };
-
-  // Two-way schedule: confirm / can't make it / add my dates / take them off.
-  const [scheduleBusy, setScheduleBusy] = useState<string | null>(null);
-  async function schedule(a: ScheduleAction) {
-    setScheduleBusy(a.action === "propose" ? "propose" : `phase:${a.phaseId}`);
-    const res = await fetch("/api/sub-portal/schedule", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(a),
-    });
-    const d = await res.json().catch(() => ({}));
-    setScheduleBusy(null);
-    if (!res.ok) return flash("err", d.error || "Couldn't update the schedule. Try again.");
-    flash(
-      "ok",
-      a.action === "confirm"
-        ? "Confirmed. The office knows you're coming."
-        : a.action === "decline"
-          ? "Sent. The office will find another day with you."
-          : a.action === "propose"
-            ? "On the calendar. Jorge, Ryan, and the PM have been told."
-            : "Taken off. The office has been told.",
-    );
-    loadPortal();
-  }
-
-  const firstName = data?.sub.contact_name?.split(/\s+/)[0] ?? "";
-
-  // ── Render ───────────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <Shell>
-        <p className="mx-auto max-w-sm px-8 pt-24 text-center text-sm text-red-400">{error}</p>
-      </Shell>
-    );
-  }
+  if (data) return <SubPortalView data={data} onReload={reload} />;
 
   return (
-    <Shell>
-      <header className="border-b border-white/[0.06]">
-        <div className="mx-auto max-w-2xl px-5 pb-5 pt-8">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <span className="h-[3px] w-7 bg-amber-500" />
-                <p className="text-[10px] uppercase tracking-[0.4em] text-amber-500/90" style={MONO}>
-                  Penney Construction
-                </p>
-              </div>
-              {data ? (
-                <h1 className="mt-3 text-[1.35rem] font-extrabold uppercase leading-[1.1] text-stone-100 sm:text-[1.7rem]" style={DISPLAY}>
-                  {data.sub.company_name}
-                </h1>
-              ) : (
-                <Skeleton className="mt-3 h-8 w-56" />
-              )}
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <a
-                href={`tel:${OFFICE_PHONE}`}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-stone-400 hover:text-stone-200"
-                aria-label="Call the office"
-              >
-                <Phone className="h-4 w-4" />
-              </a>
-              <button
-                onClick={signOut}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-stone-400 hover:text-stone-200"
-                aria-label="Sign out"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl px-5 pb-28 pt-6">
-        {!derived ? (
-          <div className="space-y-3">
-            <Skeleton className="h-20" />
-            <div className="grid grid-cols-2 gap-2.5">
-              <Skeleton className="h-20" />
-              <Skeleton className="h-20" />
-            </div>
-            <Skeleton className="h-28" />
-            <Skeleton className="h-40" />
-          </div>
+    <PortalTheme variant="field">
+      <PortalHeader subtitle="Penney Construction · Sub portal" title={error ? "Sub portal" : "Loading…"} />
+      <main className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+        {error ? (
+          <section className="card p-5 text-center">
+            <p className="text-[17px] font-bold">{error}</p>
+            <button type="button" onClick={reload} className="btn btn-primary btn-lg btn-block mt-4">
+              Try again
+            </button>
+            <a href={telHref(OFFICE_PHONE)} className="btn btn-ghost btn-block mt-3">
+              Call the office · {OFFICE_PHONE}
+            </a>
+          </section>
         ) : (
-          <>
-            {tab === "home" && (
-              <>
-                {notice && (
-                  <p
-                    className={`mb-4 rounded-xl border px-3.5 py-3 text-[13px] ${
-                      notice.kind === "ok"
-                        ? "border-emerald-500/40 bg-emerald-500/[0.06] text-emerald-300"
-                        : "border-red-500/40 bg-red-500/[0.06] text-red-300"
-                    }`}
-                  >
-                    {notice.text}
-                  </p>
-                )}
-                <HomeTab
-                  firstName={firstName}
-                  jobs={derived.jobs}
-                  allJobs={derived.allJobs}
-                  upcoming={derived.upcoming}
-                  projectById={derived.projectById}
-                  field={field}
-                  clockBusy={clockBusy}
-                  onClockIn={clockIn}
-                  onClockOut={clockOut}
-                  onGo={setTab}
-                  onOpenJob={openJobFromElsewhere}
-                  onDailyLog={openDailyLog}
-                  scheduleBusy={scheduleBusy}
-                  onSchedule={schedule}
-                />
-              </>
-            )}
-            {tab === "schedule" && (
-              <ScheduleTab
-                upcoming={derived.upcoming}
-                past={derived.past}
-                projectById={derived.projectById}
-                liveJobs={derived.jobs.map((j) => j.proj)}
-                busy={scheduleBusy}
-                notice={notice}
-                onAction={schedule}
-              />
-            )}
-            {tab === "jobs" && (
-              <JobsTab jobs={derived.jobs} pastJobs={derived.pastJobs} openJob={openJob} onToggle={setOpenJob} />
-            )}
-            {tab === "money" && <MoneyTab allJobs={derived.allJobs} onOpenJob={openJobFromElsewhere} />}
-            {tab === "field" && (
-              <FieldTab
-                rollups={derived.jobs}
-                field={field}
-                reload={reloadAll}
-                workTags={workTags}
-                openId={fieldJob}
-                onPick={setFieldJob}
-                clockBusy={clockBusy}
-                onClockIn={clockIn}
-                onClockOut={clockOut}
-                notice={notice}
-                flash={flash}
-              />
-            )}
-          </>
+          <PortalSkeleton />
         )}
-
-        <p className="mt-10 text-center text-[12px] text-stone-600">
-          Questions? Call the office at{" "}
-          <a href={`tel:${OFFICE_PHONE}`} className="text-stone-400 underline underline-offset-2">
-            {OFFICE_PHONE}
-          </a>
-        </p>
       </main>
+    </PortalTheme>
+  );
+}
 
-      <BottomNav
-        tab={tab}
-        onChange={setTab}
-        badges={{
-          money: (derived?.openTotal ?? 0) > 0.5,
-          field: !!field?.clock,
-        }}
-      />
-
-      {clockOutOpen && field?.clock && (
-        <ClockOutSheet
-          clock={field.clock}
-          tags={workTags}
-          busy={clockBusy}
-          onCancel={() => setClockOutOpen(false)}
-          onSubmit={submitClockOut}
-        />
-      )}
-    </Shell>
+/** Grey blocks where Today will be. Still, no shimmer. */
+function PortalSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading your portal" className="space-y-4">
+      <div className="h-[44px] w-2/3 rounded-full bg-[var(--line)]" />
+      <div className="h-32 rounded-2xl bg-[var(--line)]" />
+      <div className="h-[60px] rounded-2xl bg-[var(--line)]" />
+      <div className="h-[60px] rounded-2xl bg-[var(--line)]" />
+    </div>
   );
 }

@@ -3,6 +3,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canViewJobBoard, canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
+import { subDisplayName } from "@/lib/notifications/sub-field-notify";
 
 /**
  * Everything the board's project drawer shows for one job: the schedule
@@ -65,7 +66,7 @@ export async function GET(
       .order("start_date"),
     supabase
       .from("daily_logs")
-      .select("id, text, started_at, ended_at, photo_storage_paths, author_id, kind")
+      .select("id, text, started_at, ended_at, photo_storage_paths, author_id, subcontractor_id, kind")
       .eq("project_id", id)
       .gte("started_at", threeWeeksAgo)
       .order("started_at", { ascending: false })
@@ -91,18 +92,46 @@ export async function GET(
       .order("change_order_number"),
   ]);
 
-  // Author names for the logs.
+  // Author names for the logs. Sub posts have no author_id; they're signed
+  // by the company ("MGL Tile Inc (Marcio)") instead of "Crew". Both id
+  // lists drop nulls before the `.in()` (an `in.(null)` took /projects
+  // down: 3058dad).
   const authorIds = Array.from(
     new Set((logs ?? []).map((l) => l.author_id).filter(Boolean) as string[]),
   );
+  const subIds = Array.from(
+    new Set((logs ?? []).map((l) => (l.author_id ? null : l.subcontractor_id)).filter(Boolean) as string[]),
+  );
   const authorName = new Map<string, string>();
-  if (authorIds.length) {
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .in("id", authorIds);
-    for (const p of profiles ?? []) authorName.set(p.id, p.full_name ?? "");
-  }
+  const subLabel = new Map<string, string>();
+  await Promise.all([
+    authorIds.length
+      ? supabase
+          .from("profiles")
+          .select("id, full_name")
+          .in("id", authorIds)
+          .then(({ data: profiles }) => {
+            for (const p of profiles ?? []) authorName.set(p.id, p.full_name ?? "");
+          })
+      : null,
+    subIds.length
+      ? supabase
+          .from("subcontractors")
+          .select("id, company_name, contact_name")
+          .in("id", subIds)
+          .then(({ data: subs }) => {
+            for (const s of subs ?? []) {
+              if (s.company_name) subLabel.set(s.id, subDisplayName({ company_name: s.company_name, contact_name: s.contact_name }));
+            }
+          })
+      : null,
+  ]);
+  const logAuthor = (l: { author_id: string | null; subcontractor_id: string | null }) =>
+    l.author_id
+      ? authorName.get(l.author_id) || "Crew"
+      : l.subcontractor_id
+        ? subLabel.get(l.subcontractor_id) || "Sub"
+        : "Crew";
 
   // Photo thumbs. Transforms are baked in at signing time — a signed URL with
   // ?width= appended afterwards returns the full-size image, not a thumbnail.
@@ -148,7 +177,7 @@ export async function GET(
         text: l.text,
         at: l.started_at,
         open: !l.ended_at,
-        author: authorName.get(l.author_id ?? "") || "Crew",
+        author: logAuthor(l),
         hoursAgo: Math.round((now.getTime() - new Date(l.started_at).getTime()) / 3600000),
         photos: paths.map((p) => thumbs.get(p)).filter((u): u is string => !!u),
       };

@@ -123,6 +123,40 @@ export function canApproveBillPay(email: string | null | undefined): boolean {
 }
 
 /**
+ * Who can bind Penney to a subcontract: sign a work order, master agreement
+ * or sub change order for Penney, send one, file a paper-signed copy, void a
+ * signed one, and approve the agreement templates (the legal text). Ryan
+ * only (ADDENDUM 2 of the sub portal v3 plan: there is no lawyer, so the
+ * owner who answers for the contract is the one who approves it).
+ *
+ * Deliberately NOT `requireCountersigner` / ESTIMATE_REVIEW_ROLES: those
+ * admit every `owner`, which today includes Bill Crowley, Aqil Khan, Nicole
+ * and Shannon. An email allowlist, checked on the REAL signed-in profile, and
+ * refused outright while impersonating: "view as" must never sign as Ryan,
+ * and Jorge viewing as Ryan must not either.
+ */
+export const SUB_AGREEMENT_SIGNER_EMAILS: readonly string[] = [
+  "rpenney@penneyconstructioninc.com",
+];
+
+/** Who the "only X can sign" refusals name. */
+export const SUB_AGREEMENT_SIGNER_NAMES = "Ryan";
+
+export function canSignSubAgreements(
+  user:
+    | {
+        isImpersonating?: boolean;
+        realProfile?: { email?: string | null } | null;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!user || user.isImpersonating) return false;
+  const email = user.realProfile?.email?.trim().toLowerCase();
+  return !!email && SUB_AGREEMENT_SIGNER_EMAILS.includes(email);
+}
+
+/**
  * Who answers "which job and budget line is this?" when Nicole taps Ask for
  * help on a cost she cannot place. Budget lines come off the estimates, so
  * the people who wrote them are the ones who can answer: Jorge and Ryan.

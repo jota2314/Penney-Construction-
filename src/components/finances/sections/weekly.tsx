@@ -12,6 +12,7 @@ import { NextWeekButton } from "@/components/invoices/next-week-button";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { CodexReviewButton } from "@/components/finances/codex-review-button";
+import { SubBillsWaiting } from "@/components/finances/sub-bills-waiting";
 import { formatMoney } from "@/lib/money";
 
 
@@ -148,25 +149,34 @@ export default async function WeekPage({
   const subContractorIds = uniq(subsRows.map((r) => r.subcontractor_id));
   const approverIds = uniq(subsRows.flatMap((r) => [r.pay_approved_by, r.approved_for_pay_by]));
 
-  const [{ data: lineBillRows }, { data: sameNumberRows }, { data: contractRows }, { data: vendorBillRows }, { data: subRecordRows }, { data: approverRows }] =
+  const [{ data: lineBillRows }, { data: sameNumberRows }, { data: contractRows }, { data: vendorBillRows }, { data: unlinkedVendorBillRows }, { data: subRecordRows }, { data: approverRows }] =
     subsRows.length === 0
-      ? [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
+      ? [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
       : await Promise.all([
           // Everything ever billed to the same budget lines — the line's remaining budget.
           supabase.from("invoices").select("id, estimate_line_item_id, amount").in("estimate_line_item_id", orNil(subLineIds)),
           // Same vendor + same invoice number anywhere in the books — the double-entry check.
           supabase.from("invoices").select("id, vendor_name, invoice_number, amount, split_group_id").in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]).in("invoice_number", subInvoiceNumbers.length ? subInvoiceNumbers : ["—"]),
-          // Awarded contract per sub per job.
-          supabase.from("project_subcontractors").select("project_id, subcontractor_id, contract_amount").in("project_id", orNil(subProjectIds)),
-          // Everything this vendor has billed on the job so far — contract running total.
-          supabase.from("invoices").select("id, project_id, vendor_name, amount").in("project_id", orNil(subProjectIds)).in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]),
+          // Awarded contract per sub per job. Active rows only: a QR visit
+          // ('visit_only'), a finished or removed sub is not a contract.
+          supabase.from("project_subcontractors").select("project_id, subcontractor_id, contract_amount").in("project_id", orNil(subProjectIds)).eq("status", "active"),
+          // Everything this sub has billed on the job so far — contract running
+          // total. Two sets, merged by id below: bills linked to his sub record
+          // (catches vendor-name variants), plus bills on the same job with no
+          // subcontractor_id under the same vendor name (older bills never got
+          // the link, so the sub-id match alone understates what he's billed).
+          supabase.from("invoices").select("id, project_id, subcontractor_id, vendor_name, amount").in("project_id", orNil(subProjectIds)).in("subcontractor_id", orNil(subContractorIds)),
+          supabase.from("invoices").select("id, project_id, subcontractor_id, vendor_name, amount").in("project_id", orNil(subProjectIds)).is("subcontractor_id", null).in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]),
           supabase.from("subcontractors").select("id, insurance_expiry").in("id", orNil(subContractorIds)),
           supabase.from("profiles").select("id, full_name").in("id", orNil(approverIds)),
         ]);
   const lineBills = lineBillRows ?? [];
   const sameNumber = sameNumberRows ?? [];
   const contracts = contractRows ?? [];
-  const vendorBills = vendorBillRows ?? [];
+  const vendorBills = [
+    ...new Map([...(vendorBillRows ?? []), ...(unlinkedVendorBillRows ?? [])].map((b) => [b.id, b])).values(),
+  ];
+  const normVendor = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
   const subRecords = subRecordRows ?? [];
   const approverName = new Map((approverRows ?? []).map((p) => [p.id, p.full_name as string | null]));
 
@@ -233,8 +243,14 @@ export default async function WeekPage({
     const contract = contracts.find((c) => c.project_id === r.project_id && c.subcontractor_id === r.subcontractor_id);
     const contractAmt = Number(contract?.contract_amount ?? 0);
     if (contractAmt > 0) {
+      // His linked bills, plus unlinked bills on the job under his vendor name.
       const billedToSub = vendorBills
-        .filter((b) => b.project_id === r.project_id && b.vendor_name === r.vendor_name)
+        .filter(
+          (b) =>
+            b.project_id === r.project_id &&
+            ((!!r.subcontractor_id && b.subcontractor_id === r.subcontractor_id) ||
+              (!b.subcontractor_id && normVendor(b.vendor_name) === normVendor(r.vendor_name))),
+        )
         .reduce((s, b) => s + Number(b.amount || 0), 0);
       notes.push(
         billedToSub > contractAmt + 0.005
@@ -546,6 +562,9 @@ export default async function WeekPage({
             })}
           </div>
         </div>
+
+        {/* sub portal invoices not filed yet; renders nothing when none */}
+        <SubBillsWaiting />
 
         {/* subs */}
         <div className="rounded-lg border bg-card overflow-hidden">

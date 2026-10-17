@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { resolveSubAccess, getSubProjectIds } from "@/lib/sub-portal/access";
+import { resolveSubAccess } from "@/lib/sub-portal/access";
+import { isSubOnJob } from "@/lib/sub-portal/active-jobs";
+import { normalizeTrade, isNonInstallerTrade, tradeLabel } from "@/lib/schedule/trade-keywords";
+import { refuseStaffBrowser } from "@/lib/sub-portal/staff-guard";
 import { notifySubScheduleEvent } from "@/lib/notifications/tagged-mentions";
 
 // The office fan-out (in-app + push + Gmail) takes seconds; the sub's tap
@@ -33,9 +36,11 @@ const uuidish = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
  * Every action notifies Jorge, Ryan, and the job's PM.
  */
 export async function POST(request: NextRequest) {
+  const refused = await refuseStaffBrowser(request);
+  if (refused) return refused;
   const access = await resolveSubAccess(request);
   if (!access) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  const { supabase, subId, contactName, companyName } = access;
+  const { supabase, subId, contactName, companyName, trades } = access;
   const subName = contactName || companyName;
 
   let body: {
@@ -116,8 +121,8 @@ export async function POST(request: NextRequest) {
     if (endDate < startDate) return NextResponse.json({ error: "End date has to be on or after the start" }, { status: 400 });
     if (!name) return NextResponse.json({ error: "Say what you'll be doing" }, { status: 400 });
 
-    const projectIds = await getSubProjectIds(supabase, subId);
-    if (!projectIds.includes(projectId)) {
+    // Same one rule as can_propose_on: a live, non-Office/Shop job he's on.
+    if (!(await isSubOnJob(supabase, subId, projectId))) {
       return NextResponse.json({ error: "That job isn't on your list" }, { status: 403 });
     }
 
@@ -128,14 +133,20 @@ export async function POST(request: NextRequest) {
     const creator = project?.assigned_pm ?? fallback?.id ?? null;
     if (!creator) return NextResponse.json({ error: "Couldn't file this. Call the office." }, { status: 500 });
 
-    const notes = [crew ? `Crew: ${crew}` : "", note].filter(Boolean).join("\n") || null;
+    // A confirmed daily row's name (and description) shows on the homeowner's
+    // Today card, so it carries a client-safe trade label. His own words go in
+    // notes (crew/office only) and in sub_response_note (what he sees in Dates).
+    const ownTrade = trades.map((t) => normalizeTrade(t)).find((t) => !!t && !isNonInstallerTrade(t));
+    const rowName = ownTrade ? tradeLabel(ownTrade) : "Sub work";
+    const notes = [`${subName}: ${name}`, crew ? `Crew: ${crew}` : "", note].filter(Boolean).join("\n");
+    const ownWords = [name, note].filter(Boolean).join(" · ").slice(0, 1000) || null;
     const confirmedWith = `${subName} (portal)`;
 
     const { data: created, error } = await supabase
       .from("schedule_phases")
       .insert({
         project_id: projectId,
-        name,
+        name: rowName,
         description: null,
         start_date: startDate,
         end_date: endDate,
@@ -156,7 +167,7 @@ export async function POST(request: NextRequest) {
         confirmed_with: confirmedWith,
         sub_response: "confirmed",
         sub_responded_at: nowIso,
-        sub_response_note: note || null,
+        sub_response_note: ownWords,
       })
       .select("id")
       .single();

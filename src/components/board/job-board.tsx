@@ -30,6 +30,8 @@ import { BoardTv } from "./board-tv";
 import { BoardCrew } from "./board-crew";
 import { BoardDrawer } from "./board-drawer";
 import { BoardPhasePanel } from "./board-phase-panel";
+import { SubsNeededChip } from "./subs-needed-sheet";
+import { SubsTodayStrip } from "./subs-today-strip";
 
 /**
  * The job board — the one schedule. (/schedule redirects here since 10/5.)
@@ -679,7 +681,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
             </span>
           )}
           <span className="hidden text-xs text-muted-foreground xl:inline">
-            {data.onsite.length} jobs on site · {crewOut} crew in today
+            {data.onsite.length} jobs on site · {crewOut} on site today
             {needNext > 0 && <span className="text-red-400"> · {needNext} need a remaining master plan</span>}
             {late > 0 && <span className="text-amber-500"> · {late} late steps</span>}
           </span>
@@ -691,6 +693,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
               <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />${Math.round(data.dueInWindow).toLocaleString()} to collect
             </span>
           )}
+          {mode !== "tv" && <SubsNeededChip />}
           {mode === "jobs" && (
             <Button size="sm" className="h-8" onClick={() => setAdding({ date: data.todayStr, n: Date.now() })}>
               <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
@@ -710,6 +713,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
         </div>
       </div>
 
+      {mode !== "tv" && <SubsTodayStrip onOpenProject={setOpenProject} />}
       {healthError && <p className="text-xs text-red-400">{healthError} — tap Refresh to retry.</p>}
       {scheduleReview.length > 0 && (
         <details className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2">

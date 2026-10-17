@@ -1,8 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { LEGACY_SUB_PORTAL_COOKIE, SUB_PORTAL_COOKIE } from "@/lib/sub-portal/auth";
 
 async function getOrigin() {
   const headersList = await headers();
@@ -69,5 +70,10 @@ export async function reconnectGoogle() {
 export async function signOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();
+  // A shared office PC must not stay signed in as a sub once the staff
+  // session is gone (the sub-portal staff guard only bites while it exists).
+  const jar = await cookies();
+  jar.delete(SUB_PORTAL_COOKIE);
+  jar.delete(LEGACY_SUB_PORTAL_COOKIE);
   redirect("/login");
 }

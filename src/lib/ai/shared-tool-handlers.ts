@@ -29,6 +29,8 @@ import { resolveVendorType } from "@/lib/finance/spend-category";
 import { isCalendarDate, scheduleDatePatch } from "@/lib/schedule/date-patch";
 import { revalidateSchedule } from "@/lib/schedule/revalidate";
 import { phaseTransitionDates } from "@/lib/schedule/transition-dates";
+import { describeSub, resolveSubName, subName, type SubDirectoryEntry } from "@/lib/schedule/suggest-subs";
+import { isNonInstallerSub } from "@/lib/schedule/trade-keywords";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -56,6 +58,7 @@ export async function executeTool(
       case "list_todos": return await listTodos(input, supabase);
       case "get_schedule": return await getSchedule(input, supabase);
       case "find_crew_member": return await findCrewMember(input, supabase);
+      case "find_subcontractor": return await findSubcontractor(input, supabase);
       case "list_invoices": return await listInvoices(input, supabase);
       case "list_payments": return await listPayments(input, supabase);
       case "list_change_orders": return await listChangeOrders(input, supabase);
@@ -361,11 +364,28 @@ async function getSchedule(input: Record<string, unknown>, supabase: SupabaseCli
       (emps ?? []).map((e) => [e.id, `${e.first_name} ${e.last_name}`.trim()])
     );
   }
+  // Same for subs, so a replacement assigned_sub_ids list keeps who's already on.
+  const subIds = new Set<string>();
+  for (const p of data ?? []) {
+    for (const id of (p.assigned_sub_ids ?? []) as string[]) subIds.add(id);
+  }
+  let subNameById = new Map<string, string>();
+  if (subIds.size > 0) {
+    const { data: subs } = await supabase
+      .from("subcontractors")
+      .select("id, company_name, contact_name")
+      .in("id", Array.from(subIds));
+    subNameById = new Map((subs ?? []).map((s) => [s.id, subName(s)]));
+  }
   const phases = (data ?? []).map((p) => ({
     ...p,
     assigned_employees: ((p.assigned_employee_ids ?? []) as string[]).map((id) => ({
       employee_id: id,
       full_name: nameById.get(id) ?? "(unknown)",
+    })),
+    assigned_subs: ((p.assigned_sub_ids ?? []) as string[]).map((id) => ({
+      sub_id: id,
+      company_name: subNameById.get(id) ?? "(unknown)",
     })),
   }));
 
@@ -404,6 +424,86 @@ async function findCrewMember(input: Record<string, unknown>, supabase: Supabase
   }));
 
   return JSON.stringify({ count: matches.length, query: raw, matches });
+}
+
+/**
+ * Strict sub lookup for scheduling. A first name alone never resolves on its
+ * own — the model gets the candidates and is told to ask. Suppliers are left
+ * out by `resolveSubName`.
+ */
+async function findSubcontractor(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const raw = String(input.query ?? "").trim();
+  if (!raw) return JSON.stringify({ error: "query is required (the sub's name as the user said it)" });
+
+  let builder = supabase.from("subcontractors").select("id, company_name, contact_name, trades, aliases, email, is_active");
+  if (input.include_inactive !== true) builder = builder.eq("is_active", true);
+  const { data, error } = await builder;
+  if (error) return JSON.stringify({ error: error.message });
+
+  const result = resolveSubName(raw, (data ?? []) as SubDirectoryEntry[]);
+  const matches = result.candidates.map(({ sub, match }) => ({
+    sub_id: sub.id,
+    company_name: sub.company_name,
+    contact_name: sub.contact_name,
+    trades: sub.trades ?? [],
+    matched_by: match,
+    is_active: sub.is_active !== false,
+  }));
+
+  let instruction: string;
+  if (result.unique) {
+    instruction = `use_sub_id ${result.unique.id} (${subName(result.unique)}).`;
+  } else if (matches.length === 0) {
+    instruction = `No sub matches "${raw}". Ask the user for the company name. Do not put the name in notes instead.`;
+  } else if (result.firstNameOnly && matches.length === 1) {
+    instruction = `Only a first-name match. Confirm with the user before using it: "Do you mean ${describeSub(result.candidates[0].sub)}?"`;
+  } else {
+    instruction = `More than one sub matches "${raw}". Ask the user which one: ${result.candidates
+      .map((c) => describeSub(c.sub))
+      .join(" or ")}? Do not guess.`;
+  }
+
+  return JSON.stringify({ count: matches.length, query: raw, matches, instruction });
+}
+
+/**
+ * The sub ids a schedule tool may write: real, active installers only. Any
+ * other id comes back as an error the model can act on.
+ */
+async function checkSubIds(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<{ ok: true; names: Map<string, string> } | { ok: false; error: string }> {
+  if (!ids.length) return { ok: true, names: new Map() };
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (ids.some((id) => !uuid.test(id))) {
+    return { ok: false, error: "assigned_sub_ids must be sub_id values from find_subcontractor." };
+  }
+  const { data, error } = await supabase
+    .from("subcontractors")
+    .select("id, company_name, contact_name, trades, is_active")
+    .in("id", ids);
+  if (error) return { ok: false, error: error.message };
+  const rows = (data ?? []) as SubDirectoryEntry[];
+  const found = new Map(rows.map((s) => [s.id, s]));
+  const missing = ids.filter((id) => !found.has(id) || found.get(id)?.is_active === false);
+  if (missing.length) {
+    return { ok: false, error: "One of those subs isn't an active sub. Resolve the name again with find_subcontractor." };
+  }
+  const supplier = rows.find((s) => isNonInstallerSub(s));
+  if (supplier) {
+    return { ok: false, error: `${subName(supplier)} is a supplier, not a sub. Suppliers don't go on the schedule.` };
+  }
+  return { ok: true, names: new Map(rows.map((s) => [s.id, subName(s)])) };
+}
+
+/** What the model tells the user after it puts subs on a phase: on it, not emailed. */
+function subsNotEmailedNote(names: string[], phaseConfirmed: boolean): string {
+  if (!names.length) return "";
+  const who = `${names.join(", ")} ${names.length === 1 ? "is" : "are"} on the phase; not emailed.`;
+  return phaseConfirmed
+    ? `${who} The phase is already confirmed: to send the schedule email, take the sub off and add them again on the Job Board.`
+    : `${who} Use Confirm & notify on the Job Board to send the schedule email.`;
 }
 
 async function assignCrewToProject(
@@ -1439,6 +1539,10 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
   const assignedIds = Array.from(
     new Set(rawIds.map((v) => String(v)).filter((s) => s.length > 0))
   );
+  const rawSubIds = Array.isArray(input.assigned_sub_ids) ? input.assigned_sub_ids : [];
+  const subIds = Array.from(new Set(rawSubIds.map((v) => String(v)).filter((s) => s.length > 0)));
+  const subCheck = await checkSubIds(supabase, subIds);
+  if (!subCheck.ok) return JSON.stringify({ error: subCheck.error });
 
   const insertData: Record<string, unknown> = {
     project_id: input.project_id ? String(input.project_id) : null,
@@ -1456,10 +1560,11 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
   };
   if (input.notes) insertData.notes = String(input.notes);
   if (assignedIds.length) insertData.assigned_employee_ids = assignedIds;
+  if (subIds.length) insertData.assigned_sub_ids = subIds;
 
   const { data, error } = await supabase
     .from("schedule_phases").insert(insertData)
-    .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids").single();
+    .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids, assigned_sub_ids").single();
 
   if (error) return JSON.stringify({ error: error.message });
 
@@ -1467,10 +1572,12 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     supabase, assignedIds, data.project_id as string | null, createdBy
   );
   if (data.project_id) revalidateSchedule(data.project_id);
+  // New phases start unconfirmed, so nobody — crew or sub — is emailed here.
+  const subMsg = subsNotEmailedNote(subIds.map((id) => subCheck.names.get(id) ?? "Sub"), false);
 
   return JSON.stringify({
     success: true,
-    message: `Phase "${data.name}" added${rosterMsg ? `. ${rosterMsg}` : ""}`,
+    message: `Phase "${data.name}" added${rosterMsg ? `. ${rosterMsg}` : ""}${subMsg ? `. ${subMsg}` : ""}`,
     phase: data,
   });
 }
@@ -1510,11 +1617,24 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
     updates.assigned_employee_ids = assignedIds;
   }
 
+  let subIds: string[] | null = null;
+  let subNames = new Map<string, string>();
+  if (Array.isArray(input.assigned_sub_ids)) {
+    subIds = Array.from(new Set(input.assigned_sub_ids.map((v) => String(v)).filter((s) => s.length > 0)));
+    const subCheck = await checkSubIds(supabase, subIds);
+    if (!subCheck.ok) return JSON.stringify({ error: subCheck.error });
+    subNames = subCheck.names;
+    updates.assigned_sub_ids = subIds;
+  }
+
   // Snapshot before the write — a LIVE (confirmed) phase re-notifies its
-  // people when dates move or someone new is put on it.
+  // crew when dates move or someone new is put on it. Subs the AI adds are
+  // never emailed (the office confirms and notifies them from the board), but
+  // subs already on a confirmed phase were told the old dates, so they get the
+  // date-change email, same as a move on the board.
   const { data: before, error: readError } = await supabase
     .from("schedule_phases")
-    .select("project_id, status, event_type, is_confirmed, is_manually_scheduled, start_date, end_date, assigned_employee_ids")
+    .select("project_id, status, event_type, is_confirmed, is_manually_scheduled, start_date, end_date, assigned_employee_ids, assigned_sub_ids")
     .eq("id", String(input.phase_id))
     .single();
   if (readError || !before) return JSON.stringify({ error: readError?.message ?? "Phase not found" });
@@ -1538,7 +1658,7 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   const { data, error } = await supabase
     .from("schedule_phases").update(updates).eq("id", String(input.phase_id))
-    .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids").single();
+    .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids, assigned_sub_ids").single();
 
   if (error) return JSON.stringify({ error: error.message });
 
@@ -1552,25 +1672,33 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
     );
   }
 
+  const oldSubs: string[] = before.assigned_sub_ids ?? [];
   let notifyMsg = "";
+  let skippedMsg = "";
   if (before?.is_confirmed && user?.id) {
     const oldEmps: string[] = before.assigned_employee_ids ?? [];
     const addedEmps = assignedIds?.filter((eid) => !oldEmps.includes(eid)) ?? [];
     const datesChanged =
       data.start_date !== before.start_date || data.end_date !== before.end_date;
     const emailed: string[] = [];
+    // New assignees: crew only (onlySubIds: []). Without it, adding one crew
+    // member re-sent "You're scheduled" to every sub already on the phase.
     if (addedEmps.length > 0) {
       const res = await notifySchedulePhaseAssignees({
         phaseId: String(input.phase_id),
         kind: "confirmed",
         actorId: user.id,
         onlyEmployeeIds: addedEmps,
+        onlySubIds: [],
       });
       emailed.push(...res.emailed);
     }
     if (datesChanged) {
       const existingEmps = (assignedIds ?? oldEmps).filter((eid) => oldEmps.includes(eid));
-      if (existingEmps.length > 0 || !assignedIds) {
+      // Subs already on a confirmed phase were told the old dates. Tell them
+      // about the move, like the board does. Subs added in this call stay un-emailed.
+      const existingSubs = (subIds ?? oldSubs).filter((sid) => oldSubs.includes(sid));
+      if (existingEmps.length > 0 || existingSubs.length > 0 || !assignedIds) {
         const res = await notifySchedulePhaseAssignees({
           phaseId: String(input.phase_id),
           kind: "updated",
@@ -1579,16 +1707,22 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
             `Dates: ${formatShortRange(before.start_date, before.end_date)} → ${formatShortRange(data.start_date, data.end_date)}`,
           ],
           onlyEmployeeIds: assignedIds ? existingEmps : undefined,
+          onlySubIds: existingSubs,
         });
         emailed.push(...res.emailed);
+        if (res.skipped.length) skippedMsg = `No email on file, not told: ${res.skipped.join(", ")}`;
+        else if (res.error && existingSubs.length > 0) skippedMsg = `Date-change email not sent (${res.error}); tell the subs on it from the Job Board`;
       }
     }
     if (emailed.length > 0) notifyMsg = `Schedule email sent to: ${emailed.join(", ")}`;
   }
 
+  const addedSubs = (subIds ?? []).filter((id) => !oldSubs.includes(id));
+  const subMsg = subsNotEmailedNote(addedSubs.map((id) => subNames.get(id) ?? "Sub"), !!before.is_confirmed);
+
   return JSON.stringify({
     success: true,
-    message: `Phase "${data.name}" updated${rosterMsg ? `. ${rosterMsg}` : ""}${notifyMsg ? `. ${notifyMsg}` : ""}`,
+    message: `Phase "${data.name}" updated${rosterMsg ? `. ${rosterMsg}` : ""}${notifyMsg ? `. ${notifyMsg}` : ""}${skippedMsg ? `. ${skippedMsg}` : ""}${subMsg ? `. ${subMsg}` : ""}`,
     phase: data,
   });
 }

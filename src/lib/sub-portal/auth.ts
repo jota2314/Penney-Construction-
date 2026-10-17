@@ -2,8 +2,16 @@ import { createHash } from "crypto";
 import type { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-/** Cookie set on successful phone+PIN login at /sub. */
-export const SUB_PORTAL_COOKIE = "sub_portal_token";
+/**
+ * v3 cookie, set on phone+PIN login at /sub and on a job-QR sign-up.
+ * Cookies under the old name (including every one the deleted office
+ * "open as this sub" route left in office browsers) are no longer read, so
+ * each sub re-enters phone + PIN once. The PIN is unchanged: the token that
+ * salts it is never rotated.
+ */
+export const SUB_PORTAL_COOKIE = "sub_portal_session";
+/** Pre-v3 name: only ever cleared, never read. */
+export const LEGACY_SUB_PORTAL_COOKIE = "sub_portal_token";
 export const SUB_PORTAL_COOKIE_MAX_AGE = 60 * 60 * 24 * 60; // 60 days
 
 /** Sign the sub in on this response — PIN login and job-QR sign-up both land here. */
@@ -15,6 +23,8 @@ export function setSubPortalCookie(res: NextResponse, token: string) {
     path: "/",
     maxAge: SUB_PORTAL_COOKIE_MAX_AGE,
   });
+  // A fresh login leaves no stale pre-v3 copy behind.
+  res.cookies.set(LEGACY_SUB_PORTAL_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
 }
 
 /** "9784300049" → "978-430-0049", the way phones read in the sub directory. */

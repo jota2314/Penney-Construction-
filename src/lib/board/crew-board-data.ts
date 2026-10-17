@@ -6,6 +6,9 @@ import { addDays, dateToStr, isClockInRow } from "./board-data";
 import { projectColor } from "./crew-colors";
 import { holidaysBetween, type Holiday } from "./holidays";
 import { getSiteForecasts, siteKey, type DayWeather } from "@/lib/weather/forecast";
+import { isNonInstallerSub } from "@/lib/schedule/trade-keywords";
+import { etTimeLabel } from "@/lib/sub-portal/et-day";
+import { isParkedPlanStep } from "@/lib/schedule/parked";
 
 /**
  * The crew board — who is where, each day.
@@ -120,8 +123,18 @@ export interface CrewBoardData {
   cells: Record<string, Record<string, CrewCell[]>>;
   /** Jobs the editor can assign someone to. */
   projects: CrewProjectOption[];
-  /** Every active sub, for adding a sub row. */
+  /** Every active sub that installs (no lumberyards or designers), for adding a sub row. */
   subs: { id: string; name: string }[];
+}
+
+/** A sub's day at a job from the portal (QR scan, post, clock). Presence, not payroll. */
+interface VisitRow {
+  project_id: string;
+  subcontractor_id: string;
+  visit_date: string;
+  first_seen_at: string | null;
+  posts: number | null;
+  photos: number | null;
 }
 
 interface PhaseRow {
@@ -140,6 +153,7 @@ interface PhaseRow {
   phase_scope: string | null;
   planned_start_date: string | null;
   estimate_line_item_id: string | null;
+  is_manually_scheduled: boolean | null;
 }
 
 /** Field roster — the people who get a row without being scheduled first. */
@@ -223,7 +237,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
   const firstStr = weeks[0].days[0].str;
   const lastStr = weeks[weeks.length - 1].days[6].str;
 
-  const [{ data: employeeRows }, { data: subRows }, { data: phaseRows }, { data: projectRows }] =
+  const [{ data: employeeRows }, { data: subRows }, { data: phaseRows }, { data: projectRows }, { data: visitRows }] =
     await Promise.all([
       supabase
         .from("employees")
@@ -231,13 +245,13 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
         .eq("status", "active"),
       supabase
         .from("subcontractors")
-        .select("id, company_name, contact_name, is_active")
+        .select("id, company_name, contact_name, trades, is_active")
         .eq("is_active", true)
         .order("company_name"),
       supabase
         .from("schedule_phases")
         .select(
-          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, planned_start_date, estimate_line_item_id, master_phase_id",
+          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, planned_start_date, estimate_line_item_id, master_phase_id, is_manually_scheduled",
         )
         .lte("start_date", lastStr)
         .gte("end_date", firstStr)
@@ -248,13 +262,24 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
         .in("status", ["in_progress", "contracted"])
         .eq("is_overhead", false)
         .order("name"),
+      // Subs who were at a job in the window, from their portal. Office-read
+      // only; anyone else (or a read error) just gets no visit rows.
+      supabase
+        .from("sub_site_visits")
+        .select("project_id, subcontractor_id, visit_date, first_seen_at, posts, photos")
+        .gte("visit_date", firstStr)
+        .lte("visit_date", lastStr),
     ]);
+  const visits = (visitRows ?? []) as VisitRow[];
 
   // Clock-in leftovers are attendance, not a plan — the actual-work mark in
-  // the corner of the day already says who worked where.
+  // the corner of the day already says who worked where. A "From Estimate"
+  // step still parked on its placeholder day isn't a scheduled day either,
+  // even with the awarded sub pre-filled on it.
   const phases = ((phaseRows ?? []) as PhaseRow[]).filter(
     (p) =>
       !isClockInRow(p) &&
+      !isParkedPlanStep(p) &&
       ((p.assigned_employee_ids?.length ?? 0) > 0 || (p.assigned_sub_ids?.length ?? 0) > 0),
   );
 
@@ -316,15 +341,18 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
   }));
   const employeeById = new Map(employees.map((e) => [e.id, e]));
 
-  const subs = ((subRows ?? []) as {
+  const subDirectory = (subRows ?? []) as {
     id: string;
     company_name: string | null;
     contact_name: string | null;
-  }[]).map((s) => ({
+    trades: string[] | null;
+  }[];
+  const subs = subDirectory.map((s) => ({
     id: s.id,
     name: s.company_name?.trim() || s.contact_name?.trim() || "Unnamed sub",
   }));
   const subById = new Map(subs.map((s) => [s.id, s]));
+  const suppliers = new Set(subDirectory.filter((s) => isNonInstallerSub(s)).map((s) => s.id));
 
   const scheduledEmp = new Set<string>();
   const scheduledSub = new Set<string>();
@@ -344,6 +372,14 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     const s = subById.get(id);
     if (!s) continue;
     people.push({ key: `sub:${id}`, kind: "sub", id, name: s.name, title: "Sub" });
+  }
+  // A sub who checked in somewhere this window gets a row even with nothing
+  // scheduled — that's the gap the office needs to see. Linked-but-idle subs
+  // don't; "+ Sub row" adds anyone else by hand.
+  for (const id of new Set(visits.map((v) => v.subcontractor_id))) {
+    const s = subById.get(id);
+    if (!s || scheduledSub.has(id)) continue;
+    people.push({ key: `sub:${id}`, kind: "sub", id, name: s.name, title: "Sub · checked in" });
   }
 
   // ── Cells ──
@@ -390,15 +426,38 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     .gte("started_at", firstStr + "T00:00:00Z")
     .lte("started_at", new Date().toISOString()).order("started_at", { ascending: true });
   const logs = (workLogs ?? []) as WorkLog[];
-  const projectIds = [...new Set(logs.map(l => l.project_id).filter((id): id is string => !!id))];
+  const projectIds = [...new Set([...logs.map(l => l.project_id), ...visits.map(v => v.project_id)].filter((id): id is string => !!id))];
   const lineIds = [...new Set(logs.map(l => l.estimate_line_item_id).filter((id): id is string => !!id))];
   const [actualProjects, actualLines] = await Promise.all([
     projectIds.length ? supabase.from("projects").select("id, name").in("id", projectIds) : { data: [] },
     lineIds.length ? supabase.from("estimate_line_items").select("id, description").in("id", lineIds) : { data: [] },
   ]);
+  const actualProjectNames = new Map((actualProjects.data ?? []).map(p => [p.id, p.name]));
   const actualWork = actualWorkByDay(logs, employeeRows ?? [],
-    new Map((actualProjects.data ?? []).map(p => [p.id, p.name])),
+    actualProjectNames,
     new Map((actualLines.data ?? []).map(l => [l.id, l.description])), cells);
+
+  // A sub's portal check-in marks his day the way a shift marks a worker's.
+  // Sub posts have no author, so they never reach actualWorkByDay.
+  for (const v of visits) {
+    if (!subById.has(v.subcontractor_id)) continue;
+    const key = `sub:${v.subcontractor_id}`;
+    const entries = ((actualWork[key] ??= {})[v.visit_date] ??= []);
+    if (entries.some((e) => e.projectId === v.project_id)) continue;
+    const posts = v.posts ?? 0;
+    const photos = v.photos ?? 0;
+    entries.push({
+      projectId: v.project_id,
+      projectName: actualProjectNames.get(v.project_id) ?? projectById.get(v.project_id)?.name ?? "Project",
+      task: [
+        v.first_seen_at ? `On site from ${etTimeLabel(v.first_seen_at)}` : "On site",
+        `${posts} post${posts === 1 ? "" : "s"}`,
+        photos ? `${photos} photo${photos === 1 ? "" : "s"}` : null,
+      ].filter(Boolean).join(" · "),
+      clockedIn: false,
+      differsFromPlan: !(cells[key]?.[v.visit_date] ?? []).some((c) => c.confirmed && c.projectId === v.project_id),
+    });
+  }
 
   // Include workers with actual shifts even if nobody scheduled them first.
   for (const key of Object.keys(actualWork)) {
@@ -423,6 +482,6 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     projects: Array.from(projectById.values())
       .filter((p) => p.status === "in_progress" || p.status === "contracted")
       .sort((a, b) => GROUP_RANK[a.group] - GROUP_RANK[b.group] || a.name.localeCompare(b.name)),
-    subs,
+    subs: subs.filter((s) => !suppliers.has(s.id)),
   };
 }
