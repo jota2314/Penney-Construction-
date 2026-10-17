@@ -7,6 +7,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ladderProblems, STAGE_LABEL, type Stage } from "./ladder";
 import { ITEM_COLUMNS, normalize, type SelectionItem } from "./service";
 import {
+  modelTokens,
+  productKeys,
   SELECTION_SUGGESTION_AGENT,
   SELECTION_SUGGESTION_KIND,
   SIGNAL_LABEL,
@@ -244,7 +246,7 @@ export async function suggestFromEmail(
     .eq("project_id", projectId).eq("kind", SELECTION_SUGGESTION_KIND).order("created_at", { ascending: false }).limit(200);
   const prior = (existing || []).map((s) => ({ status: s.status as string, p: s.payload as SelectionSuggestionPayload }));
   const fresh = suggestions.filter((s) => !prior.some(({ status, p }) => {
-    if (p?.v !== 1 || target(p) !== target(s.payload)) return false;
+    if (p?.v !== 1 || !sameProduct(p, s.payload)) return false;
     const same = fingerprint(p) === fingerprint(s.payload);
     return p.email?.id === email.id || (status === "pending" && (s.payload.op === "add" || same)) || (status === "dismissed" && same);
   }));
@@ -257,8 +259,10 @@ export async function suggestFromEmail(
   return { status: "read", suggestions, inserted: fresh.length, dropped, ...seen };
 }
 
-const target = (p: SelectionSuggestionPayload) =>
-  p.item_id ?? `new:${String(p.changes.brand_model || p.changes.name || "").replace(/\s+/g, " ").trim().toLowerCase()}`;
+const sameProduct = (a: SelectionSuggestionPayload, b: SelectionSuggestionPayload) => {
+  const kb = productKeys(b);
+  return productKeys(a).some((k) => kb.includes(k));
+};
 /** The change itself, without where it was read (refs and quotes name the email). */
 const PROVENANCE = ["price_ref", "selected_source", "price_date"];
 const fingerprint = (p: SelectionSuggestionPayload) =>
@@ -744,10 +748,7 @@ function productName(line: string) {
   return clip(line.replace(/^\s*\d{5,}\s+/, "").replace(/(\s+\d+(\.\d+)?)?(\s+\$?[\d,]+\.\d{2}){1,2}\s*$/, ""), 160) ?? line;
 }
 
-/** Model numbers and SKUs: tokens with a digit, 4+ characters. */
-function idTokensOf(s: string) {
-  return (s.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}[a-z0-9]/g) ?? []).filter((t) => /\d/.test(t) && t.replace(/\D/g, "").length >= 2);
-}
+const idTokensOf = modelTokens;
 function idTokens(i: SelectionItem) {
   return idTokensOf(`${i.brand_model ?? ""} ${i.name}`);
 }

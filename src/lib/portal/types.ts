@@ -80,6 +80,17 @@ export interface PortalDocument {
   staged: boolean;
 }
 
+/** A design document's cover image (rendering), shown as the Home hero. */
+export interface PortalDesignCover {
+  document_id: string;
+  title: string;
+  subtitle: string | null;
+  image_url: string;
+  /** The design document itself (PDF). */
+  url: string;
+  staged: boolean;
+}
+
 export interface PortalNeed {
   kind: "contract" | "change_order" | "decision";
   title: string;
@@ -144,6 +155,7 @@ export interface PortalData {
   selections: PortalDecision[];
   selection_sheet: PortalSelectionSheet | null;
   documents: PortalDocument[];
+  design_cover: PortalDesignCover | null;
   needed: PortalNeed[];
   photos: PortalPhoto[];
 }

@@ -80,17 +80,18 @@ export function SelectionsLogPanel({ projectId, onDrafted }: { projectId: string
     onDrafted?.();
   }
 
-  if (error) return <section className="rounded-lg border p-3 text-sm text-red-400">{error}</section>;
-  if (!data) return <section className="flex items-center gap-2 rounded-lg border p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading selections log…</section>;
+  if (error) return <section className="rounded-xl border bg-card p-4 text-sm text-red-400">{error}</section>;
+  if (!data) return <section className="flex items-center gap-2 rounded-xl border bg-card p-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading selections log…</section>;
 
   const names = new Map(data.items.map((i) => [i.id, i.name]));
 
   return (
-    <section className="rounded-lg border p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <section className="rounded-xl border bg-card p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <ClipboardList className="h-4 w-4 text-amber-500" />
-          <h4 className="text-sm font-semibold">Selections log ({data.items.length})</h4>
+          <h4 className="text-sm font-semibold">Selections log</h4>
+          {data.items.length > 0 && <span className="rounded-full bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">{data.items.length}</span>}
         </div>
         {data.items.length > 0 && (
           confirming ? (
@@ -106,7 +107,7 @@ export function SelectionsLogPanel({ projectId, onDrafted }: { projectId: string
         )}
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
-        One record per product. Updated through Claude (the /selections skill and Penney MCP) and approved email suggestions; every change keeps who, when and the source.
+        Every product on this job, with its price and where the price came from. Claude and approved email suggestions keep it current; each change records who, when and the source.
       </p>
       {message && <p className="mb-2 rounded bg-muted/50 p-2 text-xs">{message}</p>}
       <SelectionSuggestions suggestions={data.suggestions ?? []} onChanged={reload} />
@@ -141,7 +142,7 @@ export function SelectionsLogPanel({ projectId, onDrafted }: { projectId: string
         </ul>
       )}
 
-      {data.allowances.lines.length > 0 && (
+      {data.allowances.lines.some((l) => l.items > 0) && (
         <div className="mt-3 rounded-md bg-muted/40 p-2.5">
           <p className="mb-1 text-xs font-semibold">Allowance check (product + 6.25% tax + the line&apos;s markup)</p>
           <ul className="space-y-1">

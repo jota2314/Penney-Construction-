@@ -106,7 +106,7 @@ export async function loadPortalData(
 
   let docsQuery = supabase
     .from("client_portal_documents")
-    .select("id, kind, title, subtitle, storage_bucket, storage_path, filename, sort_order, published_at, created_at")
+    .select("id, kind, title, subtitle, storage_bucket, storage_path, filename, cover_bucket, cover_path, sort_order, published_at, created_at")
     .eq("project_id", projectId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
@@ -307,7 +307,8 @@ export async function loadPortalData(
 
   type DocRow = {
     id: string; kind: string; title: string; subtitle: string | null; storage_bucket: string;
-    storage_path: string; filename: string | null; published_at: string | null; created_at: string;
+    storage_path: string; filename: string | null; cover_bucket: string | null; cover_path: string | null;
+    published_at: string | null; created_at: string;
   };
   const docRows = (docsRes.data || []) as DocRow[];
 
@@ -315,6 +316,7 @@ export async function loadPortalData(
     ...sheets.map((s) => ({ bucket: s.pdf_bucket, path: s.pdf_path })),
     ...items.map((i) => ({ bucket: i.image_bucket, path: i.image_path })),
     ...docRows.map((d) => ({ bucket: d.storage_bucket, path: d.storage_path })),
+    ...docRows.map((d) => ({ bucket: d.cover_bucket, path: d.cover_path })),
   ]);
   const urlOf = (bucket: string | null, path: string | null) =>
     bucket && path ? signed.get(`${bucket}/${path}`) ?? null : null;
@@ -372,6 +374,17 @@ export async function loadPortalData(
       url,
       staged: !d.published_at,
     });
+  }
+  // Home hero: the rendering on a visible design document. Published covers
+  // win over staged ones so the staff preview reads like the client's page.
+  let designCover: PortalData["design_cover"] = null;
+  for (const d of [...docRows].sort((a, b) => Number(!!b.published_at) - Number(!!a.published_at))) {
+    if (d.kind !== "design" && d.kind !== "drawing") continue;
+    const image = urlOf(d.cover_bucket, d.cover_path);
+    const url = urlOf(d.storage_bucket, d.storage_path);
+    if (!image || !url) continue;
+    designCover = { document_id: d.id, title: d.title, subtitle: d.subtitle, image_url: image, url, staged: !d.published_at };
+    break;
   }
   for (const s of sheets) {
     const url = urlOf(s.pdf_bucket, s.pdf_path);
@@ -475,6 +488,7 @@ export async function loadPortalData(
     selections: decisions,
     selection_sheet: selectionSheet,
     documents,
+    design_cover: designCover,
     needed,
     photos,
   };

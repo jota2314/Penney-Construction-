@@ -89,10 +89,32 @@ function driftOf(item: SelectionItem, p: SelectionSuggestionPayload): string | n
 
 const key = (s: unknown) => String(s ?? "").trim().toLowerCase();
 
+/** Model numbers and SKUs in a text: tokens with a digit, 4+ characters ("pvtr42fhd", "2890768"). A size ("4x10") isn't one. */
+export function modelTokens(s: string): string[] {
+  return (s.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}[a-z0-9]/g) ?? [])
+    .filter((t) => /\d/.test(t) && t.replace(/\D/g, "").length >= 2 && !/^\d+x\d+$/.test(t));
+}
+
+/**
+ * What a suggestion is about: its log item, or for a new product its model
+ * numbers plus the quote line's part number. The model words a product
+ * differently from one read to the next ("Bertch PVTR42FHD SPEC" vs
+ * "Bertch PVTR42FHD"), so new products match on any shared model number.
+ */
+export function productKeys(p: SelectionSuggestionPayload): string[] {
+  if (p.item_id) return [p.item_id];
+  const line = String(p.changes.price_ref ?? "").match(/\bline ([^,(]+)/)?.[1] ?? "";
+  const keys = modelTokens(`${p.changes.brand_model ?? ""} ${p.changes.name ?? ""} ${line}`);
+  return keys.length ? keys : [`name:${key(p.changes.name)}`];
+}
+
 function duplicateOf(items: SelectionItem[], p: SelectionSuggestionPayload): string | null {
   const name = key(p.changes.name);
   const model = key(p.changes.brand_model);
-  const hit = items.find((i) => i.stage !== "removed" && (key(i.name) === name || (model && key(i.brand_model) === model)));
+  const keys = productKeys(p);
+  const hit = items.find((i) => i.stage !== "removed" && (
+    key(i.name) === name || (model && key(i.brand_model) === model) ||
+    modelTokens(`${i.brand_model ?? ""} ${i.name}`).some((t) => keys.includes(t))));
   return hit ? `Already in the log as "${hit.name}".` : null;
 }
 
