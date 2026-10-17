@@ -184,3 +184,84 @@ test('identical IDs deduplicate while conflicting records and invalid bank input
   assert.throws(() => summarizeCashFlow([], [], [bank({ direction: 'unknown' })], '2026-10-17'), /direction/);
   assert.throws(() => summarizeCashFlow([], [], [bank({ txn_date: '2026-02-30' })], '2026-10-17'), /date/);
 });
+
+test('year-to-date record headlines include October despite a September bank cutoff', () => {
+  const result = summarizeCashFlow([
+    receipt({ received_date: '2026-09-01', amount: 100 }), receipt({ amount: 200 }),
+  ], [bill({ paid_date: '2026-09-01', amount: 50 }), bill({ amount: 75 })], [bank()], '2026-10-17');
+  assert.equal(result.yearToDate.received, 300);
+  assert.equal(result.yearToDate.paidBills, 125);
+  assert.equal(result.later.records.received, 200);
+  assert.equal(result.months[9].records.paidBills, 75);
+  assert.equal('net' in result.yearToDate, false);
+  assert.equal('spent' in result.yearToDate, false);
+});
+
+test('payroll diagnostic recognizes ADP bills but never Adpro or duplicate/internal bills', () => {
+  const result = summarizeCashFlow([], [
+    bill({ vendor_name: 'ADP Payroll', source: 'bank_reconcile_payroll', paid_date: '2026-09-30', amount: 100 }),
+    bill({ vendor_name: 'Adpro Design', amount: 680 }),
+    bill({ vendor_name: 'ADP Payroll', paid_date: '2026-09-30', amount: 500, duplicate_of_id: 'original' }),
+    bill({ vendor_name: 'ADP Payroll', paid_date: '2026-09-30', amount: 600, payment_method: 'internal' }),
+  ], [bank({ description: 'ADP WAGE PAY', amount: 100 })], '2026-10-17');
+  assert.equal(result.payroll.recordedADPpayroll, 100);
+  assert.equal(result.payroll.bankPayroll, 100);
+  assert.equal(result.payroll.additionalBankPayroll, 0);
+  assert.deepEqual(result.payroll.uncertainOverlapMonths, []);
+  assert.equal(result.months[8].payroll.recordedBillCount, 1);
+  assert.equal(result.yearToDate.paidBills, 780);
+});
+
+test('candidate additional bank payroll is reported only in zero-payroll-bill months, never added to spending', () => {
+  const result = summarizeCashFlow([], [
+    bill({ vendor_name: 'ADP Payroll', paid_date: '2026-07-31', amount: 100 }),
+    bill({ vendor_name: 'Vendor', amount: 300 }),
+  ], [
+    bank({ txn_date: '2026-07-31', description: 'ADP WAGE PAY', amount: 100 }),
+    bank({ txn_date: '2026-08-31', description: 'ADP Tax', amount: 120 }),
+    bank({ txn_date: '2026-09-30', description: 'ADP PAYROLL FEES', amount: 20 }),
+  ], '2026-10-17');
+  assert.equal(result.payroll.recordedADPpayroll, 100);
+  assert.equal(result.payroll.bankPayroll, 240);
+  assert.equal(result.payroll.additionalBankPayroll, 140);
+  assert.equal(result.payroll.bankPayrollThrough, '2026-09-30');
+  assert.equal(result.months[6].payroll.additionalBankPayroll, 0);
+  assert.equal(result.months[7].payroll.additionalBankPayroll, 120);
+  assert.equal(result.months[8].payroll.additionalBankPayroll, 20);
+  assert.equal(result.yearToDate.paidBills, 400);
+});
+
+test('partial payroll overlap is flagged without adding an aggregate difference', () => {
+  const result = summarizeCashFlow([], [
+    bill({ vendor_name: 'ADP Payroll', paid_date: '2026-09-30', payment_status: 'partial', paid_amount: 40, amount: 100 }),
+  ], [bank({ description: 'ADP WAGE PAY', amount: 100 })], '2026-10-17');
+  assert.equal(result.payroll.recordedADPpayroll, 40);
+  assert.equal(result.payroll.additionalBankPayroll, 0);
+  assert.deepEqual(result.payroll.uncertainOverlapMonths, ['2026-09']);
+  assert.equal(result.months[8].payroll.overlapUncertain, true);
+});
+
+test('unresolved and undated payroll candidates prevent an unsupported additional amount', () => {
+  const unresolved = summarizeCashFlow([], [
+    bill({ vendor_name: 'ADP Payroll', paid_date: '2026-09-30', payment_status: 'partial', paid_amount: null }),
+  ], [bank({ description: 'ADP WAGE PAY', amount: 100 })], '2026-10-17');
+  assert.equal(unresolved.payroll.additionalBankPayroll, 0);
+  assert.equal(unresolved.months[8].payroll.recordedBillCount, 1);
+  assert.deepEqual(unresolved.payroll.uncertainOverlapMonths, ['2026-09']);
+  const undated = summarizeCashFlow([], [
+    bill({ vendor_name: 'ADP Payroll', paid_date: null, invoice_date: null, amount: 100 }),
+  ], [bank({ description: 'ADP WAGE PAY', amount: 100 })], '2026-10-17');
+  assert.equal(undated.payroll.additionalBankPayroll, 0);
+  assert.equal(undated.payroll.undatedBillCount, 1);
+  assert.deepEqual(undated.payroll.uncertainOverlapMonths, ['2026-09']);
+});
+
+test('absence of imported payroll has null coverage, not a complete zero-payroll claim', () => {
+  const result = summarizeCashFlow([], [bill({ vendor_name: 'ADP Payroll', amount: 100 })], [bank({ description: 'Vendor ACH' })], '2026-10-17');
+  assert.equal(result.payroll.bankPayroll, 0);
+  assert.equal(result.payroll.bankPayrollThrough, null);
+  assert.equal(result.payroll.additionalBankPayroll, 0);
+  assert.equal(result.months[9].payroll.recordedADPpayroll, 100);
+  assert.equal(result.months[9].payroll.bankPayrollCount, 0);
+  assert.equal('complete' in result.payroll, false);
+});
