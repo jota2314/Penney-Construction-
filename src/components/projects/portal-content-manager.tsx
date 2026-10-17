@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Eye, EyeOff, FileText, Loader2, Plus, Send, Undo2, Trash2, ListChecks } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { SelectionsLogPanel } from "./selections-log-panel";
+import { PortalDocumentCover } from "./portal-document-cover";
 
 // What the client sees on the portal, and the switch that puts it there.
 // Selection sheets and documents are STAGED until someone presses Publish;
@@ -17,7 +18,7 @@ interface SheetRow {
   show_prices: boolean; show_allowances: boolean; published_at: string | null;
   created_at: string; client_selection_items: { count: number }[];
 }
-interface DocRow { id: string; kind: string; title: string; filename: string | null; published_at: string | null; created_at: string }
+interface DocRow { id: string; kind: string; title: string; filename: string | null; cover_bucket: string | null; cover_path: string | null; published_at: string | null; created_at: string }
 interface DecisionRow { id: string; category: string; status: string; client_visible: boolean; client_done_at: string | null; client_dismissed_at: string | null; selected_value: string | null }
 interface ClientItemRow { id: string; name: string; client_action: "approved" | "removed"; client_action_at: string | null; client_selection_sheets: { project_id: string } }
 interface ClientPhaseRow { id: string; name: string; client_completed_at: string | null }
@@ -38,6 +39,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [decisions, setDecisions] = useState<DecisionRow[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
+  const [imageFiles, setImageFiles] = useState<FileRow[]>([]);
   const [clientItems, setClientItems] = useState<ClientItemRow[]>([]);
   const [clientPhases, setClientPhases] = useState<ClientPhaseRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,12 +52,12 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
 
   const fetchAll = useCallback(async () => {
     const supabase = createClient();
-    const [s, d, c, f, ci, cp] = await Promise.all([
+    const [s, d, c, f, img, ci, cp] = await Promise.all([
       supabase.from("client_selection_sheets")
         .select("id, title, revision, sheet_date, show_prices, show_allowances, published_at, created_at, client_selection_items(count)")
         .eq("project_id", projectId).order("created_at", { ascending: false }),
       supabase.from("client_portal_documents")
-        .select("id, kind, title, filename, published_at, created_at")
+        .select("id, kind, title, filename, cover_bucket, cover_path, published_at, created_at")
         .eq("project_id", projectId).order("sort_order").order("created_at", { ascending: false }),
       supabase.from("client_selections")
         .select("id, category, status, client_visible, client_done_at, client_dismissed_at, selected_value")
@@ -63,6 +65,12 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
       supabase.from("project_files")
         .select("id, filename, storage_bucket, storage_path, created_at")
         .eq("project_id", projectId).ilike("filename", "%.pdf").order("created_at", { ascending: false }),
+      // Pictures a design document's Home cover can be made from.
+      supabase.from("project_files")
+        .select("id, filename, storage_bucket, storage_path, created_at")
+        .eq("project_id", projectId)
+        .or("filename.ilike.%.jpg,filename.ilike.%.jpeg,filename.ilike.%.png,filename.ilike.%.webp")
+        .order("created_at", { ascending: false }),
       // What the client tapped on their portal (approve / remove / mark complete).
       supabase.from("client_selection_items")
         .select("id, name, client_action, client_action_at, client_selection_sheets!inner(project_id)")
@@ -78,6 +86,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
       docs: (d.data as DocRow[]) ?? [],
       decisions: (c.data as DecisionRow[]) ?? [],
       files: (f.data as FileRow[]) ?? [],
+      imageFiles: (img.data as FileRow[]) ?? [],
       clientItems: (ci.data as unknown as ClientItemRow[]) ?? [],
       clientPhases: (cp.data as ClientPhaseRow[]) ?? [],
     };
@@ -88,6 +97,7 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
     setDocs(r.docs);
     setDecisions(r.decisions);
     setFiles(r.files);
+    setImageFiles(r.imageFiles);
     setClientItems(r.clientItems);
     setClientPhases(r.clientPhases);
     setLoading(false);
@@ -176,6 +186,14 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
       {live ? "Live" : "Draft"}
     </span>
   );
+
+  // Same pick as the portal loader: the client's Home opens on the first
+  // published design/drawing document that has a picture.
+  const homeCoverId = docs.find((d) => d.published_at && (d.kind === "design" || d.kind === "drawing") && d.cover_path)?.id ?? null;
+  const coverNote = (d: DocRow) =>
+    !d.published_at ? "The client sees it once this document is published."
+      : d.id === homeCoverId ? "On the client's Home now."
+      : "Another published document's picture shows first.";
 
   const clientDecisions = decisions.filter((d) => d.client_done_at || d.client_dismissed_at);
   const clientChanges = clientItems.length + clientDecisions.length + clientPhases.length;
@@ -292,6 +310,16 @@ export function PortalContentManager({ projectId, userId }: { projectId: string;
                     </div>
                     <LiveBadge live={live} />
                   </div>
+                  {(d.kind === "design" || d.kind === "drawing") && (
+                    <PortalDocumentCover
+                      projectId={projectId}
+                      doc={{ id: d.id, live, cover_bucket: d.cover_bucket, cover_path: d.cover_path }}
+                      imageFiles={imageFiles}
+                      note={coverNote(d)}
+                      disabled={!!busy}
+                      onChanged={load}
+                    />
+                  )}
                   <div className="mt-2 flex flex-wrap gap-2">
                     {confirming === key ? (
                       <>
