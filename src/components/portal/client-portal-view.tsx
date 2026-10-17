@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, Camera, Check, ChevronRight, FileText } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import { scheduleProgress } from "@/lib/schedule/progress";
 import { deriveCurrentScheduleActivity } from "@/lib/schedule/health";
 import type {
   PortalData,
   PortalDecision,
+  PortalDesignCover,
   PortalDocument,
   PortalDocumentGroup,
   PortalPhoto,
@@ -276,17 +278,23 @@ function Empty({ children }: { children: React.ReactNode }) {
 function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab) => void; upcoming: PortalData["schedule"]; today: string }) {
   const t = data.today_on_site;
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
-  const sheet = data.selection_sheet;
-  const f = data.financials;
-  const counts = sheet ? countStatuses(sheet.items) : null;
-
   return (
     <>
-      <section className="card p-4">
-        <p className="label">Needed from you</p>
-        {data.needed.length === 0 ? (
-          <p className="mt-2 text-[16px] font-semibold">Nothing right now. We&apos;ll email you when we need something.</p>
-        ) : (
+      {data.design_cover && <DesignHero cover={data.design_cover} />}
+
+      {data.needed.length === 0 ? (
+        <section className="card flex items-center gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#EEF5F0] text-[#2F6B4F]">
+            <Check className="h-5 w-5" strokeWidth={3} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[16px] font-bold">You&apos;re all caught up</p>
+            <p className="text-[14px] leading-snug text-[var(--muted)]">Nothing needed from you right now. We&apos;ll email you when we need something.</p>
+          </div>
+        </section>
+      ) : (
+        <section className="card border-l-4 border-l-[var(--accent)] p-4">
+          <p className="label">Needed from you</p>
           <ul className="mt-2 divide-y divide-[var(--line)]">
             {data.needed.map((n, i) => (
               <li key={i} className="flex items-center justify-between gap-3 py-3">
@@ -302,8 +310,8 @@ function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab)
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
 
       {showToday && t && (
         <section className="card border-l-4 border-l-[var(--accent)] p-4">
@@ -349,39 +357,212 @@ function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab)
         {upcoming.length === 0 ? (
           <p className="mt-2 text-[15px] text-[var(--muted)]">{data.project.status === "completed" ? "Your project is complete." : data.schedule.length === 0 ? "Your schedule will appear here once your start date is set." : data.schedule.every(phaseDone) ? "All scheduled work is complete." : "The team is reviewing the next schedule update."}</p>
         ) : (
-          <ul className="mt-2 divide-y divide-[var(--line)]">
-            {upcoming.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-                <span className="text-[16px] font-semibold">{p.name}</span>
-                <span className="shrink-0 text-[14px] text-[var(--muted)]">
-                  {p.status === "in_progress" && p.start_date && p.start_date <= today ? "In progress" : p.firm ? fmtShort(p.start_date) : weekOf(p.start_date)}
-                </span>
-              </li>
-            ))}
+          <ul className="mt-1 divide-y divide-[var(--line)]">
+            {upcoming.map((p) => {
+              const inProgress = p.status === "in_progress" && !!p.start_date && p.start_date <= today;
+              return (
+                <li key={p.id} className="flex items-center gap-3 py-3">
+                  <DateTile date={p.start_date} week={!p.firm && !inProgress} active={inProgress} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[16px] font-semibold leading-snug">{p.name}</span>
+                    <span className="block text-[13px] text-[var(--muted)]">
+                      {inProgress ? "In progress" : p.firm ? `Confirmed · ${fmtShort(p.start_date)}` : weekOf(p.start_date)}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
 
+      <SelectionsCard data={data} onOpen={() => go("selections")} />
+      <PaymentsCard data={data} onOpen={() => go("payments")} />
+
       <div className="grid grid-cols-2 gap-3">
-        <Shortcut onClick={() => go("selections")} title="Selections"
-          line={sheet ? [sheet.title.replace(/^Fixture \+ Finish /, ""), sheet.revision].filter(Boolean).join(" ") : data.selections.length ? `${data.selections.length} item${data.selections.length === 1 ? "" : "s"}` : "None right now"}
-          sub={counts ? `${counts.selected} selected · ${counts.pending} pending` : undefined} draft={sheet?.staged} />
-        <Shortcut onClick={() => go("documents")} title="Documents" line={`${data.documents.length} file${data.documents.length === 1 ? "" : "s"}`} />
-        <Shortcut onClick={() => go("payments")} title="Payments"
-          line={f ? `${fmt(f.total_payments_received)} paid` : "—"} sub={f ? `of ${fmt(f.adjusted_contract)}` : undefined} />
-        <Shortcut onClick={() => go("photos")} title="Photos" line={`${data.photos.length} photo${data.photos.length === 1 ? "" : "s"}`} />
+        <DocumentsTile docs={data.documents} onOpen={() => go("documents")} />
+        <PhotosTile photos={data.photos} onOpen={() => go("photos")} />
       </div>
     </>
   );
 }
 
-function Shortcut({ title, line, sub, onClick, draft }: { title: string; line: string; sub?: string; onClick: () => void; draft?: boolean }) {
+// The project's design rendering, laid out like the cover of the client
+// design presentation: the picture, then the dark panel with the title.
+function DesignHero({ cover }: { cover: PortalDesignCover }) {
   return (
-    <button onClick={onClick} className="card flex min-h-[92px] flex-col items-start justify-start p-3.5 text-left">
-      <p className="label">{title}</p>
-      <p className="mt-1 text-[16px] font-extrabold leading-tight">{line}</p>
-      {sub && <p className="mt-0.5 text-[13px] text-[var(--muted)]">{sub}</p>}
-      {draft && <p className="mt-1.5"><Draft>Draft</Draft></p>}
+    <section className="card overflow-hidden sm:grid sm:grid-cols-[minmax(0,5fr)_minmax(0,8fr)]">
+      <a href={cover.url} target="_blank" rel="noreferrer" className="block bg-[var(--line)] sm:order-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={cover.image_url} alt={`${cover.title} rendering`} className="aspect-[3/2] h-full w-full object-cover" />
+      </a>
+      <div className="flex flex-col justify-between gap-4 bg-[var(--ink)] p-4 text-white sm:order-1 sm:p-5">
+        <div>
+          {cover.staged && <p className="mb-2"><Draft /></p>}
+          <p className="text-[12px] font-bold uppercase tracking-[.08em] text-[#E39A72]">Your design</p>
+          <h2 className="mt-1 text-[21px] font-extrabold leading-tight">{cover.title}</h2>
+          {cover.subtitle && <p className="mt-1 text-[14px] text-white/75">{cover.subtitle}</p>}
+          <p className="mt-2 text-[13px] leading-snug text-white/65">Design illustration. The finishes you choose are tracked in Selections.</p>
+        </div>
+        <a href={cover.url} target="_blank" rel="noreferrer"
+          className="btn w-full bg-white text-[var(--ink)] active:bg-[var(--paper)]">
+          Open presentation <ArrowUpRight className="h-4 w-4" strokeWidth={2.5} aria-hidden />
+        </a>
+      </div>
+    </section>
+  );
+}
+
+// Calendar tile for Up next. Estimated phases show their week's Monday.
+function DateTile({ date, week, active }: { date: string | null; week: boolean; active: boolean }) {
+  const d = date ? parseDay(date) : null;
+  if (d && week) d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return (
+    <span className={`flex h-[52px] w-[50px] shrink-0 flex-col items-center justify-center rounded-xl border ${active ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)] bg-[var(--paper)]"}`}>
+      {d ? (
+        <>
+          <span className={`text-[11px] font-bold uppercase leading-none tracking-[.06em] ${active ? "text-white/85" : "text-[var(--accent-dark)]"}`}>
+            {d.toLocaleDateString("en-US", { month: "short" })}
+          </span>
+          <span className="mt-0.5 text-[20px] font-extrabold leading-none">{d.getDate()}</span>
+        </>
+      ) : <span className="text-[12px] font-bold text-[var(--muted)]">TBD</span>}
+    </span>
+  );
+}
+
+function CardHead({ title, action }: { title: string; action: string }) {
+  return (
+    <span className="flex items-center justify-between gap-3">
+      <span className="label">{title}</span>
+      <span className="inline-flex items-center text-[14px] font-bold text-[var(--accent-dark)]">
+        {action}<ChevronRight className="h-4 w-4" strokeWidth={2.5} aria-hidden />
+      </span>
+    </span>
+  );
+}
+
+const HOME_THUMBS = 8;
+
+// Selections at a glance: the product photos from the current sheet and a
+// bar split by status, in the same colors as the Selections tab.
+function SelectionsCard({ data, onOpen }: { data: PortalData; onOpen: () => void }) {
+  const sheet = data.selection_sheet;
+  const decisions = data.selections.filter((s) => s.client_visible !== false);
+  const items = sheet ? sheet.items.filter((i) => i.client_action !== "removed") : [];
+  const counts = sheet ? countStatuses(sheet.items) : null;
+  const withPhotos = items.filter((i) => i.image_url);
+  const shown = withPhotos.slice(0, HOME_THUMBS);
+  const more = withPhotos.length - shown.length;
+  const order = Object.keys(STATUS) as SelectionItemStatus[];
+  const title = sheet
+    ? [sheet.title.replace(/^Fixture \+ Finish /, ""), sheet.revision].filter(Boolean).join(" ")
+    : decisions.length ? `${decisions.length} decision${decisions.length === 1 ? "" : "s"}` : "None right now";
+
+  return (
+    <button onClick={onOpen} className="card block w-full p-4 text-left">
+      <CardHead title="Selections" action="View all" />
+      <span className="mt-1 block text-[19px] font-extrabold leading-tight">{title}</span>
+      {sheet?.staged && <span className="mt-1.5 block"><Draft>Draft</Draft></span>}
+      {!sheet && <span className="mt-1 block text-[14px] text-[var(--muted)]">{decisions.length ? "Open to see what we need you to choose." : "We'll email you when there's something to choose."}</span>}
+
+      {shown.length > 0 && (
+        <span className="mt-3 grid grid-cols-4 gap-2">
+          {shown.map((it, i) => {
+            const last = i === shown.length - 1 && more > 0;
+            return (
+              <span key={it.id} className="relative block aspect-square overflow-hidden rounded-xl border border-[var(--line)] bg-white">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={it.image_url!} alt={it.name} loading="lazy" className="h-full w-full object-contain p-1" />
+                <span className="absolute left-1.5 top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: STATUS[itemStatus(it)].color }} />
+                {last && (
+                  <span className="absolute inset-0 flex items-center justify-center bg-[rgba(37,45,43,0.72)] text-[16px] font-extrabold text-white">+{more}</span>
+                )}
+              </span>
+            );
+          })}
+        </span>
+      )}
+
+      {counts && items.length > 0 && (
+        <>
+          <span className="mt-3 flex h-2 overflow-hidden rounded-full bg-[var(--line)]">
+            {order.filter((k) => counts[k] > 0).map((k) => (
+              <span key={k} className="h-full" style={{ width: `${(counts[k] / items.length) * 100}%`, background: STATUS[k].color }} />
+            ))}
+          </span>
+          <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[13px] text-[var(--muted)]">
+            {order.filter((k) => counts[k] > 0).map((k) => (
+              <span key={k} className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ background: STATUS[k].color }} />
+                <span><b className="text-[var(--ink)]">{counts[k]}</b> {STATUS[k].label.toLowerCase()}</span>
+              </span>
+            ))}
+          </span>
+        </>
+      )}
+    </button>
+  );
+}
+
+function PaymentsCard({ data, onOpen }: { data: PortalData; onOpen: () => void }) {
+  const f = data.financials;
+  if (!f) return null;
+  const total = f.adjusted_contract || f.contract_value;
+  const paidPct = total > 0 ? Math.min(100, Math.round((f.total_payments_received / total) * 100)) : 0;
+  return (
+    <button onClick={onOpen} className="card block w-full p-4 text-left">
+      <CardHead title="Payments" action="Details" />
+      <span className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
+        <span className="text-[22px] font-extrabold leading-tight">
+          {fmt(f.total_payments_received)} <span className="text-[14px] font-semibold text-[var(--muted)]">paid</span>
+        </span>
+        <span className="text-[14px] text-[var(--muted)]">of {fmt(total)}</span>
+      </span>
+      <span className="mt-2.5 block h-2 overflow-hidden rounded-full bg-[var(--line)]">
+        <span className="block h-full rounded-full bg-[#2F6B4F]" style={{ width: `${paidPct}%` }} />
+      </span>
+      <span className="mt-1.5 block text-[13px] text-[var(--muted)]">{paidPct}% of your contract paid</span>
+    </button>
+  );
+}
+
+function DocumentsTile({ docs, onOpen }: { docs: PortalDocument[]; onOpen: () => void }) {
+  const groups = DOC_GROUPS.filter((g) => docs.some((d) => (d.group === "drawing" ? "design" : d.group) === g.key)).map((g) => g.label);
+  return (
+    <button onClick={onOpen} className="card flex min-h-[132px] flex-col items-start p-3.5 text-left">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--paper)] text-[var(--accent-dark)]">
+        <FileText className="h-5 w-5" strokeWidth={2.25} aria-hidden />
+      </span>
+      <span className="label mt-2.5 block">Documents</span>
+      <span className="mt-0.5 block text-[17px] font-extrabold leading-tight">{docs.length} file{docs.length === 1 ? "" : "s"}</span>
+      {groups.length > 0 && <span className="mt-0.5 block text-[13px] leading-snug text-[var(--muted)]">{groups.join(" · ")}</span>}
+    </button>
+  );
+}
+
+function PhotosTile({ photos, onOpen }: { photos: PortalPhoto[]; onOpen: () => void }) {
+  if (photos.length === 0) {
+    return (
+      <button onClick={onOpen} className="card flex min-h-[132px] flex-col items-start p-3.5 text-left">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--paper)] text-[var(--accent-dark)]">
+          <Camera className="h-5 w-5" strokeWidth={2.25} aria-hidden />
+        </span>
+        <span className="label mt-2.5 block">Photos</span>
+        <span className="mt-0.5 block text-[17px] font-extrabold leading-tight">None yet</span>
+        <span className="mt-0.5 block text-[13px] leading-snug text-[var(--muted)]">Site photos appear once work starts</span>
+      </button>
+    );
+  }
+  return (
+    <button onClick={onOpen} className="card relative block min-h-[132px] overflow-hidden text-left">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={photos[0].thumb} alt="Latest progress photo" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+      <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-3.5 pt-8 text-white">
+        <span className="block text-[12px] font-bold uppercase tracking-[.08em] text-white/80">Photos</span>
+        <span className="block text-[17px] font-extrabold leading-tight">{photos.length} photo{photos.length === 1 ? "" : "s"}</span>
+        <span className="block text-[13px] text-white/80">Latest {fmtShort(photos[0].date)}</span>
+      </span>
     </button>
   );
 }
