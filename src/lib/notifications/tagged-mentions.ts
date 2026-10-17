@@ -9,7 +9,12 @@ import {
   testModeSubject,
 } from "@/lib/notifications/test-mode";
 
-export type MentionSource =
+// The test-mode switch, re-exported so every notifier imports it from one
+// place (sub-field-notify uses it). Same functions, no behavior change.
+export { applyTestModeRecipients, isNotificationTestMode, testModeSubject };
+
+/** The sources the notifiers in this file write: in-app + push + email. */
+export type EmailedMentionSource =
   | "company_post"
   | "daily_log"
   | "project_update"
@@ -21,11 +26,22 @@ export type MentionSource =
   | "sub_schedule"
   | "sub_signup";
 
+/**
+ * Written only by sub-field-notify.ts (never through deliverNotifications):
+ * in-app + push, never email. Allowed by migration 20261017120000. The
+ * emailing notifiers here take EmailedMentionSource, so handing them one of
+ * these is a type error, not just a comment.
+ */
+export type SubNoticeSource = "sub_field" | "sub_invoice" | "sub_agreement" | "sub_digest";
+
+/** Every app_notifications.source_type the app writes. */
+export type MentionSource = EmailedMentionSource | SubNoticeSource;
+
 type NotifyTaggedProfilesInput = {
   actorId: string;
   actorName: string;
   recipientProfileIds: string[];
-  sourceType: MentionSource;
+  sourceType: EmailedMentionSource;
   sourceId: string;
   title: string;
   body: string;
@@ -72,7 +88,7 @@ export async function getServerGmailAccessToken(
   return null;
 }
 
-type RecipientProfile = {
+export type RecipientProfile = {
   id: string;
   email: string | null;
   full_name: string | null;
@@ -100,7 +116,7 @@ async function deliverNotifications(
   args: {
     actorId: string;
     deliveries: NotificationDelivery[];
-    sourceType: MentionSource;
+    sourceType: EmailedMentionSource;
     sourceId: string;
     body: string;
     url: string;
@@ -706,8 +722,9 @@ export async function notifyTeamOfFeedPost({
 }
 
 
-// Who hears about a sub's schedule moves, on top of the job's PM.
-const SUB_SCHEDULE_OFFICE_EMAILS = [
+// Who hears about a sub's schedule moves, on top of the job's PM. The first
+// (Jorge) also carries every sub notice, since subs have no profile.
+export const SUB_SCHEDULE_OFFICE_EMAILS = [
   "jbetancur@penneyconstructioninc.com",
   "rpenney@penneyconstructioninc.com",
 ];
