@@ -11,9 +11,9 @@ await db.exec(`alter table public.schedule_phases add column client_completed_at
 create function public.fixture_touch() returns trigger language plpgsql as $$begin new.updated_at=clock_timestamp();return new;end$$;
 create trigger touch_phase before update on public.schedule_phases for each row execute function public.fixture_touch();
 create trigger touch_log before update on public.daily_logs for each row execute function public.fixture_touch();`);
-await db.exec(read('../supabase/migrations/20261017003312_inspection_schedule_lifecycle.sql'));
-await db.exec(read('../supabase/migrations/20261017003318_schedule_field_progress_review.sql'));
-await db.exec(read('../supabase/migrations/20261017005636_inspection_link_concurrency.sql'));
+await db.exec(read('../supabase/migrations/20261017005039_inspection_schedule_lifecycle.sql'));
+await db.exec(read('../supabase/migrations/20261017005130_schedule_field_progress_review.sql'));
+await db.exec(read('../supabase/migrations/20261017011240_inspection_link_concurrency.sql'));
 await db.exec(`create trigger fixture_estimate_sync after update of status on public.projects for each row execute function public.sync_estimate_status_on_project_change();`);
 after(() => db.close());
 const owner='00000000-0000-4000-8000-000000000001', field='00000000-0000-4000-8000-000000000002';

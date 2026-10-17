@@ -17,8 +17,8 @@ insert into public.projects(id,name,status,contract_value) values('${project}','
 select set_config('request.jwt.claim.sub','${owner}',false);
 select set_config('request.jwt.claim.role','authenticated',false);
 `);
-await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261017003312_inspection_schedule_lifecycle.sql', import.meta.url), 'utf8'));
-await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261017005636_inspection_link_concurrency.sql', import.meta.url), 'utf8'));
+await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261017005039_inspection_schedule_lifecycle.sql', import.meta.url), 'utf8'));
+await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261017011240_inspection_link_concurrency.sql', import.meta.url), 'utf8'));
 after(async () => db.close());
 
 const one = async (sql, params=[]) => {
