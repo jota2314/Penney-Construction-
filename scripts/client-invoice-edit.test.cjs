@@ -28,7 +28,7 @@ async function run(patch={},payload=input,stamp='2026-10-01T00:00:00Z'){
  assert.equal(args.p_invoice_id,'invoice-4');assert.equal(args.p_project_id,'test-job');
  assert.equal(args.p_expected_updated_at,'2026-10-01T00:00:00Z');
  assert.equal(JSON.stringify(args.p_line_items),JSON.stringify(input.line_items));
- assert.deepEqual(state.invalidations,['/projects/test-job']);
+ assert.deepEqual(state.invalidations,['/projects/test-job','/ceo','/money']);
  for(const patch of [{signedIn:false},{role:'field'}]){
   assert.ok((await run(patch)).error);assert.equal(state.calls.length,0);
  }
