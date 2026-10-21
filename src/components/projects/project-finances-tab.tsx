@@ -57,6 +57,8 @@ import { closeLineItem, reopenLineItem } from "@/lib/actions/line-closeout";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import { ApplyReceiptButton } from "./apply-receipt-button";
 import { ClientInvoiceDialog } from "@/components/invoices/client-invoice-dialog";
+import { ClientInvoiceCreditDialog } from "@/components/invoices/client-invoice-credit-dialog";
+import { canCreditSentInvoice } from "@/lib/finance/client-invoice-credits";
 import { deleteClientInvoice, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
 import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
@@ -142,6 +144,7 @@ interface ClientInvoiceRow {
   paid_at: string | null;
   paid_amount: number | null;
   quickbooks_invoice_id: string | null;
+  quickbooks_id?: string | null;
   quickbooks_doc_number: string | null;
 }
 
@@ -738,6 +741,9 @@ export function ProjectFinancesTab({
                 </a>
                 <TestSendInvoiceButton invoiceId={inv.id} />
                 <SendInvoiceButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
+                {canCreditSentInvoice(inv) && (
+                  <ClientInvoiceCreditDialog projectId={projectId} invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
+                )}
                 {inv.status !== "paid" && (
                   <MarkInvoicePaidButton invoiceId={inv.id} projectId={projectId} />
                 )}
