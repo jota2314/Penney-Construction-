@@ -1,3 +1,4 @@
+import { canManageMarketing } from "@/lib/marketing/access";
 import type { UserRole } from "@/types/auth";
 
 /**
@@ -420,6 +421,9 @@ export function canAccessPath(
   viewer: AccessViewer,
   pathname: string,
 ): boolean {
+  if (pathname === "/marketing" || pathname.startsWith("/marketing/")) {
+    return canManageMarketing(viewer.role);
+  }
   if (pathname === "/command-center/my-time" || pathname.startsWith("/command-center/my-time/")) {
     return viewer.role === "project_manager";
   }

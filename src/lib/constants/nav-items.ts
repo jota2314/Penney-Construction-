@@ -21,6 +21,7 @@ import {
   Table2,
   Wallet,
   BookOpen,
+  Megaphone,
 } from "lucide-react";
 
 export interface NavItem {
@@ -75,6 +76,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Tools",
     items: [
+      { title: "Marketing", url: "/marketing", icon: Megaphone },
       { title: "Email", url: "/command-center/emails", icon: Mail },
       // Todos moved off the sidebar — /command-center/todos still works, and
       // the Command Center's "Needs attention" card links straight to it.
