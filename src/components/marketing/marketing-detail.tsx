@@ -5,25 +5,29 @@ import { useState } from "react";
 import { Archive, Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileText, Instagram, Layers, Pencil, Play, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useSwipeCarousel } from "@/hooks/use-swipe-carousel";
 import type { MarketingItem } from "@/types/marketing";
 import { archiveMarketingItem } from "@/lib/actions/marketing";
 import { coverAsset, displayDate, downloadUrl, fileSize, kindLabels, mediaAssets, messageOf, statusLabels } from "./marketing-utils";
 
-type Props = { item: MarketingItem; onClose: () => void; onEdit: () => void; onRefresh: () => Promise<void>; onArchived: () => Promise<void> };
+type Props = { item: MarketingItem; initialSlideIndex?: number; onClose: () => void; onEdit: () => void; onRefresh: () => Promise<void>; onArchived: () => Promise<void> };
 
-export function MarketingDetail({ item, onClose, onEdit, onRefresh, onArchived }: Props) {
+export function MarketingDetail({ item, initialSlideIndex = 0, onClose, onEdit, onRefresh, onArchived }: Props) {
   const media = mediaAssets(item);
   const cover = coverAsset(item);
   const slides = media.length ? media : cover ? [cover] : [];
-  const [slideIndex, setSlideIndex] = useState(0);
-  const selected = slides[Math.min(slideIndex, Math.max(0, slides.length - 1))];
+  const [requestedSlideIndex, setSlideIndex] = useState(initialSlideIndex);
+  const slideIndex = Math.min(Math.max(0, requestedSlideIndex), Math.max(0, slides.length - 1));
+  const selected = slides[slideIndex];
   const [copied, setCopied] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [mediaError, setMediaError] = useState(false);
+  const [failedUrls, setFailedUrls] = useState<Record<string, string>>({});
 
-  const changeSlide = (next: number) => { setSlideIndex(next); setMediaError(false); };
+  const changeSlide = (next: number) => setSlideIndex(Math.min(Math.max(0, next), Math.max(0, slides.length - 1)));
+  const swipe = useSwipeCarousel({ count: slides.length, index: slideIndex, onIndexChange: changeSlide });
+  const canSwipe = slides.length > 1 && selected?.mime_type.startsWith("image/");
   const copyCaption = async () => {
     try { await navigator.clipboard.writeText(item.caption || ""); setCopied(true); window.setTimeout(() => setCopied(false), 2000); }
     catch { setError("Could not copy automatically. Select the caption below and copy it."); }
@@ -36,18 +40,49 @@ export function MarketingDetail({ item, onClose, onEdit, onRefresh, onArchived }
   };
   const refreshMedia = async () => {
     setBusy(true);
-    try { await onRefresh(); setMediaError(false); }
+    try { await onRefresh(); setFailedUrls({}); }
     catch (refreshError) { setError(messageOf(refreshError)); }
     finally { setBusy(false); }
   };
+
+  const unavailablePreview = (failed: boolean) => <div className="flex flex-col items-center px-8 text-center">
+    {item.instagram_url && !failed ? <Instagram className="mb-4 size-12 text-white/60" /> : <Play className="mb-4 size-12 text-white/60" />}
+    <p className="text-lg font-medium">{failed ? "Preview could not load" : item.instagram_url ? "Saved from Instagram" : "No preview added yet"}</p>
+    <p className="mt-2 max-w-xs text-sm text-white/60">{failed ? "Refresh the preview, or download the original file below." : item.instagram_url ? "Open the original post, or add its video and cover to your library." : "Add a video, carousel slides, or a cover image."}</p>
+    {failed ? <Button className="mt-5" variant="secondary" disabled={busy} onClick={refreshMedia}><RefreshCw className={busy ? "animate-spin" : ""} />Refresh preview</Button> : item.instagram_url ? <Button asChild className="mt-5" variant="secondary"><a href={item.instagram_url} target="_blank" rel="noopener noreferrer">Open Instagram<ExternalLink /></a></Button> : null}
+  </div>;
 
   return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
     <DialogContent className="max-h-[94dvh] gap-0 overflow-y-auto p-0 sm:max-w-5xl" showCloseButton={!busy}>
       <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(320px,.8fr)]">
         <div className="min-w-0 bg-zinc-950 text-white">
-          <div className="relative flex aspect-[4/5] max-h-[67dvh] items-center justify-center overflow-hidden lg:max-h-none">
-            {selected?.url && !mediaError ? selected.mime_type.startsWith("video/") ? <video key={selected.id} src={selected.url} controls playsInline preload="metadata" poster={cover?.mime_type.startsWith("image/") ? cover.url || undefined : undefined} onError={() => setMediaError(true)} className="size-full object-contain" aria-label={item.title} /> : selected.mime_type.startsWith("image/") ? <img key={selected.id} src={selected.url} alt={`${item.title} — slide ${slideIndex + 1}`} onError={() => setMediaError(true)} className="size-full object-contain" /> : <div className="px-8 text-center"><FileText className="mx-auto mb-3 size-10 text-white/50" /><p className="text-sm">This file is available in Downloads.</p></div> : <div className="flex flex-col items-center px-8 text-center">{item.instagram_url && !mediaError ? <Instagram className="mb-4 size-12 text-white/60" /> : <Play className="mb-4 size-12 text-white/60" />}<p className="text-lg font-medium">{mediaError ? "Preview could not load" : item.instagram_url ? "Saved from Instagram" : "No preview added yet"}</p><p className="mt-2 max-w-xs text-sm text-white/60">{mediaError ? "Refresh the preview, or download the original file below." : item.instagram_url ? "Open the original post, or add its video and cover to your library." : "Add a video, carousel slides, or a cover image."}</p>{mediaError ? <Button className="mt-5" variant="secondary" disabled={busy} onClick={refreshMedia}><RefreshCw className={busy ? "animate-spin" : ""} />Refresh preview</Button> : item.instagram_url ? <Button asChild className="mt-5" variant="secondary"><a href={item.instagram_url} target="_blank" rel="noopener noreferrer">Open Instagram<ExternalLink /></a></Button> : null}</div>}
-            {slides.length > 1 && <><button type="button" aria-label="Previous slide" disabled={slideIndex === 0} onClick={() => changeSlide(slideIndex - 1)} className="absolute left-3 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur transition-colors hover:bg-black/80 disabled:invisible"><ChevronLeft className="size-5" /></button><button type="button" aria-label="Next slide" disabled={slideIndex === slides.length - 1} onClick={() => changeSlide(slideIndex + 1)} className="absolute right-3 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur transition-colors hover:bg-black/80 disabled:invisible"><ChevronRight className="size-5" /></button><span className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/15 bg-black/60 px-3 py-1 text-xs tabular-nums backdrop-blur">{slideIndex + 1} / {slides.length}</span></>}
+          <div
+            className="relative flex aspect-[4/5] max-h-[67dvh] items-center justify-center overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange-400 lg:max-h-none"
+            role="region"
+            aria-label={`${item.title} preview`}
+            aria-roledescription={slides.length > 1 ? "carousel" : undefined}
+            tabIndex={canSwipe ? 0 : undefined}
+            style={{ touchAction: canSwipe ? "pan-y" : "auto" }}
+            {...(canSwipe ? swipe.handlers : {})}
+            onKeyDown={event => {
+              if (!canSwipe || event.altKey || event.ctrlKey || event.metaKey) return;
+              if (event.target instanceof HTMLElement && event.target.closest("input,textarea,select,video,[contenteditable='true']")) return;
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault(); event.stopPropagation();
+              changeSlide(slideIndex + (event.key === "ArrowRight" ? 1 : -1));
+            }}
+          >
+            {slides.length ? <div className="absolute inset-0 flex size-full motion-reduce:!transition-none" style={swipe.trackStyle}>
+              {slides.map((asset, index) => {
+                const failed = !!asset.url && failedUrls[asset.id] === asset.url;
+                const active = index === slideIndex;
+                const markFailed = () => setFailedUrls(previous => ({ ...previous, [asset.id]: asset.url || "" }));
+                return <div key={asset.id} className="flex size-full shrink-0 items-center justify-center" aria-hidden={!active} inert={!active}>
+                  {asset.url && !failed ? asset.mime_type.startsWith("video/") ? active ? <video src={asset.url} controls playsInline preload="metadata" poster={cover?.mime_type.startsWith("image/") ? cover.url || undefined : undefined} onError={markFailed} className="size-full object-contain" aria-label={item.title} /> : <Play className="size-12 text-white/60" /> : asset.mime_type.startsWith("image/") ? <img src={asset.url} alt={`${item.title} — slide ${index + 1}`} loading={Math.abs(index - slideIndex) <= 1 ? "eager" : "lazy"} draggable={false} onError={markFailed} className="size-full select-none object-contain" /> : <div className="px-8 text-center"><FileText className="mx-auto mb-3 size-10 text-white/50" /><p className="text-sm">This file is available in Downloads.</p></div> : unavailablePreview(failed)}
+                </div>;
+              })}
+            </div> : unavailablePreview(false)}
+            {slides.length > 1 && <><button type="button" aria-label="Previous slide" disabled={slideIndex === 0} onClick={() => changeSlide(slideIndex - 1)} className="absolute left-3 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur transition-colors hover:bg-black/80 disabled:invisible"><ChevronLeft className="size-5" /></button><button type="button" aria-label="Next slide" disabled={slideIndex === slides.length - 1} onClick={() => changeSlide(slideIndex + 1)} className="absolute right-3 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur transition-colors hover:bg-black/80 disabled:invisible"><ChevronRight className="size-5" /></button><span aria-live="polite" className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/15 bg-black/60 px-3 py-1 text-xs tabular-nums backdrop-blur">{slideIndex + 1} / {slides.length}</span></>}
           </div>
           {slides.length > 1 && <div className="flex gap-2 overflow-x-auto border-t border-white/10 p-3" aria-label="Carousel slides">{slides.map((asset, index) => <button key={asset.id} type="button" onClick={() => changeSlide(index)} className={`relative flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border-2 ${index === slideIndex ? "border-orange-400" : "border-transparent opacity-60 hover:opacity-100"}`} aria-label={`View slide ${index + 1}`} aria-current={index === slideIndex ? "true" : undefined}>{asset.url && asset.mime_type.startsWith("image/") ? <img src={asset.url} alt="" className="size-full object-cover" /> : <Play className="size-4" />}<span className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1 text-[10px]">{index + 1}</span></button>)}</div>}
         </div>
