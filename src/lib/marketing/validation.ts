@@ -77,5 +77,7 @@ export function storageMetadataMatches(expected: { size: number; mime_type: stri
 export function marketingUploadEndpoint(supabaseUrl: string): string {
   const url = new URL(supabaseUrl);
   if (url.hostname.endsWith(".supabase.co")) url.hostname = url.hostname.replace(/\.supabase\.co$/, ".storage.supabase.co");
-  return `${url.origin}/storage/v1/upload/resumable`;
+  // x-signature upload tokens are handled by the signed TUS route. The base
+  // /resumable route instead expects a user JWT and evaluates its auth.uid().
+  return `${url.origin}/storage/v1/upload/resumable/sign`;
 }
