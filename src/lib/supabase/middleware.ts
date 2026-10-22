@@ -7,6 +7,7 @@ import {
 import { canAccessPath } from "@/lib/auth/role-access";
 
 const OFFICE_PREFIXES = [
+  "/marketing",
   "/dashboard",
   "/projects",
   "/customers",
