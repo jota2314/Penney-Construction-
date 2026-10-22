@@ -61,8 +61,9 @@ test('uploads enforce size, safe names, MIME and role independently', () => {
 test('object names remain under their reserved item and asset IDs', () => {
   assert.equal(validation.marketingObjectPath(itemId, assetId, 'Kitchen • final.jpg'), `${itemId}/${assetId}/Kitchen---final.jpg`);
   assert.equal(validation.marketingObjectPath(itemId, assetId, '.hidden.jpg'), `${itemId}/${assetId}/file-hidden.jpg`);
-  assert.equal(validation.marketingUploadEndpoint('https://abc.supabase.co'), 'https://abc.storage.supabase.co/storage/v1/upload/resumable');
-  assert.equal(validation.marketingUploadEndpoint('http://127.0.0.1:54321'), 'http://127.0.0.1:54321/storage/v1/upload/resumable');
+  assert.equal(validation.marketingUploadEndpoint('https://abc.supabase.co'), 'https://abc.storage.supabase.co/storage/v1/upload/resumable/sign');
+  assert.equal(validation.marketingUploadEndpoint('http://127.0.0.1:54321'), 'http://127.0.0.1:54321/storage/v1/upload/resumable/sign');
+  assert.equal(validation.marketingUploadEndpoint('https://storage.example.test'), 'https://storage.example.test/storage/v1/upload/resumable/sign');
 });
 
 test('finalization rejects missing, mismatched or incomplete storage metadata', () => {
