@@ -47,14 +47,27 @@ export function canViewPayroll(role: UserRole | string | null | undefined): bool
   return !!role && PAYROLL_ROLES.includes(role);
 }
 
-/**
- * The CEO dashboard is Jorge-only — an explicit email allowlist, not a role
- * check, because `owner` also covers Ryan, Nicole, and Shannon and they are
- * deliberately excluded.
- */
-export const CEO_DASHBOARD_EMAILS: readonly string[] = [
+/** Jorge's two sign-ins — the allowlist for his Jorge-only sections. */
+export const JORGE_EMAILS: readonly string[] = [
   "jbetancur@penneyconstructioninc.com",
   "jorgebetancurfx@gmail.com",
+];
+
+export function isJorge(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return JORGE_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
+ * The CEO dashboard is Jorge + Ryan — an explicit email allowlist, not a
+ * role check, because `owner` also covers Nicole and Shannon and they are
+ * deliberately excluded. Ryan added 10/22, Jorge's call. This list gates
+ * /ceo only; the Jorge-only sections below use JORGE_EMAILS, so adding
+ * someone here does not open Agent Crew or estimating to them.
+ */
+export const CEO_DASHBOARD_EMAILS: readonly string[] = [
+  ...JORGE_EMAILS,
+  "rpenney@penneyconstructioninc.com",
 ];
 
 export function canViewCeoDashboard(email: string | null | undefined): boolean {
@@ -65,9 +78,9 @@ export function canViewCeoDashboard(email: string | null | undefined): boolean {
 /**
  * Sections that are Jorge's alone — his 8/24 spec: "agent crew just me,
  * estimating just me, meetings and walkthroughs just me, team hiring just
- * me, design just me." Same email allowlist as the CEO dashboard because
- * `owner` covers Ryan/Nicole/Shannon and they are deliberately excluded,
- * exactly like /ceo and /design.
+ * me, design just me." An email allowlist (JORGE_EMAILS) because `owner`
+ * covers Ryan/Nicole/Shannon and they are deliberately excluded, exactly
+ * like /design.
  *
  * /design keeps its own gate above (it also carries the RLS story);
  * estimate REVIEWS (/command-center/reviews) stay owner+precon — that's
@@ -423,7 +436,7 @@ export function canAccessPath(
   // hiring) — email allowlist, checked before the role rules so it applies
   // to owners and office alike.
   if (isJorgeOnlyPath(pathname)) {
-    return canViewCeoDashboard(viewer.email);
+    return isJorge(viewer.email);
   }
   if (pathname === "/board" || pathname.startsWith("/board/")) {
     return canViewJobBoard(viewer);

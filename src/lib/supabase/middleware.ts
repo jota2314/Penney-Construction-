@@ -189,7 +189,7 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Role/email-restricted routes: PM blocked prefixes, Jorge-only /ceo
+    // Role/email-restricted routes: PM blocked prefixes, Jorge+Ryan /ceo
     // (uses the impersonation-resolved identity so View-as previews this
     // correctly).
     if (!canAccessPath({ role, email: effectiveEmail }, pathname)) {

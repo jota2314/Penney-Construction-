@@ -36,7 +36,7 @@ interface Flow {
 export default async function CeoPage() {
   const user = await requireAuth();
 
-  // Jorge-only (email allowlist, impersonation-aware for View-as previews).
+  // Jorge + Ryan (email allowlist, impersonation-aware for View-as previews).
   if (!canViewCeoDashboard(user.profile?.email ?? user.email)) {
     redirect("/command-center");
   }
