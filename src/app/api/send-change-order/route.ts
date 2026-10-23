@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { z } from "zod";
+import { isTimeAndMaterials, timeMaterialsTermsError } from "@/lib/change-orders/billing";
+import { formatMoneyNumber } from "@/lib/money";
 
 export const runtime = "nodejs";
 
@@ -41,6 +43,11 @@ export async function POST(request: Request) {
     .single();
 
   if (!co) return NextResponse.json({ error: "Change order not found" }, { status: 404 });
+  if (!["draft", "submitted"].includes(co.status)) {
+    return NextResponse.json({ error: "Only a draft or submitted change order can be sent for approval." }, { status: 409 });
+  }
+  const termsError = timeMaterialsTermsError(co);
+  if (termsError) return NextResponse.json({ error: termsError }, { status: 400 });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const proj = co.projects as any;
@@ -64,6 +71,9 @@ export async function POST(request: Request) {
     headers: { cookie: request.headers.get("cookie") || "" },
   });
 
+  if (!pdfRes.ok) {
+    return NextResponse.json({ error: "Change order PDF generation failed. No email was sent." }, { status: 502 });
+  }
   let attachments: { filename: string; mimeType: string; content: string }[] | undefined;
   if (pdfRes.ok) {
     const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
@@ -84,7 +94,7 @@ export async function POST(request: Request) {
 Please review the attached Change Order #${co.change_order_number} for ${proj?.name || "your project"}.
 
 ${co.title}
-Amount: $${Math.round(Number(co.price_impact)).toLocaleString()}
+${isTimeAndMaterials(co) ? `Billing basis: Time & Materials\nFinal amount: To be determined from documented work and materials.\n\nBilling terms:\n${co.tm_terms}\n\nYour signature authorizes the scope and billing terms; it does not establish a fixed total.` : `Amount: $${formatMoneyNumber(Number(co.price_impact))}`}
 
 To approve this change order, please click the link below and sign:
 

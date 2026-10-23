@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 import { timingSafeEqual } from "crypto";
 import { formatMoneyNumber } from "@/lib/money";
+import { isTimeAndMaterials, TIME_MATERIALS_AUTHORIZATION } from "@/lib/change-orders/billing";
 
 export const runtime = "nodejs";
 
@@ -96,10 +97,11 @@ export async function GET(request: NextRequest) {
   const projName = sanitizeForPdf(proj?.name || "Project");
   const custPhone = sanitizeForPdf(cust?.phone || "");
   const clientSig = sanitizeForPdf(co.client_signature || "");
+  const isTM = isTimeAndMaterials(co);
 
   const { data: allCOs } = await supabase
     .from("change_orders")
-    .select("id, change_order_number, title, price_impact, status")
+    .select("id, change_order_number, title, price_impact, status, billing_type")
     .eq("project_id", co.project_id)
     .order("change_order_number");
 
@@ -114,13 +116,15 @@ export async function GET(request: NextRequest) {
     .order("sort_order");
   const itemized = (coLines || []).length > 1;
 
-  const approvedTotal = (allCOs || []).filter((c) => c.status === "approved").reduce((s, c) => s + Number(c.price_impact), 0);
+  const fixedCOs = (allCOs || []).filter((c) => !isTimeAndMaterials(c));
+  const hasTM = isTM || (allCOs || []).some((c) => isTimeAndMaterials(c) && ["submitted", "approved"].includes(c.status));
+  const approvedTotal = fixedCOs.filter((c) => c.status === "approved").reduce((s, c) => s + Number(c.price_impact), 0);
   // COs already sent to the client but not yet signed. Leaving them out makes
   // the summary contradict the running total the client was quoted.
-  const pendingTotal = (allCOs || [])
+  const pendingTotal = fixedCOs
     .filter((c) => c.status === "submitted" && c.id !== co.id)
     .reduce((s, c) => s + Number(c.price_impact), 0);
-  const thisCoAmount = co.status !== "approved" ? Number(co.price_impact) : 0;
+  const thisCoAmount = !isTM && co.status !== "approved" ? Number(co.price_impact) : 0;
   const newContract = contractValue + approvedTotal + pendingTotal + thisCoAmount;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
@@ -224,14 +228,14 @@ export async function GET(request: NextRequest) {
 
   autoTable(doc, {
     startY: y,
-    head: [["Item", "Scope of Work", "Price (USD)"]],
+    head: [["Item", "Scope of Work", isTM ? "Billing basis" : "Price (USD)"]],
     body: itemized
       ? (coLines || []).map((l) => [
           sanitizeForPdf(l.description),
           sanitizeForPdf(l.proposal_description || ""),
-          fmtCurrency(Number(l.total_price)),
+          isTM ? "Time & materials" : fmtCurrency(Number(l.total_price)),
         ])
-      : [[coTitle, coDescription, fmtCurrency(Number(co.price_impact))]],
+      : [[coTitle, coDescription, isTM ? "Time & materials" : fmtCurrency(Number(co.price_impact))]],
     theme: "grid",
     styles: { fontSize: 8, cellPadding: 3 },
     headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
@@ -250,7 +254,7 @@ export async function GET(request: NextRequest) {
   autoTable(doc, {
     startY: y,
     head: [],
-    body: [["CHANGE ORDER TOTAL", "", fmtCurrency(Number(co.price_impact))]],
+    body: [[isTM ? "FINAL T&M AMOUNT" : "CHANGE ORDER TOTAL", "", isTM ? "To be determined" : fmtCurrency(Number(co.price_impact))]],
     theme: "grid",
     styles: { fontSize: 9, cellPadding: 3, fontStyle: "bold" },
     columnStyles: {
@@ -267,21 +271,37 @@ export async function GET(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 6;
 
+  if (isTM) {
+    if (y > ph - 65) { doc.addPage(); addPageHeader(); y = 36; }
+    y = sectionHeader("TIME & MATERIALS BILLING TERMS", y);
+    autoTable(doc, {
+      startY: y,
+      body: [[sanitizeForPdf(co.tm_terms?.trim() || "Billing terms have not been set. Draft only - not ready for client approval.")]],
+      theme: "grid",
+      styles: { fontSize: 8, cellPadding: 3, textColor: BLACK },
+      margin: { left: margin, right: margin, top: 36, bottom: 18 },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 6;
+  }
+
   // ── Contract Summary ──
+  if (y > ph - 80) { doc.addPage(); addPageHeader(); y = 36; }
   y = sectionHeader("CONTRACT SUMMARY", y);
 
   const contractRows: string[][] = [
     ["Original Contract", fmtCurrency(contractValue)],
-    ["Approved Change Orders", fmtCurrency(approvedTotal)],
+    [hasTM ? "Approved Fixed-price Change Orders" : "Approved Change Orders", fmtCurrency(approvedTotal)],
   ];
   if (pendingTotal !== 0) {
-    contractRows.push(["Pending Change Orders (sent, awaiting signature)", fmtCurrency(pendingTotal)]);
+    contractRows.push([hasTM ? "Pending Fixed-price Changes (awaiting signature)" : "Pending Change Orders (sent, awaiting signature)", fmtCurrency(pendingTotal)]);
   }
   if (co.status !== "approved") {
     const impact = Number(co.price_impact);
-    contractRows.push([`This Change Order (#${co.change_order_number})`, `${impact >= 0 ? "+" : ""}${fmtCurrency(impact)}`]);
+    contractRows.push([`This Change Order (#${co.change_order_number})`, isTM ? "Time & materials - TBD" : `${impact >= 0 ? "+" : ""}${fmtCurrency(impact)}`]);
   }
-  contractRows.push(["NEW CONTRACT TOTAL", fmtCurrency(newContract)]);
+  if (hasTM) contractRows.push(["Time & materials charges (separate; excluded below)", "To be determined"]);
+  contractRows.push([hasTM ? "FIXED-PRICE CONTRACT TOTAL" : "NEW CONTRACT TOTAL", fmtCurrency(newContract)]);
 
   autoTable(doc, {
     startY: y,
@@ -306,7 +326,7 @@ export async function GET(request: NextRequest) {
   y = (doc as any).lastAutoTable.finalY + 8;
 
   // ── Signatures ──
-  const sigSpaceNeeded = co.client_signature ? 70 : 55;
+  const sigSpaceNeeded = (co.client_signature ? 70 : 55) + (isTM ? 12 : 0);
   if (y > ph - sigSpaceNeeded - 20) { doc.addPage(); addPageHeader(); y = 36; }
   y = sectionHeader("SIGNATURES", y);
 
@@ -316,8 +336,9 @@ export async function GET(request: NextRequest) {
   doc.setTextColor(100, 100, 100);
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text("By signing below, both parties agree to the scope of work and adjusted contract amount described in this Change Order.", margin, y + 3);
-  y += 8;
+  const authorization = doc.splitTextToSize(isTM ? TIME_MATERIALS_AUTHORIZATION : "By signing below, both parties agree to the scope of work and adjusted contract amount described in this Change Order.", contentW) as string[];
+  doc.text(authorization, margin, y + 3);
+  y += authorization.length * 3 + 5;
 
   // Two-column signature layout
   const halfW = contentW / 2 - 3;

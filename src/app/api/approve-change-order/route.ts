@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { changeOrderApprovalError, isTimeAndMaterials } from "@/lib/change-orders/billing";
+import { createHash } from "crypto";
 
 export const runtime = "nodejs";
 const approvalSchema = z.object({
   token: z.string().min(20).max(200),
   signature: z.string().trim().min(2).max(200),
+  version: z.string().regex(/^[a-f0-9]{64}$/),
 });
+
+// Sign only the exact scope and billing basis that the client reviewed.
+function approvalVersion(co: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify([
+    co.id, co.title, co.description, co.billing_type, co.tm_terms,
+    co.price_impact, co.status, co.sent_to_client_at, co.updated_at,
+  ])).digest("hex");
+}
 
 // Use service role for public access (no auth required)
 function getPublicClient() {
@@ -27,11 +38,15 @@ export async function GET(request: NextRequest) {
 
   const { data: co, error } = await supabase
     .from("change_orders")
-    .select("id, change_order_number, title, description, status, price_impact, cost_impact, client_signature, client_signed_at, client_viewed_at, client_view_count, project_id, projects(name, project_number, address, city, state, contract_value)")
+    .select("id, change_order_number, title, description, status, price_impact, billing_type, tm_terms, sent_to_client_at, updated_at, client_signature, client_signed_at, client_viewed_at, client_view_count, project_id, projects(name, project_number, address, city, state, contract_value)")
     .eq("approval_token", token)
     .single();
 
   if (error || !co) return NextResponse.json({ error: "Change order not found or invalid link" }, { status: 404 });
+  if (co.status !== "approved") {
+    const approvalError = changeOrderApprovalError(co);
+    if (approvalError) return NextResponse.json({ error: approvalError }, { status: 409 });
+  }
 
   // Track view — set first viewed timestamp + increment count
   await supabase
@@ -48,12 +63,12 @@ export async function GET(request: NextRequest) {
   // Get sum of other approved COs
   const { data: otherCOs } = await supabase
     .from("change_orders")
-    .select("price_impact")
+    .select("price_impact, billing_type")
     .eq("project_id", co.project_id)
     .eq("status", "approved")
     .neq("id", co.id);
 
-  const approvedTotal = (otherCOs || []).reduce((s, c) => s + Number(c.price_impact), 0);
+  const approvedTotal = (otherCOs || []).filter((c) => !isTimeAndMaterials(c)).reduce((s, c) => s + Number(c.price_impact), 0);
 
   return NextResponse.json({
     id: co.id,
@@ -62,7 +77,10 @@ export async function GET(request: NextRequest) {
     description: co.description,
     status: co.status,
     price_impact: Number(co.price_impact),
-    cost_impact: Number(co.cost_impact),
+    billing_type: co.billing_type,
+    tm_terms: co.tm_terms,
+    has_time_materials: isTimeAndMaterials(co) || (otherCOs || []).some(isTimeAndMaterials),
+    approval_version: approvalVersion(co),
     client_signature: co.client_signature,
     client_signed_at: co.client_signed_at,
     project_name: proj?.name || "",
@@ -79,21 +97,26 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const parsed = approvalSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "Valid token and signature required" }, { status: 400 });
+    return NextResponse.json({ error: "Valid token, signature, and reviewed version required. Reload the change order." }, { status: 400 });
   }
-  const { token, signature } = parsed.data;
+  const { token, signature, version } = parsed.data;
 
   const supabase = getPublicClient();
 
   // Find the CO
   const { data: co } = await supabase
     .from("change_orders")
-    .select("id, status, client_signature")
+    .select("id, title, description, price_impact, status, client_signature, billing_type, tm_terms, sent_to_client_at, updated_at")
     .eq("approval_token", token)
     .single();
 
   if (!co) return NextResponse.json({ error: "Change order not found" }, { status: 404 });
   if (co.client_signature) return NextResponse.json({ error: "Already signed" }, { status: 400 });
+  const approvalError = changeOrderApprovalError(co);
+  if (approvalError) return NextResponse.json({ error: approvalError }, { status: 409 });
+  if (version !== approvalVersion(co)) {
+    return NextResponse.json({ error: "The change order changed since you opened it. Reload and review the current scope and billing terms before signing." }, { status: 409 });
+  }
 
   // Get client IP
   const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
@@ -112,12 +135,15 @@ export async function POST(request: NextRequest) {
       client_ip: ip,
     })
     .eq("id", co.id)
+    .eq("status", "submitted")
+    .eq("updated_at", co.updated_at)
+    .eq("sent_to_client_at", co.sent_to_client_at)
     .is("client_signature", null)
     .select("id")
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!approved) return NextResponse.json({ error: "Already signed" }, { status: 409 });
+  if (!approved) return NextResponse.json({ error: "This change order changed or was already signed. Reload it before approving." }, { status: 409 });
 
   // Generate signed PDF and save to storage
   try {

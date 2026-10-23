@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
+import { isTimeAndMaterials } from "@/lib/change-orders/billing";
+import { formatMoneyNumber } from "@/lib/money";
 
 export const runtime = "nodejs";
 
@@ -26,7 +28,7 @@ export async function POST(request: Request) {
 
     const { data: co } = await supabase
       .from("change_orders")
-      .select("change_order_number, title, price_impact, project_id, projects(name)")
+      .select("change_order_number, title, price_impact, billing_type, tm_terms, project_id, projects(name)")
       .eq("id", changeOrderId)
       .single();
 
@@ -63,7 +65,7 @@ export async function POST(request: Request) {
     const subject = `[TEST] Change Order #${co.change_order_number} — ${projectName}`;
     const body = `This is a test send of Change Order #${co.change_order_number} (${co.title}) for ${projectName}.
 
-Amount: $${Math.round(Number(co.price_impact)).toLocaleString()}
+${isTimeAndMaterials(co) ? `Billing basis: Time & Materials\nFinal amount: To be determined\nBilling terms: ${co.tm_terms?.trim() || "Not set - draft only"}` : `Amount: $${formatMoneyNumber(Number(co.price_impact))}`}
 
 The PDF is attached. The client has NOT received this email — it was sent only to you for review.
 

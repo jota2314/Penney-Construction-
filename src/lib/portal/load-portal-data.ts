@@ -3,7 +3,9 @@ import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
 import { isMasterPhase } from "@/lib/schedule/progress";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
+import { projectPortalTMEntries, type PortalTMRow } from "./time-materials";
 import type {
+  PortalChangeOrder,
   PortalData,
   PortalDocument,
   PortalNeed,
@@ -24,7 +26,7 @@ import type {
 const SIGN_TTL = 60 * 60 * 4;
 
 interface PaymentRow { payment_type: string; amount: number }
-interface CORow { status: string; price_impact: number }
+interface CORow { status: string; price_impact: number; billing_type: string }
 
 // Client-safe financial summary from raw rows (contract + payments + approved
 // change orders). Computed directly rather than via get_project_financials,
@@ -33,9 +35,12 @@ function buildFinancials(contractValue: number, payments: PaymentRow[], changeOr
   const sumBy = (pred: (t: string) => boolean) =>
     payments.filter((p) => pred(p.payment_type)).reduce((s, p) => s + p.amount, 0);
   const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
-  const approvedCOs = changeOrders.filter((c) => c.status === "approved");
+  // Measured T&M charges are a separate running ledger, never a fixed contract
+  // addition or an invoice. The native invoice workflow handles actual billing.
+  const approvedCOs = changeOrders.filter((c) => c.status === "approved" && c.billing_type !== "time_materials");
   const changeOrderRevenue = approvedCOs.reduce((s, c) => s + c.price_impact, 0);
   const adjustedContract = contractValue + changeOrderRevenue;
+  const hasTimeMaterials = changeOrders.some((c) => c.billing_type === "time_materials");
   return {
     contract_value: contractValue,
     adjusted_contract: adjustedContract,
@@ -43,7 +48,9 @@ function buildFinancials(contractValue: number, payments: PaymentRow[], changeOr
     deposit_received: sumBy((t) => t === "deposit"),
     draws_received: sumBy((t) => t === "draw" || t === "progress"),
     final_received: sumBy((t) => t === "final"),
-    outstanding_receivable: adjustedContract - totalReceived,
+    // Payments are project-wide; a payment for a T&M invoice must not reduce
+    // the apparent base-contract balance. Allocation is not recorded here.
+    outstanding_receivable: hasTimeMaterials ? null : adjustedContract - totalReceived,
     change_order_count: approvedCOs.length,
     change_order_revenue: changeOrderRevenue,
   };
@@ -137,7 +144,7 @@ export async function loadPortalData(
     // Client-facing change orders only — exclude internal cost_impact.
     supabase
       .from("change_orders")
-      .select("id, change_order_number, title, description, status, price_impact, client_signed_at, approval_token, sent_to_client_at")
+      .select("id, change_order_number, title, description, status, price_impact, billing_type, tm_terms, client_signed_at, approval_token, sent_to_client_at")
       .eq("project_id", projectId)
       .or("sent_to_client_at.not.is.null,status.eq.approved")
       .neq("status", "void")
@@ -222,13 +229,45 @@ export async function loadPortalData(
     preview
       ? `/api/generate-change-order?changeOrderId=${c.id}`
       : c.approval_token ? `/approve/${c.approval_token}` : null;
-  const changeOrders = (changeOrdersRes.data || []).map((c) => ({
+  const coRows = changeOrdersRes.data || [];
+  const tmIds = coRows.filter((co) => co.billing_type === "time_materials").map((co) => co.id);
+  const tmRows: PortalTMRow[] = [];
+  let tmUnavailable = false;
+  if (tmIds.length > 0) {
+    // Scope to this project AND the already eligible sent/approved COs. Even
+    // preview cannot use a draft entry to expose an otherwise hidden CO.
+    // Paginate the full ledger so the API's row limit cannot silently lower
+    // the running total as a long project accumulates measurements.
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      let tmQuery = supabase.from("change_order_tm_entries")
+        .select("id, change_order_id, work_date, category, description, quantity, unit, unit_rate, amount, status, published_at, void_reason")
+        .eq("project_id", projectId)
+        .in("change_order_id", tmIds)
+        .order("work_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (!preview) tmQuery = tmQuery.in("status", ["published", "void"]).not("published_at", "is", null);
+      const tmRes = await tmQuery;
+      if (tmRes.error) { tmUnavailable = true; break; }
+      const page = (tmRes.data || []) as PortalTMRow[];
+      tmRows.push(...page);
+      if (page.length < pageSize) break;
+    }
+  }
+  const changeOrders: PortalChangeOrder[] = coRows.map((c) => ({
     id: c.id,
     change_order_number: c.change_order_number,
     title: c.title,
     description: c.description,
     status: c.status,
     price_impact: Number(c.price_impact),
+    billing_type: c.billing_type === "time_materials" ? "time_materials" : "fixed_price",
+    tm_terms: c.billing_type === "time_materials" ? c.tm_terms : null,
+    tm_entries: c.billing_type === "time_materials"
+      ? tmUnavailable ? null : projectPortalTMEntries(tmRows, c.id, preview)
+      : [],
     signed: !!c.client_signed_at,
     sent_at: c.sent_to_client_at,
     approval_token: preview ? null : c.approval_token,
@@ -419,7 +458,8 @@ export async function loadPortalData(
       id: `co-${co.id}`,
       group: "change_order",
       title: `Change order ${co.change_order_number} · ${co.title}`,
-      subtitle: co.signed || co.status === "approved" ? "Approved" : "Awaiting your signature",
+      subtitle: [co.billing_type === "time_materials" ? "Time & materials" : null,
+        co.signed || co.status === "approved" ? "Approved" : "Awaiting your signature"].filter(Boolean).join(" · "),
       date: (co.sent_at || "").slice(0, 10) || null,
       url: co.url,
       staged: false,
@@ -455,7 +495,8 @@ export async function loadPortalData(
   }
   for (const co of changeOrders) {
     if (!co.signed && co.status === "submitted") {
-      needed.push({ kind: "change_order", title: `Review and sign change order ${co.change_order_number}`, detail: co.title, url: co.url });
+      needed.push({ kind: "change_order", title: `Review and sign change order ${co.change_order_number}`,
+        detail: `${co.title}${co.billing_type === "time_materials" ? " · Time & materials; charges follow recorded work" : ""}`, url: co.url });
     }
   }
   for (const s of decisions) {

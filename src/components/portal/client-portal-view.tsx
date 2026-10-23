@@ -17,6 +17,7 @@ import type {
   SelectionItemStatus,
 } from "@/lib/portal/types";
 import { portalFont } from "./portal-font";
+import { TimeMaterialsSection } from "./time-materials-section";
 
 const CONTACT_EMAIL = "jbetancur@penneyconstructioninc.com";
 const CONTACT_PHONE = "978-621-4387";
@@ -508,11 +509,19 @@ function SelectionsCard({ data, onOpen }: { data: PortalData; onOpen: () => void
 function PaymentsCard({ data, onOpen }: { data: PortalData; onOpen: () => void }) {
   const f = data.financials;
   if (!f) return null;
+  const hasTimeMaterials = data.change_orders.some((co) => co.billing_type === "time_materials");
   const total = f.adjusted_contract || f.contract_value;
   const paidPct = total > 0 ? Math.min(100, Math.round((f.total_payments_received / total) * 100)) : 0;
   return (
     <button onClick={onOpen} className="card block w-full p-4 text-left">
       <CardHead title="Payments" action="Details" />
+      {hasTimeMaterials ? <>
+        <span className="mt-2 block text-[13px] text-[var(--muted)]">Contract value (excludes T&amp;M)</span>
+        <span className="block text-[22px] font-extrabold leading-tight">{fmt(total)}</span>
+        <span className="mt-2 block text-[13px] text-[var(--muted)]">Project payments received</span>
+        <span className="block text-[18px] font-extrabold text-[#2F6B4F]">{fmt(f.total_payments_received)}</span>
+        <span className="mt-2 block text-[13px] text-[var(--muted)]">View recorded hours, charges and invoices in Details.</span>
+      </> : <>
       <span className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
         <span className="text-[22px] font-extrabold leading-tight">
           {fmt(f.total_payments_received)} <span className="text-[14px] font-semibold text-[var(--muted)]">paid</span>
@@ -523,6 +532,7 @@ function PaymentsCard({ data, onOpen }: { data: PortalData; onOpen: () => void }
         <span className="block h-full rounded-full bg-[#2F6B4F]" style={{ width: `${paidPct}%` }} />
       </span>
       <span className="mt-1.5 block text-[13px] text-[var(--muted)]">{paidPct}% of your contract paid</span>
+      </>}
     </button>
   );
 }
@@ -969,29 +979,33 @@ function DocumentsTab({ docs }: { docs: PortalDocument[] }) {
 function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
   const f = data.financials;
   if (!f) return <Empty>Payment details will appear here shortly.</Empty>;
+  const hasTimeMaterials = data.change_orders.some((co) => co.billing_type === "time_materials");
   const paidPct = f.adjusted_contract > 0 ? Math.min(100, Math.round((f.total_payments_received / f.adjusted_contract) * 100)) : 0;
   return (
     <>
       <section className="card p-4">
-        <p className="label">Contract total</p>
+        <p className="label">{hasTimeMaterials ? "Contract value (excludes T&M)" : "Contract total"}</p>
         <p className="mt-1 text-[30px] font-extrabold leading-none">{fmt(f.adjusted_contract || f.contract_value)}</p>
         {f.change_order_revenue !== 0 && (
           <p className="mt-1.5 text-[14px] text-[var(--muted)]">Includes {fmt(f.change_order_revenue)} in approved changes ({f.change_order_count})</p>
         )}
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--line)]">
+        {!hasTimeMaterials && <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--line)]">
           <div className="h-full rounded-full bg-[#2F6B4F]" style={{ width: `${paidPct}%` }} />
-        </div>
+        </div>}
         <div className="mt-3 flex justify-between">
           <div>
-            <p className="label">Paid to date</p>
+            <p className="label">{hasTimeMaterials ? "Project payments received" : "Paid to date"}</p>
             <p className="text-[18px] font-extrabold text-[#2F6B4F]">{fmt(f.total_payments_received)}</p>
           </div>
-          <div className="text-right">
+          {!hasTimeMaterials && f.outstanding_receivable !== null && <div className="text-right">
             <p className="label">Balance</p>
             <p className="text-[18px] font-extrabold">{fmt(f.outstanding_receivable)}</p>
-          </div>
+          </div>}
         </div>
+        {hasTimeMaterials && <p className="mt-2 text-[13px] text-[var(--muted)]">Payments may include T&amp;M invoices, so a separate contract balance is not shown.</p>}
       </section>
+
+      <TimeMaterialsSection changeOrders={data.change_orders} />
 
       {data.invoices.length > 0 && (
         <section className="card p-4">
@@ -1040,7 +1054,7 @@ function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
                   <span className="block text-[13px] text-[var(--muted)]">{co.signed || co.status === "approved" ? "Approved" : "Awaiting your signature"}</span>
                   {co.url && <a href={co.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-[14px] font-bold text-[var(--accent-dark)]">{co.signed ? "View" : "Review and sign"} →</a>}
                 </span>
-                <span className="shrink-0 text-[16px] font-extrabold">{co.price_impact >= 0 ? "+" : "−"}{fmt(Math.abs(co.price_impact))}</span>
+                <span className="shrink-0 text-[16px] font-extrabold">{co.billing_type === "time_materials" ? "T&M" : <>{co.price_impact >= 0 ? "+" : "−"}{fmt(Math.abs(co.price_impact))}</>}</span>
               </li>
             ))}
           </ul>

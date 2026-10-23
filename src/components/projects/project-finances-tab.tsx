@@ -60,7 +60,9 @@ import { ClientInvoiceDialog } from "@/components/invoices/client-invoice-dialog
 import { ClientInvoiceCreditDialog } from "@/components/invoices/client-invoice-credit-dialog";
 import { canCreditSentInvoice } from "@/lib/finance/client-invoice-credits";
 import { deleteClientInvoice, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
-import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
+import { createChangeOrder, updateChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
+import { TimeMaterialsLog } from "./time-materials-log";
+import { ChangeOrderBillingFields } from "./change-order-billing-fields";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { PermitScopeCard } from "@/components/projects/permit-scope-card";
@@ -124,6 +126,9 @@ interface ChangeOrderRow {
   client_signature: string | null;
   client_signed_at: string | null;
   quickbooks_pushed_at?: string | null;
+  billing_type?: "fixed_price" | "time_materials";
+  tm_terms?: string | null;
+  tm_issued_at?: string | null;
 }
 
 interface ClientInvoiceRow {
@@ -637,8 +642,8 @@ export function ProjectFinancesTab({
                   )}
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="font-bold text-orange-400">+{formatMoney(Number(co.price_impact))}</div>
-                  <div className="text-[10px] text-muted-foreground">cost: {formatMoney(Number(co.cost_impact))}</div>
+                  <div className="font-bold text-orange-400">{co.billing_type === "time_materials" ? "T&M" : `+${formatMoney(Number(co.price_impact))}`}</div>
+                  <div className="text-[10px] text-muted-foreground">{co.billing_type === "time_materials" ? "Measured as work proceeds" : `cost: ${formatMoney(Number(co.cost_impact))}`}</div>
                 </div>
               </div>
               {/* Bottom row: actions */}
@@ -649,13 +654,14 @@ export function ProjectFinancesTab({
                 >
                   <FileDown className="h-3 w-3" /> PDF
                 </a>
-                <EditCOButton co={co} />
+                <EditCOButton co={co} projectId={projectId} />
+                {co.billing_type === "time_materials" && <TimeMaterialsLog changeOrderId={co.id} projectId={projectId} coNumber={co.change_order_number} terms={co.tm_terms ?? null} status={co.status} />}
                 <TestSendCOButton changeOrderId={co.id} />
                 <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} sentAt={co.sent_to_client_at} />
                 {co.status !== "approved" && (
-                  <ApproveCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+                  <ApproveCOButton changeOrderId={co.id} projectId={projectId} />
                 )}
-                {(co.status === "approved" || co.client_signed_at) && (
+                {co.billing_type !== "time_materials" && (co.status === "approved" || co.client_signed_at) && (
                   <PushCOToQBButton co={co} projectId={projectId} />
                 )}
                 <div className="flex-1" />
@@ -1737,24 +1743,23 @@ function LifecycleDot({ active, label }: { active: boolean; label: string }) {
 
 // ── Sub-components ─────────────────────────────────────
 
-function ApproveCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
+function ApproveCOButton({ changeOrderId, projectId }: { changeOrderId: string; projectId: string }) {
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleApprove() {
-    setSaving(true);
-    const supabase = (await import("@/lib/supabase/client")).createClient();
-    await supabase.from("change_orders").update({
-      status: "approved",
-      approved_at: new Date().toISOString(),
-      approved_by: "Manual approval",
-    }).eq("id", changeOrderId);
-    setSaving(false);
-    router.refresh();
+    setSaving(true); setError(null);
+    try {
+      const result = await updateChangeOrder(changeOrderId, projectId, { status: "approved" });
+      if (result.error) { setError(result.error); return; }
+      router.refresh();
+    } catch { setError("Could not approve the change order. Please try again."); }
+    finally { setSaving(false); }
   }
 
   return (
-    <button
+    <><button
       onClick={handleApprove}
       disabled={saving}
       className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors disabled:opacity-50"
@@ -1762,6 +1767,7 @@ function ApproveCOButton({ changeOrderId, coNumber }: { changeOrderId: string; c
       <CheckCircle2 className="h-3 w-3" />
       {saving ? "Approving..." : "Approve"}
     </button>
+    {error && <span role="alert" className="text-xs text-red-500">{error}</span>}</>
   );
 }
 
@@ -1806,132 +1812,96 @@ function PushCOToQBButton({ co, projectId }: { co: ChangeOrderRow; projectId: st
   );
 }
 
-function EditCOButton({ co }: { co: ChangeOrderRow }) {
+function EditCOButton({ co, projectId }: { co: ChangeOrderRow; projectId: string }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState(co.title);
   const [description, setDescription] = useState(co.description ?? "");
   const [costImpact, setCostImpact] = useState(String(co.cost_impact));
   const [priceImpact, setPriceImpact] = useState(String(co.price_impact));
+  const [billingType, setBillingType] = useState<"fixed_price" | "time_materials">(co.billing_type ?? "fixed_price");
+  const [terms, setTerms] = useState(co.tm_terms ?? "");
   const router = useRouter();
+  const locked = !!co.tm_issued_at || !!co.approved_at || !!co.sent_to_client_at || !!co.client_signed_at || ["submitted", "approved"].includes(co.status);
+  const scopeLocked = locked && co.billing_type === "time_materials";
 
   function handleOpen() {
-    setTitle(co.title);
-    setDescription(co.description ?? "");
-    setCostImpact(String(co.cost_impact));
-    setPriceImpact(String(co.price_impact));
-    setOpen(true);
+    setTitle(co.title); setDescription(co.description ?? "");
+    setCostImpact(String(co.cost_impact)); setPriceImpact(String(co.price_impact));
+    setBillingType(co.billing_type ?? "fixed_price"); setTerms(co.tm_terms ?? "");
+    setError(null); setOpen(true);
   }
-
   async function handleSave() {
     if (!title.trim()) return;
-    setSaving(true);
-    const supabase = (await import("@/lib/supabase/client")).createClient();
-    await supabase.from("change_orders").update({
-      title: title.trim(),
-      description: description.trim() || null,
-      cost_impact: parseMoney(costImpact) ?? 0,
-      price_impact: parseMoney(priceImpact) ?? 0,
-    }).eq("id", co.id);
-    setSaving(false);
-    setOpen(false);
-    router.refresh();
+    setSaving(true); setError(null);
+    try {
+      const result = await updateChangeOrder(co.id, projectId, {
+        title: title.trim(), description: description.trim(),
+        billing_type: billingType, tm_terms: terms.trim() || null,
+        cost_impact: billingType === "time_materials" ? 0 : parseMoney(costImpact) ?? 0,
+        price_impact: billingType === "time_materials" ? 0 : parseMoney(priceImpact) ?? 0,
+      });
+      if (result.error) { setError(result.error); return; }
+      setOpen(false); router.refresh();
+    } catch { setError("Could not save the change order. Please try again."); }
+    finally { setSaving(false); }
   }
-
-  return (
-    <>
-      <button
-        onClick={handleOpen}
-        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors"
-      >
-        <Pencil className="h-3 w-3" /> Edit
-      </button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
-          <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">Edit CO #{co.change_order_number}</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Title *</label>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Extra framing for header"
-                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Description</label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Detailed scope of the change..."
-                  rows={3}
-                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm resize-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
-                  <input
-                    type="number" step="0.01" inputMode="decimal"
-                    value={costImpact}
-                    onChange={(e) => setCostImpact(e.target.value)}
-                    placeholder="0"
-                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
-                  <input
-                    type="number" step="0.01" inputMode="decimal"
-                    value={priceImpact}
-                    onChange={(e) => setPriceImpact(e.target.value)}
-                    placeholder="0"
-                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-md text-sm border hover:bg-muted">Cancel</button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !title.trim()}
-                className="px-4 py-2 rounded-md text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+  return <>
+    <button onClick={handleOpen} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted"><Pencil className="h-3 w-3" />Edit</button>
+    <BottomSheet open={open} onOpenChange={setOpen}>
+      <BottomSheetContent>
+        <BottomSheetHeader><BottomSheetTitle>Edit CO #{co.change_order_number}</BottomSheetTitle><BottomSheetDescription>Scope and billing basis for this change.</BottomSheetDescription></BottomSheetHeader>
+        <BottomSheetBody className="space-y-3">
+          <label className="block text-xs font-medium text-muted-foreground">Title *<input value={title} disabled={scopeLocked} onChange={e => setTitle(e.target.value)} className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm disabled:opacity-60" /></label>
+          <label className="block text-xs font-medium text-muted-foreground">Description<textarea rows={5} value={description} disabled={scopeLocked} onChange={e => setDescription(e.target.value)} className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm disabled:opacity-60" /></label>
+          {scopeLocked && <p className="text-xs text-muted-foreground">This T&M scope has been shared with the client. Create a new change order for changes to the authorized work.</p>}
+          <ChangeOrderBillingFields billingType={billingType} terms={terms} onTypeChange={setBillingType} onTermsChange={setTerms} locked={locked} />
+          {billingType === "fixed_price" && <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs font-medium text-muted-foreground">Our Cost ($)<input type="number" step="0.01" value={costImpact} onChange={e => setCostImpact(e.target.value)} className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm" /></label>
+            <label className="text-xs font-medium text-muted-foreground">Client Price ($)<input type="number" step="0.01" value={priceImpact} onChange={e => setPriceImpact(e.target.value)} className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm" /></label>
+          </div>}
+          {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+        </BottomSheetBody>
+        <BottomSheetFooter><button onClick={handleSave} disabled={saving || !title.trim() || scopeLocked} className="h-11 w-full rounded-xl bg-orange-600 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save changes"}</button></BottomSheetFooter>
+      </BottomSheetContent>
+    </BottomSheet>
+  </>;
 }
 
 function DeleteCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleDelete() {
-    const supabase = (await import("@/lib/supabase/client")).createClient();
-    await supabase.from("change_orders").delete().eq("id", changeOrderId);
-    setConfirming(false);
-    router.refresh();
+    setDeleting(true); setError(null);
+    try {
+      const supabase = (await import("@/lib/supabase/client")).createClient();
+      const { data: deleted, error: deleteError } = await supabase.from("change_orders").delete().eq("id", changeOrderId).select("id");
+      if (deleteError) {
+        setError(deleteError.code === "23503" ? "This change order has linked history and cannot be deleted. Keep it for the audit trail." : deleteError.message);
+        return;
+      }
+      if (!deleted?.length) { setError("Change order not found or deletion is not allowed."); return; }
+      setConfirming(false); router.refresh();
+    } catch { setError("Could not delete the change order. Please try again."); }
+    finally { setDeleting(false); }
   }
 
   if (confirming) return (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1">
       <span className="text-[10px] text-red-400">Delete CO #{coNumber}?</span>
-      <button onClick={handleDelete} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30">Yes</button>
-      <button onClick={() => setConfirming(false)} className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted">No</button>
+      <button onClick={handleDelete} disabled={deleting} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50">{deleting ? "Deleting…" : "Yes"}</button>
+      <button onClick={() => setConfirming(false)} disabled={deleting} className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted">No</button>
+      {error && <p role="alert" className="w-full text-xs text-red-500">{error}</p>}
     </div>
   );
 
   return (
     <button
-      onClick={() => setConfirming(true)}
+      onClick={() => { setConfirming(true); setError(null); }}
       className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
     >
       <Trash2 className="h-3 w-3" /> Delete
@@ -2052,6 +2022,8 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
   const [description, setDescription] = useState("");
   const [costImpact, setCostImpact] = useState("");
   const [priceImpact, setPriceImpact] = useState("");
+  const [billingType, setBillingType] = useState<"fixed_price" | "time_materials">("fixed_price");
+  const [terms, setTerms] = useState("");
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
@@ -2065,8 +2037,10 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
         project_id: projectId,
         title: title.trim(),
         description: description.trim() || undefined,
-        cost_impact: parseMoney(costImpact) ?? 0,
-        price_impact: parseMoney(priceImpact) ?? 0,
+        cost_impact: billingType === "time_materials" ? 0 : parseMoney(costImpact) ?? 0,
+        price_impact: billingType === "time_materials" ? 0 : parseMoney(priceImpact) ?? 0,
+        billing_type: billingType,
+        tm_terms: terms.trim() || null,
       });
       if (result.error) {
         setError(result.error);
@@ -2077,6 +2051,8 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
       setDescription("");
       setCostImpact("");
       setPriceImpact("");
+      setBillingType("fixed_price");
+      setTerms("");
       router.refresh();
     } catch {
       setError("Something went wrong — the change order was not created.");
@@ -2125,7 +2101,8 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
                 className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm resize-none"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <ChangeOrderBillingFields billingType={billingType} terms={terms} onTypeChange={setBillingType} onTermsChange={setTerms} />
+            {billingType === "fixed_price" && <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
                 <input
@@ -2146,7 +2123,7 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
                   className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
                 />
               </div>
-            </div>
+            </div>}
           </BottomSheetBody>
           <BottomSheetFooter>
             {error && <p className="text-xs text-red-400">{error}</p>}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { formatMoneyNumber } from "@/lib/money";
+import { isTimeAndMaterials, TIME_MATERIALS_AUTHORIZATION } from "@/lib/change-orders/billing";
 
 interface COData {
   id: string;
@@ -11,6 +12,10 @@ interface COData {
   description: string | null;
   status: string;
   price_impact: number;
+  billing_type: "fixed_price" | "time_materials";
+  tm_terms: string | null;
+  has_time_materials: boolean;
+  approval_version: string;
   client_signature: string | null;
   client_signed_at: string | null;
   project_name: string;
@@ -46,12 +51,12 @@ export default function ApproveChangeOrderPage() {
   }, [token]);
 
   async function handleApprove() {
-    if (!signature.trim()) return;
+    if (!signature.trim() || !co) return;
     setSubmitting(true);
     const res = await fetch("/api/approve-change-order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, signature: signature.trim() }),
+      body: JSON.stringify({ token, signature: signature.trim(), version: co.approval_version }),
     });
     const data = await res.json();
     if (data.error) setError(data.error);
@@ -77,7 +82,8 @@ export default function ApproveChangeOrderPage() {
 
   const alreadySigned = co.client_signature || done;
   const sigName = co.client_signature || signature;
-  const newTotal = co.contract_value + co.approved_cos_total + (co.status !== "approved" ? co.price_impact : 0);
+  const isTM = isTimeAndMaterials(co);
+  const newTotal = co.contract_value + co.approved_cos_total + (isTM ? 0 : co.price_impact);
 
   if (alreadySigned) return (
     <div className="min-h-screen bg-white flex items-center justify-center p-4">
@@ -91,8 +97,9 @@ export default function ApproveChangeOrderPage() {
         <p className="text-gray-500 mb-1">CO #{co.change_order_number}: {co.title}</p>
         <p className="text-gray-500 mb-6">Signed by {sigName}</p>
         <div className="inline-block bg-gray-50 rounded-lg px-6 py-3 text-left">
-          <p className="text-sm text-gray-500">Amount</p>
-          <p className="text-xl font-bold text-gray-900">{fmt(co.price_impact)}</p>
+          <p className="text-sm text-gray-500">{isTM ? "Time & Materials" : "Amount"}</p>
+          <p className="text-xl font-bold text-gray-900">{isTM ? "Final amount to be determined" : fmt(co.price_impact)}</p>
+          {isTM && <p className="text-sm text-gray-600 whitespace-pre-line mt-3">{co.tm_terms}</p>}
         </div>
         <p className="text-xs text-gray-400 mt-6">
           {co.client_signed_at ? new Date(co.client_signed_at).toLocaleString() : "Just now"}
@@ -138,9 +145,10 @@ export default function ApproveChangeOrderPage() {
           {/* Amount */}
           <div className="px-6 py-5 border-b border-gray-100">
             <div className="flex justify-between items-center">
-              <p className="font-semibold text-gray-900">Change Order Amount</p>
-              <p className="text-2xl font-bold text-gray-900">{fmt(co.price_impact)}</p>
+              <p className="font-semibold text-gray-900">{isTM ? "Time & Materials" : "Change Order Amount"}</p>
+              <p className="text-xl font-bold text-gray-900 text-right">{isTM ? "Final amount TBD" : fmt(co.price_impact)}</p>
             </div>
+            {isTM && <div className="mt-4 text-sm text-gray-600"><p className="font-semibold mb-1">Billing terms</p><p className="whitespace-pre-line">{co.tm_terms}</p></div>}
           </div>
 
           {/* Contract summary */}
@@ -151,20 +159,21 @@ export default function ApproveChangeOrderPage() {
                 <span className="text-gray-500">Original Contract</span>
                 <span className="text-gray-900 font-medium">{fmt(co.contract_value)}</span>
               </div>
-              {co.approved_cos_total > 0 && (
+              {co.approved_cos_total !== 0 && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Previous Changes</span>
-                  <span className="text-gray-900 font-medium">+{fmt(co.approved_cos_total)}</span>
+                  <span className="text-gray-500">Previous {co.has_time_materials ? "Fixed-price " : ""}Changes</span>
+                  <span className="text-gray-900 font-medium">{co.approved_cos_total >= 0 ? "+" : ""}{fmt(co.approved_cos_total)}</span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span className="text-gray-500">This Change Order</span>
-                <span className="text-gray-900 font-medium">{co.price_impact >= 0 ? "+" : ""}{fmt(co.price_impact)}</span>
+                <span className="text-gray-900 font-medium">{isTM ? "Time & materials — TBD" : `${co.price_impact >= 0 ? "+" : ""}${fmt(co.price_impact)}`}</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-gray-200">
-                <span className="font-bold text-gray-900">New Contract Total</span>
+                <span className="font-bold text-gray-900">{co.has_time_materials ? "Fixed-price Contract Total" : "New Contract Total"}</span>
                 <span className="font-bold text-gray-900 text-lg">{fmt(newTotal)}</span>
               </div>
+              {co.has_time_materials && <p className="text-xs text-gray-500">Time and materials charges are separate and are not included in the fixed-price total.</p>}
             </div>
           </div>
 
@@ -172,7 +181,7 @@ export default function ApproveChangeOrderPage() {
           <div className="px-6 py-6">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Authorization</p>
             <p className="text-xs text-gray-400 mb-4">
-              By signing below, you authorize the work described above and agree to the adjusted contract amount.
+              {isTM ? TIME_MATERIALS_AUTHORIZATION : "By signing below, you authorize the work described above and agree to the adjusted contract amount."}
             </p>
             <label className="text-sm font-medium text-gray-700 block mb-1">Your Full Name</label>
             <input
