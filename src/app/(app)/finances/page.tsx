@@ -23,6 +23,7 @@ import Expenses from "@/components/finances/sections/expenses";
 import Income from "@/components/finances/sections/income";
 import Overhead from "@/components/finances/sections/overhead";
 import Weekly from "@/components/finances/sections/weekly";
+import { TransactionSearch } from "@/components/finances/transaction-search";
 
 export const metadata: Metadata = {
   title: "Finance workspace | Penney Construction",
@@ -237,6 +238,7 @@ export default async function FinancePage({
         </div>
       </nav>
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-24 sm:p-6 lg:p-8">
+        <TransactionSearch />
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{tab.label}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{tab.subtitle}</p>
