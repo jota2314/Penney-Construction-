@@ -110,6 +110,25 @@ export interface PortalPhase {
 export interface PortalChangeOrder {
   id: string; change_order_number: number; title: string; description: string | null; status: string;
   price_impact: number; signed: boolean; sent_at: string | null; approval_token: string | null; url: string | null;
+  billing_type: "fixed_price" | "time_materials";
+  tm_terms: string | null;
+  /** null means the ledger could not be loaded; [] means no shared entries yet. */
+  tm_entries: PortalTimeMaterialEntry[] | null;
+}
+
+/** Only client-facing measurements and charges. Never employee pay or vendor cost. */
+export interface PortalTimeMaterialEntry {
+  id: string;
+  work_date: string;
+  category: "labor" | "material" | "equipment" | "other";
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_rate: number | null;
+  amount: number | null;
+  status: "draft" | "published" | "void";
+  published_at: string | null;
+  void_reason: string | null;
 }
 
 export interface PortalPayment {
@@ -122,7 +141,9 @@ export interface PortalInvoice { id: string; invoice_number: number; title: stri
 export interface PortalFinancials {
   contract_value: number; adjusted_contract: number; total_payments_received: number;
   deposit_received: number; draws_received: number; final_received: number;
-  outstanding_receivable: number; change_order_count: number; change_order_revenue: number;
+  /** null when T&M payments cannot be separated from fixed-contract payments. */
+  outstanding_receivable: number | null;
+  change_order_count: number; change_order_revenue: number;
 }
 
 export interface PortalPhoto { thumb: string; full: string; date: string }

@@ -40,12 +40,15 @@ export async function pushChangeOrderToQuickBooks(
   const { data: co, error: coErr } = await supabase
     .from("change_orders")
     .select(
-      "id, project_id, change_order_number, title, price_impact, status, client_signed_at, quickbooks_estimate_id, quickbooks_pushed_at, projects(project_number)"
+      "id, project_id, change_order_number, title, price_impact, billing_type, status, client_signed_at, quickbooks_estimate_id, quickbooks_pushed_at, projects(project_number)"
     )
     .eq("id", changeOrderId)
     .single();
 
   if (coErr || !co) return { error: coErr?.message || "Change order not found" };
+  if (co.billing_type === "time_materials") {
+    return { error: "Time and materials authorization has no fixed amount to push. Bill documented charges through the client invoice workflow." };
+  }
   if (co.quickbooks_pushed_at) {
     return { error: null, qbEstimateId: co.quickbooks_estimate_id || undefined };
   }

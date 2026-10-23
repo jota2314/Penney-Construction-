@@ -15,10 +15,20 @@ export async function createChangeOrder(data: {
   price_impact: number;
   status?: string;
   notes?: string;
+  billing_type?: "fixed_price" | "time_materials";
+  tm_terms?: string | null;
 }) {
   const supabase = await createClient();
   const { data: user } = await supabase.auth.getUser();
   if (!user.user) return { error: "Not authenticated" };
+  const billingType = data.billing_type ?? "fixed_price";
+  if (!["fixed_price", "time_materials"].includes(billingType)) return { error: "Invalid billing basis" };
+  if (billingType === "time_materials") {
+    data = { ...data, cost_impact: 0, price_impact: 0 };
+    if (["submitted", "approved"].includes(data.status ?? "draft") && !data.tm_terms?.trim()) {
+      return { error: "Enter the agreed T&M billing rates and terms before approval." };
+    }
+  }
 
   // Get next change_order_number
   const { data: existing } = await supabase
@@ -54,6 +64,8 @@ export async function createChangeOrder(data: {
       cost_impact: data.cost_impact,
       price_impact: data.price_impact,
       notes: data.notes || null,
+      billing_type: billingType,
+      tm_terms: billingType === "time_materials" ? data.tm_terms?.trim() || null : null,
       approved_at: data.status === "approved" ? new Date().toISOString() : null,
       created_by: user.user.id,
     })
@@ -100,12 +112,42 @@ export async function updateChangeOrder(
     price_impact?: number;
     status?: string;
     notes?: string;
+    billing_type?: "fixed_price" | "time_materials";
+    tm_terms?: string | null;
   }
 ) {
   const supabase = await createClient();
 
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return { error: "Not authenticated" };
+  const { data: current, error: readError } = await supabase.from("change_orders")
+    .select("id, title, description, billing_type, tm_terms, tm_issued_at, approved_at, status, client_signed_at, sent_to_client_at")
+    .eq("id", changeOrderId).eq("project_id", projectId).single();
+  if (readError || !current) return { error: "Change order not found or access denied." };
+  const billingType = data.billing_type ?? current.billing_type ?? "fixed_price";
+  if (!["fixed_price", "time_materials"].includes(billingType)) return { error: "Invalid billing basis" };
+  const terms = data.tm_terms === undefined ? current.tm_terms : data.tm_terms?.trim() || null;
+  const issued = !!current.tm_issued_at || !!current.approved_at || !!current.sent_to_client_at || !!current.client_signed_at || ["submitted", "approved"].includes(current.status);
+  if (issued &&
+    (billingType !== current.billing_type || terms !== current.tm_terms)) {
+    return { error: "The billing basis already shared with the client cannot be changed. Create a new change order." };
+  }
+  if (issued && current.billing_type === "time_materials" &&
+    ((data.title !== undefined && data.title !== current.title) ||
+      (data.description !== undefined && (data.description || null) !== current.description))) {
+    return { error: "The T&M scope already shared with the client cannot be changed. Create a new change order." };
+  }
+  if (billingType === "time_materials") {
+    data = { ...data, cost_impact: 0, price_impact: 0 };
+    if (["submitted", "approved"].includes(data.status ?? current.status) && !terms) {
+      return { error: "Enter the agreed T&M billing rates and terms before approval." };
+    }
+  }
+
   const updateData: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
+    billing_type: billingType,
+    tm_terms: billingType === "time_materials" ? terms : null,
   };
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined)
@@ -115,15 +157,17 @@ export async function updateChangeOrder(
     updateData.price_impact = data.price_impact;
   if (data.status !== undefined) {
     updateData.status = data.status;
-    if (data.status === "approved")
-      updateData.approved_at = new Date().toISOString();
+    if (data.status === "approved") {
+      updateData.approved_at = current.approved_at || new Date().toISOString();
+      updateData.approved_by = "Manual approval";
+    }
   }
   if (data.notes !== undefined) updateData.notes = data.notes || null;
 
   const { error } = await supabase
     .from("change_orders")
     .update(updateData)
-    .eq("id", changeOrderId);
+    .eq("id", changeOrderId).eq("project_id", projectId);
 
   if (error) return { error: error.message };
 
@@ -173,18 +217,34 @@ export async function deleteChangeOrder(
 ) {
   const supabase = await createClient();
 
-  // Delete linked estimate line items first
-  await supabase
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return { error: "Not authenticated" };
+  const { data: linkedLines, error: linesError } = await supabase
     .from("estimate_line_items")
-    .delete()
+    .select("id")
     .eq("change_order_id", changeOrderId);
+  if (linesError) return { error: linesError.message };
 
-  const { error } = await supabase
+  // Delete the parent first: the T&M history FK must reject the deletion before
+  // any budget/source lines can be removed. Its line-item FK uses SET NULL.
+  const { data: deleted, error } = await supabase
     .from("change_orders")
     .delete()
-    .eq("id", changeOrderId);
+    .eq("id", changeOrderId).eq("project_id", projectId).select("id");
 
-  if (error) return { error: error.message };
+  if (error) return { error: error.code === "23503"
+    ? "This change order has linked history and cannot be deleted. Keep it for the audit trail."
+    : error.message };
+  if (!deleted?.length) return { error: "Change order not found or deletion is not allowed." };
+
+  if (linkedLines?.length) {
+    const { error: cleanupError } = await supabase.from("estimate_line_items").delete()
+      .in("id", linkedLines.map(line => line.id)).is("change_order_id", null);
+    if (cleanupError) {
+      revalidatePath(`/projects/${projectId}`);
+      return { error: "The change order was deleted, but its former estimate lines could not be removed. Review the estimate before continuing." };
+    }
+  }
 
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
