@@ -1,3 +1,6 @@
+// Development contribution by Jorge Betancur; see repository NOTICE.md.
+// Attribution is not a determination of ownership of the full app or customer data.
+
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Playfair_Display, Archivo, IBM_Plex_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
