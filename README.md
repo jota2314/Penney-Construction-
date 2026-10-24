@@ -1,3 +1,8 @@
+## Development attribution and rights
+
+Development contributions by Jorge Betancur are documented in [NOTICE.md](NOTICE.md). Attribution is not a determination of ownership of the complete application or customer data. Any ownership and license questions should be resolved with applicable agreements.
+
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
