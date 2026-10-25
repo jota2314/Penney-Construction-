@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
 import { canAccessPath } from "@/lib/auth/role-access";
 import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
-import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 export function MobileBottomNav({
   role,
@@ -82,7 +81,6 @@ export function MobileBottomNav({
                 })}
               </div>
             ))}
-            <AppOwnershipNotice className="mx-3 mt-3 border-t border-border/50 py-3" />
           </div>
         </div>
       )}

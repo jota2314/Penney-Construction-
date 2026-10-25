@@ -1,6 +1,4 @@
 import Link from "next/link";
-import { APP_OWNERSHIP_STATEMENT } from "@/lib/app-ownership";
-import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 export const metadata = {
   title: "Privacy Policy — Penney Construction",
@@ -23,7 +21,7 @@ export default function PrivacyPage() {
           Privacy Policy
         </h1>
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
-          Last updated: October 25, 2026
+          Last updated: April 26, 2026
         </p>
 
         <div className="prose prose-neutral dark:prose-invert mt-10 space-y-8">
@@ -36,25 +34,6 @@ export default function PrivacyPage() {
               we receive through{" "}
               <span className="font-medium">penneyconstruction.build</span> and
               when working with clients.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold">Application ownership</h2>
-            <p>{APP_OWNERSHIP_STATEMENT}</p>
-            <p>
-              This identifies the owner of the software. Penney Construction, Inc.
-              continues to handle business and personal information as described
-              in this policy. Software ownership does not transfer ownership of
-              customer, employee, subcontractor, or project records to the
-              application owner. See the{" "}
-              <Link
-                href="/terms#application-ownership"
-                className="text-amber-600 hover:underline dark:text-amber-400"
-              >
-                application ownership notice
-              </Link>
-              .
             </p>
           </section>
 
@@ -172,7 +151,6 @@ export default function PrivacyPage() {
             </p>
           </section>
         </div>
-        <AppOwnershipNotice className="mt-12 border-t border-neutral-200 pt-6 text-neutral-600 dark:border-neutral-800 dark:text-neutral-400" />
       </div>
     </main>
   );

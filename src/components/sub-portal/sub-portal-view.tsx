@@ -21,7 +21,6 @@ import { SignSheet } from "./sign-sheet";
 import { TodayTab } from "./today-tab";
 import { DatesTab } from "./dates-tab";
 import { MoneyTab } from "./money-tab";
-import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 /**
  * The sub portal v3, one screen for both doors in:
@@ -448,8 +447,7 @@ function PortalFooter({
       <button type="button" onClick={onSignOut} disabled={preview || signingOut} className="btn btn-ghost btn-block">
         {signingOut ? "Signing out…" : signOutWarning ? "Sign out anyway" : "Sign out"}
       </button>
-      <p className="pt-2 text-center text-[13px] text-[var(--muted)]">Penney Construction, Inc. · North Shore, MA</p>
-      <AppOwnershipNotice className="pb-6 text-[var(--muted)]" />
+      <p className="pb-6 pt-2 text-center text-[13px] text-[var(--muted)]">Penney Construction, Inc. · North Shore, MA</p>
     </footer>
   );
 }

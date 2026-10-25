@@ -17,7 +17,6 @@ import type {
   SelectionItemStatus,
 } from "@/lib/portal/types";
 import { portalFont } from "./portal-font";
-import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 const CONTACT_EMAIL = "jbetancur@penneyconstructioninc.com";
 const CONTACT_PHONE = "978-621-4387";
@@ -242,7 +241,6 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
         <p className="mt-4 text-[14px] text-[var(--muted)]">
           <a href={`tel:${CONTACT_PHONE.replace(/-/g, "")}`} className="font-semibold text-[var(--ink)]">{CONTACT_PHONE}</a> · North Shore, MA
         </p>
-        <AppOwnershipNotice className="mt-4 text-[var(--muted)]" />
       </footer>
     </div>
   );

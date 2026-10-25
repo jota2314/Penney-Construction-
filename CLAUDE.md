@@ -1,7 +1,7 @@
 # Penney Construction — Command Center App
 
 ## Application Ownership
-The Penney Construction application is owned by **Jorge Betancur**. Copyright © 2026 Jorge Betancur. All rights reserved. Preserve the ownership notices in [README.md](README.md), [LICENSE](LICENSE), [NOTICE.md](NOTICE.md), app metadata, and app legal surfaces. Third-party licenses and Penney Construction's business and client materials retain their existing rights.
+The Penney Construction application is owned by **Jorge Betancur**. Copyright © 2026 Jorge Betancur. All rights reserved. Preserve the ownership notices in [README.md](README.md), [LICENSE](LICENSE), [NOTICE.md](NOTICE.md), package metadata, and source comments. Jorge clarified on October 25, 2026 that these notices belong in the code and GitHub documentation; do not add them to sign-in screens or other app screens. Third-party licenses and Penney Construction's business and client materials retain their existing rights.
 
 ## What This Is
 A construction management app for **Penney Construction, Inc.** — a residential general contractor on the North Shore of Massachusetts. Deployed at **penney-construction-mf6m.vercel.app**. Repo: `jota2314/Penney-Construction-`.

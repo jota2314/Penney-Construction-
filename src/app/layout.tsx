@@ -1,10 +1,14 @@
+/**
+ * Penney Construction application owner: Jorge Betancur.
+ * Copyright (c) 2026 Jorge Betancur. All rights reserved.
+ * See LICENSE and NOTICE.md for scope and third-party rights.
+ */
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Playfair_Display, Archivo, IBM_Plex_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Analytics } from "@vercel/analytics/next";
 import { APPLE_STARTUP_IMAGES } from "@/lib/pwa";
-import { APP_COPYRIGHT, APP_OWNER_NAME } from "@/lib/app-ownership";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -40,8 +44,6 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Penney Construction",
   description: "Pre-Construction & Estimating Platform",
-  authors: [{ name: APP_OWNER_NAME }],
-  creator: APP_OWNER_NAME,
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -56,8 +58,6 @@ export const metadata: Metadata = {
   },
   other: {
     "mobile-web-app-capable": "yes",
-    "app-owner": APP_OWNER_NAME,
-    copyright: APP_COPYRIGHT,
   },
 };
 

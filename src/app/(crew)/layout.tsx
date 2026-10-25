@@ -11,7 +11,6 @@ import { UploadQueueBanner } from "@/components/schedule/upload-queue-banner";
 import { ROLE_LABELS } from "@/lib/constants/roles";
 import { WAREHOUSE_STAFF_TITLE } from "@/lib/auth/role-access";
 import { crewViewport } from "@/lib/crew-viewport-config";
-import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 export const viewport = crewViewport;
 
@@ -51,10 +50,7 @@ export default async function CrewLayout({
         avatarUrl={user.profile?.avatar_url || null}
       />
       </div>
-      <CrewScrollArea>
-        {children}
-        <AppOwnershipNotice className="mx-auto max-w-md px-4 pt-6" />
-      </CrewScrollArea>
+      <CrewScrollArea>{children}</CrewScrollArea>
       <CrewBottomNav isRunner={isRunner} />
       <FloatingChat />
       <UploadQueueBanner />
