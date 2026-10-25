@@ -1,3 +1,8 @@
+/**
+ * Penney Construction application owner: Jorge Betancur.
+ * Copyright (c) 2026 Jorge Betancur. All rights reserved.
+ * See LICENSE and NOTICE.md for scope and third-party rights.
+ */
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Playfair_Display, Archivo, IBM_Plex_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
