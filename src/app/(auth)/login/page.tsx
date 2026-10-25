@@ -7,12 +7,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 export const metadata: Metadata = { title: "Sign In | Penney Construction" };
 
 export default function LoginPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#4A4543] via-[#3D3835] to-[#2E2A28] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#4A4543] via-[#3D3835] to-[#2E2A28] px-4 py-8">
       <div className="w-full max-w-md space-y-8">
         {/* Logo */}
         <div className="flex flex-col items-center">
@@ -43,6 +44,7 @@ export default function LoginPage() {
         <p className="text-center text-xs text-white/40">
           Penney Construction, Inc.
         </p>
+        <AppOwnershipNotice className="text-white/70" />
       </div>
     </div>
   );

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { APP_COPYRIGHT, APP_OWNER_NAME, APP_OWNERSHIP_STATEMENT } from "@/lib/app-ownership";
+import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 export const metadata = {
   title: "Terms of Service — Penney Construction",
@@ -21,7 +23,7 @@ export default function TermsPage() {
           Terms of Service
         </h1>
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
-          Last updated: April 26, 2026
+          Last updated: October 25, 2026
         </p>
 
         <div className="prose prose-neutral dark:prose-invert mt-10 space-y-8">
@@ -144,8 +146,33 @@ export default function TermsPage() {
             </p>
           </section>
 
+          <section id="application-ownership" className="scroll-mt-8">
+            <h2 className="text-xl font-semibold">11. Application ownership</h2>
+            <p className="font-medium">{APP_OWNERSHIP_STATEMENT}</p>
+            <p>{APP_COPYRIGHT}</p>
+            <p>
+              The application software and original documentation are proprietary.
+              Third-party software and assets retain their respective ownership,
+              licenses, and attribution notices. Application ownership does not
+              transfer ownership of Penney Construction, Inc., its branding, or
+              its business, customer, financial, and project records.
+            </p>
+            <p>
+              This notice does not change existing written agreements, construction
+              contracts, or authorized access to the application. For application
+              ownership and permissions, contact {APP_OWNER_NAME} at{" "}
+              <a
+                href="mailto:jbetancur@penneyconstructioninc.com"
+                className="text-amber-600 hover:underline dark:text-amber-400"
+              >
+                jbetancur@penneyconstructioninc.com
+              </a>
+              .
+            </p>
+          </section>
+
           <section>
-            <h2 className="text-xl font-semibold">11. Contact</h2>
+            <h2 className="text-xl font-semibold">12. Contact</h2>
             <p>
               Penney Construction, Inc.
               <br />
@@ -161,6 +188,7 @@ export default function TermsPage() {
             </p>
           </section>
         </div>
+        <AppOwnershipNotice className="mt-12 border-t border-neutral-200 pt-6 text-neutral-600 dark:border-neutral-800 dark:text-neutral-400" />
       </div>
     </main>
   );

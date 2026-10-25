@@ -1,5 +1,7 @@
 # App Icon & Splash Screen Source Files
 
+**Penney Construction application owner: Jorge Betancur.** Copyright © 2026 Jorge Betancur. All rights reserved. See [ownership and attribution](../NOTICE.md); company branding and third-party assets retain their respective rights.
+
 `@capacitor/assets` reads three source images from this folder and generates every iOS icon and splash screen size automatically.
 
 ## Required files

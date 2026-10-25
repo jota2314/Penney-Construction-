@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { PortalHeader, PortalNotice, PortalTheme } from "@/components/portal-kit";
 import { telHref } from "@/lib/portal-kit/format";
+import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 const OFFICE_PHONE = "978-621-4387";
 const PHONE_KEY = "sub_portal_phone";
@@ -178,6 +179,9 @@ export function SubLogin({ loomUrl }: { loomUrl: string | null }) {
           </a>
         </div>
       </main>
+      <footer className="pc-safe-bottom mx-auto w-full max-w-md px-4 pb-6">
+        <AppOwnershipNotice className="text-[var(--muted)]" />
+      </footer>
     </PortalTheme>
   );
 }

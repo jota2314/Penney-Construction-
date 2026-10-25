@@ -12,6 +12,7 @@ import { NavUser } from "./nav-user";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
 import { canAccessPath } from "@/lib/auth/role-access";
 import type { UserProfile } from "@/types/auth";
+import { AppOwnershipNotice } from "@/components/legal/app-ownership-notice";
 
 export function AppSidebar({
   profile,
@@ -57,6 +58,7 @@ export function AppSidebar({
 
       <SidebarFooter>
         <NavUser profile={profile} email={email} />
+        <AppOwnershipNotice className="px-2 pb-2 group-data-[collapsible=icon]:hidden" />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

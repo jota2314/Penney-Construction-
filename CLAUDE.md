@@ -1,11 +1,14 @@
 # Penney Construction — Command Center App
 
+## Application Ownership
+The Penney Construction application is owned by **Jorge Betancur**. Copyright © 2026 Jorge Betancur. All rights reserved. Preserve the ownership notices in [README.md](README.md), [LICENSE](LICENSE), [NOTICE.md](NOTICE.md), app metadata, and app legal surfaces. Third-party licenses and Penney Construction's business and client materials retain their existing rights.
+
 ## What This Is
 A construction management app for **Penney Construction, Inc.** — a residential general contractor on the North Shore of Massachusetts. Deployed at **penney-construction-mf6m.vercel.app**. Repo: `jota2314/Penney-Construction-`.
 
 ## Team
-- **Ryan Penney** — Owner (rpenney@penneyconstructioninc.com)
-- **Jorge Betancur** — Precon/Estimator, primary user building this app (jbetancur@penneyconstructioninc.com)
+- **Ryan Penney** — Owner of Penney Construction, Inc. (rpenney@penneyconstructioninc.com)
+- **Jorge Betancur** — Application owner; Precon/Estimator, primary user building this app (jbetancur@penneyconstructioninc.com)
 - **Nicole Smith** — Admin, handles permits + deposits (nsmith@penneyconstructioninc.com)
 - **Howie Clickstein** — Field
 - **Shannon Penney** — Intake

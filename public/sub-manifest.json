@@ -2,7 +2,7 @@
   "id": "/sub",
   "name": "Penney Sub Portal",
   "short_name": "Penney Sub",
-  "description": "Your jobs, dates, drawings, daily photos and invoices with Penney Construction.",
+  "description": "Your jobs, dates, drawings, daily photos and invoices with Penney Construction. Application owned by Jorge Betancur.",
   "start_url": "/sub/portal",
   "scope": "/sub",
   "display": "standalone",

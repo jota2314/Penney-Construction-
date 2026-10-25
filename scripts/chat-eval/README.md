@@ -1,5 +1,7 @@
 # Chat eval
 
+**Penney Construction application owner: Jorge Betancur.** Copyright © 2026 Jorge Betancur. All rights reserved. See [ownership and attribution](../../NOTICE.md) and [LICENSE](../../LICENSE).
+
 A small harness for verifying every change to `/api/chat` (the AI Assistant) actually makes things better.
 
 ## Two ways to authenticate
