@@ -2,6 +2,9 @@
 
 # dependencies
 /node_modules
+
+# Private crew membership/payment images must never be committed.
+/src/assets/crew/
 /.pnp
 .pnp.*
 .yarn/*
