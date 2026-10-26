@@ -595,6 +595,64 @@ export async function splitSpend(input: {
   return {};
 }
 
+/**
+ * Re-cut a receipt that is ALREADY in pieces, as one whole document. A piece
+ * can only move to one job, so a capture that landed as two pieces on the
+ * wrong job (BC of Essex credit 17807: five jobs on one refund slip) could not
+ * be fixed in the app. resplit_spend_group folds every live piece back into
+ * one row and splits it again, atomically — nothing changes if it fails.
+ */
+export async function resplitSpendGroup(input: {
+  groupId: string;
+  pieces: {
+    projectId: string;
+    lineItemId?: string | null;
+    amount: number;
+    note?: string;
+  }[];
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  if (!input.groupId) return { error: "This receipt is not split into pieces" };
+  if (input.pieces.length < 2) return { error: "A split needs at least two pieces" };
+  for (const piece of input.pieces) {
+    if (!piece.projectId) return { error: "Every piece needs a job" };
+    if (!Number.isFinite(piece.amount) || piece.amount === 0) {
+      return { error: "Every piece needs a real dollar amount" };
+    }
+    if (piece.amount < 0 !== input.pieces[0].amount < 0) {
+      return { error: "A split can't mix charges and credits — file them separately" };
+    }
+  }
+
+  const { data, error } = await supabase.rpc("resplit_spend_group", {
+    p_group_id: input.groupId,
+    p_splits: input.pieces.map((piece) => ({
+      project_id: piece.projectId,
+      line_item_id: piece.lineItemId ?? null,
+      amount: piece.amount,
+      note: piece.note ?? "",
+    })),
+  });
+  if (error) return { error: error.message };
+
+  // Same hand-off as splitSpend: every piece on a budget line → one QBO push.
+  const first = ((data ?? []) as { id: string; source: string | null }[])[0];
+  if (first && !isBankLedgerRow(first.source)) {
+    await mirrorToQuickBooks(supabase, [first.id]);
+  }
+
+  revalidatePath("/spent/review");
+  revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
+  revalidatePath("/projects");
+  return {};
+}
+
 
 /**
  * "I don't know what this is" — hand the row to the people who can say.

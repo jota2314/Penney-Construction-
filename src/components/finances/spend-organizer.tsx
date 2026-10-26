@@ -17,6 +17,7 @@ import {
   attachReceiptToCapture,
   bulkAssignSpend,
   splitSpend,
+  resplitSpendGroup,
   listBudgetLinesForJob,
   type CaptureBudgetLine,
   type CaptureForReview,
@@ -215,11 +216,14 @@ function SplitPieceRow({
 function SplitEditor({
   row,
   jobs,
+  groupId,
   onDone,
   onCancel,
 }: {
   row: CaptureForReview;
   jobs: CaptureJobOption[];
+  /** Set when re-cutting a receipt that is already in pieces: `row` is the group card and its amount is the receipt total. */
+  groupId?: string;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -232,20 +236,31 @@ function SplitEditor({
   const [explanation, setExplanation] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [elapsed, setElapsed] = useState(0);
-  const [pieces, setPieces] = useState<SplitPiece[]>([
-    {
-      projectId: row.project_id ?? "",
-      lineItemId: row.line_item_id ?? "",
-      amount: "",
-      note: "",
-    },
-    {
-      projectId: row.project_id ?? "",
-      lineItemId: "",
-      amount: "",
-      note: "",
-    },
-  ]);
+  const [pieces, setPieces] = useState<SplitPiece[]>(() =>
+    // Re-splitting starts from the pieces as they stand, so "Enter manually"
+    // means correcting them rather than retyping the receipt.
+    groupId && row.allocations?.length
+      ? row.allocations.map((piece) => ({
+          projectId: piece.project_id ?? "",
+          lineItemId: piece.line_item_id ?? "",
+          amount: piece.amount === null ? "" : Number(piece.amount).toFixed(2),
+          note: piece.description ?? "",
+        }))
+      : [
+          {
+            projectId: row.project_id ?? "",
+            lineItemId: row.line_item_id ?? "",
+            amount: "",
+            note: "",
+          },
+          {
+            projectId: row.project_id ?? "",
+            lineItemId: "",
+            amount: "",
+            note: "",
+          },
+        ],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -266,7 +281,7 @@ function SplitEditor({
         const response = await fetch("/api/spend/split-suggestions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ invoiceId: row.id }),
+          body: JSON.stringify({ invoiceId: row.id, wholeReceipt: Boolean(groupId) }),
           signal: controller.signal,
         });
         const data = await response.json();
@@ -287,28 +302,32 @@ function SplitEditor({
       }
     })();
     return () => { controller.abort(); clearInterval(ticker); clearTimeout(timeout); };
-  }, [row.id, analysisAttempt]);
+  }, [row.id, analysisAttempt, groupId]);
 
   const sum = pieces.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
   const balanced = Math.round(sum * 100) === Math.round(total * 100);
-  const ready = !analyzing && balanced && (pieces.length > 1 || Boolean(pieces[0]?.lineItemId)) && pieces.every((p) => p.projectId && Number.isFinite(Number(p.amount)) &&
+  // A re-split replaces every piece, so it needs at least two of them; moving
+  // the whole receipt onto one job is the per-piece Confirm's job.
+  const ready = !analyzing && balanced && (pieces.length > 1 || (!groupId && Boolean(pieces[0]?.lineItemId))) && pieces.every((p) => p.projectId && Number.isFinite(Number(p.amount)) &&
     Number(p.amount) !== 0 && Math.sign(Number(p.amount)) === Math.sign(total) &&
     Math.abs(Number(p.amount) * 100 - Math.round(Number(p.amount) * 100)) < 0.00001);
 
   function submit() {
     setError(null);
     startTransition(async () => {
-      const result = pieces.length === 1 ? await resolveCapture({
-        invoiceId: row.id, projectId: pieces[0].projectId, lineItemId: pieces[0].lineItemId || null,
-      }) : await splitSpend({
-        invoiceId: row.id,
-        pieces: pieces.map((p) => ({
-          projectId: p.projectId,
-          lineItemId: p.lineItemId || null,
-          amount: Number(p.amount),
-          note: p.note.trim() || undefined,
-        })),
-      });
+      const splitPieces = pieces.map((p) => ({
+        projectId: p.projectId,
+        lineItemId: p.lineItemId || null,
+        amount: Number(p.amount),
+        note: p.note.trim() || undefined,
+      }));
+      const result = groupId
+        ? await resplitSpendGroup({ groupId, pieces: splitPieces })
+        : pieces.length === 1
+          ? await resolveCapture({
+              invoiceId: row.id, projectId: pieces[0].projectId, lineItemId: pieces[0].lineItemId || null,
+            })
+          : await splitSpend({ invoiceId: row.id, pieces: splitPieces });
       if (result.error) setError(result.error);
       else onDone();
     });
@@ -318,7 +337,7 @@ function SplitEditor({
     <div className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-2.5 so-rise">
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-[0.14em] text-amber-500 font-semibold">
-          Split by job or budget line
+          {groupId ? "Re-split the whole receipt" : "Split by job or budget line"}
         </div>
         <div className="text-xs font-semibold tabular-nums">{money(total)}</div>
       </div>
@@ -377,7 +396,7 @@ function SplitEditor({
           disabled={pending || !ready}
           className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
         >
-          {pending ? "Saving…" : pieces.length === 1 ? "Save assignment" : "Save split"}
+          {pending ? "Saving…" : groupId ? "Save re-split" : pieces.length === 1 ? "Save assignment" : "Save split"}
         </button>
       </div>
       {error && <div className="text-xs text-red-400">{error}</div>}
@@ -859,8 +878,10 @@ function InvoiceReviewGroup({ row, jobs, checked, onToggle }: {
   checked: boolean;
   onToggle: () => void;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState(false);
+  const [resplitting, setResplitting] = useState(false);
   const allocations = row.allocations ?? [];
   const pending = pendingReviewAllocations(row);
   const reasons = [...new Set(pending.map(piece => piece.review_reason).filter(Boolean))];
@@ -888,10 +909,36 @@ function InvoiceReviewGroup({ row, jobs, checked, onToggle }: {
           ? <button type="button" onClick={() => setPreview(true)} className="underline underline-offset-2">View invoice PDF</button>
           : <a href={row.photo_url} target="_blank" rel="noreferrer" className="underline underline-offset-2">View receipt</a>)}
         <Link href={`/spent/${row.id}`} className="underline underline-offset-2">Open bill</Link>
-        <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open} className="ml-auto rounded-lg border px-3 py-2">
+        {/* One receipt, wrong pieces (e.g. a refund slip that covers five jobs
+            but was captured as two): re-cut the whole thing in one go. */}
+        {row.split_group_id && (
+          <button
+            type="button"
+            onClick={() => setResplitting(value => !value)}
+            disabled={!row.amount}
+            aria-expanded={resplitting}
+            className={`ml-auto rounded-lg border px-3 py-2 disabled:opacity-50 ${resplitting ? "border-amber-500/50 text-amber-500" : ""}`}
+          >
+            Re-split receipt
+          </button>
+        )}
+        <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open} className={`${row.split_group_id ? "" : "ml-auto "}rounded-lg border px-3 py-2`}>
           {open ? "Hide allocations" : `Review job allocations (${pending.length})`}
         </button>
       </div>
+      {resplitting && row.split_group_id && (
+        <SplitEditor
+          row={row}
+          jobs={jobs}
+          groupId={row.split_group_id}
+          onDone={() => {
+            setResplitting(false);
+            setOpen(false);
+            router.refresh();
+          }}
+          onCancel={() => setResplitting(false)}
+        />
+      )}
       {open && <div className="flex flex-col gap-2 border-t pt-3">
         {pending.map(piece => <OrganizerRow key={piece.id} row={piece} jobs={jobs} showVendor={false} checked={false} onToggle={() => {}} index={0} allocation />)}
       </div>}

@@ -17,9 +17,20 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   try {
-    const input = z.object({ invoiceId: z.string().uuid() }).parse(await request.json());
+    const input = z.object({ invoiceId: z.string().uuid(), wholeReceipt: z.boolean().optional() }).parse(await request.json());
     const { data: invoice, error } = await supabase.from("invoices").select("*").eq("id", input.invoiceId).single();
     if (error || !invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    // Re-splitting a receipt that is already in pieces: read it against the
+    // receipt's total, not the one piece the request came from.
+    let transactionAmount = Number(invoice.amount);
+    let currentPieces: { project_id: string | null; amount: number; description: string | null }[] | null = null;
+    if (input.wholeReceipt && invoice.split_group_id) {
+      const { data: siblings, error: siblingError } = await supabase.from("invoices").select("project_id,amount,description")
+        .eq("split_group_id", invoice.split_group_id).is("duplicate_of_id", null);
+      if (siblingError || !siblings?.length) throw new Error("The receipt's pieces could not be loaded. Try again.");
+      transactionAmount = siblings.reduce((sum, s) => sum + Math.round(Number(s.amount) * 100), 0) / 100;
+      currentPieces = siblings.map(s => ({ project_id: s.project_id, amount: Number(s.amount), description: s.description }));
+    }
     if (!invoice.attachment_storage_path) return NextResponse.json({ error: "Attach the receipt or PDF first so AI can read the actual items." }, { status: 422 });
     const { data: file, error: fileError } = await supabase.storage.from("field-captures").download(invoice.attachment_storage_path);
     if (fileError || !file) throw new Error("The attached receipt could not be opened. Replace the attachment and try again.");
@@ -56,14 +67,14 @@ export async function POST(request: Request) {
         apiKey: process.env.OPENAI_API_KEY });
     }
     const analysis = await ask([block, { type: "text", text: `Read every page of this receipt. Suggest itemized portions of THIS transaction, for review before saving.
-Transaction: ${JSON.stringify({ vendor: invoice.vendor_name, amount: invoice.amount, date: invoice.invoice_date, project_id: invoice.project_id, description: invoice.description, notes: invoice.notes, review_reason: invoice.review_reason })}
-Accessible jobs: ${JSON.stringify(jobs)}
+Transaction: ${JSON.stringify({ vendor: invoice.vendor_name, amount: transactionAmount, date: invoice.invoice_date, project_id: invoice.project_id, description: invoice.description, notes: invoice.notes, review_reason: invoice.review_reason, ...(currentPieces ? { current_pieces: currentPieces } : {}) })}
+${currentPieces ? "This is the WHOLE receipt, being re-split because its current_pieces may be on the wrong jobs. Allocate from the receipt itself (per-line job references, PO, delivery address), not from current_pieces.\n" : ""}Accessible jobs: ${JSON.stringify(jobs)}
 Return {explanation:string,warnings:string[],pieces:[{project_id:uuid|null,line_item_id:uuid|null,amount:number,note:string}]}.
 Open budget lines for the existing job: ${JSON.stringify(initialLines)}
 Match each piece to an exact line ID from this list belonging to its project, or null if no open line fits. Do not use a catch-all or the closest unrelated line just because the matching trade is closed or missing. Keep explanation to two short sentences and warnings brief. Return JSON immediately, with no introductory analysis.
 This is an ITEM and BUDGET-LINE split, not merely a split between jobs. For an itemized receipt return a separate piece for EACH priced receipt line, even if ALL pieces have the SAME project_id. Do not combine fire caulk, nail stoppers and window cap into one piece merely because they belong to one job. Keep the itemized pieces separate even when their budget line is the same.
-Use the site address/PO and existing assignment as evidence. Billing address is not the job site. Leave ambiguous jobs null. Retain item names, quantities and extended prices in notes. Allocate sales tax/discount proportionally to the priced items, round cents and explain it. Sum must EXACTLY equal the transaction amount, including credits as negative. Never scale a different invoice total to fit a bank charge, partial payment, or already split share unless its allocation is explicitly supported. Check images alone do not establish itemized costs. If there is no supported dollar breakdown, return pieces:[] and explain what is missing. Do not guess an even split. Only an invoice with one priced item or an explicit single bundled charge may return one piece. Posting date versus invoice date alone is normal and needs no warning. Do not include card authorization codes or other irrelevant payment details in notes.` }], splitAnalysisSchema, value => validateSplitAmounts(Number(invoice.amount), value.pieces));
-    validateSplitAmounts(Number(invoice.amount), analysis.pieces);
+Use the site address/PO and existing assignment as evidence. Billing address is not the job site. Leave ambiguous jobs null. Retain item names, quantities and extended prices in notes. Allocate sales tax/discount proportionally to the priced items, round cents and explain it. Sum must EXACTLY equal the transaction amount, including credits as negative. Never scale a different invoice total to fit a bank charge, partial payment, or already split share unless its allocation is explicitly supported. Check images alone do not establish itemized costs. If there is no supported dollar breakdown, return pieces:[] and explain what is missing. Do not guess an even split. Only an invoice with one priced item or an explicit single bundled charge may return one piece. Posting date versus invoice date alone is normal and needs no warning. Do not include card authorization codes or other irrelevant payment details in notes.` }], splitAnalysisSchema, value => validateSplitAmounts(transactionAmount, value.pieces));
+    validateSplitAmounts(transactionAmount, analysis.pieces);
     const allowedJobs = new Set((jobs ?? []).map(j => j.id));
     for (const p of analysis.pieces) if (p.project_id && !allowedJobs.has(p.project_id)) throw new Error("AI returned an unrecognized job. Try again.");
     const projectIds = [...new Set(analysis.pieces.map(p => p.project_id).filter((id): id is string => !!id))];
