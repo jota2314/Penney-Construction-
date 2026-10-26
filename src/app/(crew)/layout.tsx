@@ -46,6 +46,7 @@ export default async function CrewLayout({
         />
       )}
       <CrewHeader
+        key={`${user.id}:${user.profile?.id ?? user.id}`}
         fullName={user.profile?.full_name || null}
         avatarUrl={user.profile?.avatar_url || null}
       />

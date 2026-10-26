@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { ChevronRight, Fuel, Loader2, Sun, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,69 @@ import {
 /** One tap from every crew screen, including the warehouse runner's route. */
 export function CrewGasCard() {
   const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    let objectUrl: string | undefined;
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+
+    // Start while the crew screen opens, not when someone reaches the pump.
+    // Keep the authorized image only in this mounted header's memory.
+    async function prepareCard() {
+      try {
+        const response = await fetch(`/api/crew/gas-card?attempt=${attempt}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) {
+          throw new Error("Gas card unavailable");
+        }
+        const blob = await response.blob();
+        if (disposed) return;
+        controller.signal.throwIfAborted();
+        objectUrl = URL.createObjectURL(blob);
+        const preview = new window.Image();
+        const cancelDecode = () => { preview.src = ""; };
+        controller.signal.addEventListener("abort", cancelDecode, { once: true });
+        preview.src = objectUrl;
+        try {
+          await preview.decode();
+        } finally {
+          controller.signal.removeEventListener("abort", cancelDecode);
+        }
+        if (disposed) return;
+        controller.signal.throwIfAborted();
+        setImageSrc(objectUrl);
+        setImageState("ready");
+      } catch {
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = undefined;
+        }
+        if (!disposed) setImageState("error");
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    void prepareCard();
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearTimeout(timeout);
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = undefined;
+      }
+    };
+  }, [attempt]);
+
   return (
-    <Dialog onOpenChange={() => setImageState("loading")}>
+    <Dialog>
       <DialogTrigger asChild>
         <button
           type="button"
@@ -72,26 +131,25 @@ export function CrewGasCard() {
                 className="bg-amber-600 text-white hover:bg-amber-700"
                 onClick={() => {
                   setImageState("loading");
+                  setImageSrc(null);
                   setAttempt((value) => value + 1);
                 }}
               >
                 Try again
               </Button>
             </div>
-          ) : (
+          ) : imageSrc ? (
             <Image
-              key={attempt}
-              src={`/api/crew/gas-card?attempt=${attempt}`}
+              src={imageSrc}
               alt="BJ's gas membership barcode"
               width={1280}
               height={640}
               unoptimized
               loading="eager"
-              className={`max-h-full w-full object-contain ${imageState === "ready" ? "opacity-100" : "opacity-0"}`}
-              onLoad={() => setImageState("ready")}
+              className="max-h-full w-full object-contain"
               onError={() => setImageState("error")}
             />
-          )}
+          ) : null}
         </div>
 
         <div className="shrink-0 space-y-1 border-t border-slate-200 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] text-center text-sm text-slate-600 [@media(max-height:500px)]:py-2">
