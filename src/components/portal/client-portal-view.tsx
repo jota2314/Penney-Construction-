@@ -17,6 +17,7 @@ import type {
   SelectionItemStatus,
 } from "@/lib/portal/types";
 import { portalFont } from "./portal-font";
+import { ScheduleTab } from "./schedule-tab";
 
 const CONTACT_EMAIL = "jbetancur@penneyconstructioninc.com";
 const CONTACT_PHONE = "978-621-4387";
@@ -223,7 +224,7 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
 
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
         {tab === "home" && <HomeTab data={data} go={go} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
-        {tab === "schedule" && <ScheduleTab data={data} action={action} />}
+        {tab === "schedule" && <ScheduleTab phases={data.schedule} action={action} />}
         {tab === "selections" && (
           <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} action={action} />
         )}
@@ -564,59 +565,6 @@ function PhotosTile({ photos, onOpen }: { photos: PortalPhoto[]; onOpen: () => v
         <span className="block text-[13px] text-white/80">Latest {fmtShort(photos[0].date)}</span>
       </span>
     </button>
-  );
-}
-
-// ─────────────────────────────── Schedule
-function ScheduleTab({ data, action }: { data: PortalData; action: ClientAction }) {
-  const today = todayISO();
-  if (data.schedule.length === 0) return <Empty>Your project timeline will appear here once it&apos;s scheduled.</Empty>;
-  return (
-    <>
-      <p className="px-1 text-[14px] leading-relaxed text-[var(--muted)]">
-        <b className="text-[var(--ink)]">Confirmed</b> dates are locked with our trades. <b className="text-[var(--ink)]">Estimated</b> dates firm up as work gets closer.
-      </p>
-      <ol className="card divide-y divide-[var(--line)]">
-        {data.schedule.map((p) => {
-          const teamDone = p.status === "completed";
-          const clientDone = !teamDone && !!p.client_completed;
-          const isDone = teamDone;
-          const isNow = !isDone && p.status === "in_progress";
-          // The client can tick off work that has started; future phases stay the team's.
-          const canMark = !isDone && !clientDone && (isNow || (!!p.start_date && p.start_date <= today));
-          const busy = action.busy === `phase:${p.id}`;
-          const isInspection = p.event_type === "inspection";
-          const chip = isDone ? ["Done", "#2F6B4F"] : clientDone ? ["Awaiting verification", "#7A5A1E"] : isNow ? ["In progress", "#C66638"] : p.firm ? ["Confirmed", "#252D2B"] : ["Estimated", "#8A918C"];
-          return (
-            <li key={p.id} className={`flex gap-3 p-4 ${isNow ? "bg-[#FBF1EB]" : ""}`}>
-              <span className={`mt-1 h-3.5 w-3.5 shrink-0 ${isInspection ? "rotate-45 rounded-[3px]" : "rounded-full"}`}
-                style={{ background: isDone || isNow ? chip[1] : "transparent", border: `2px solid ${chip[1]}` }} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p className={`text-[16px] font-bold ${isDone ? "text-[var(--muted)]" : ""}`}>{p.name}</p>
-                  <span className="shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-bold text-white" style={{ background: chip[1] }}>{chip[0]}</span>
-                </div>
-                {p.description && <p className="mt-0.5 text-[14px] text-[var(--muted)]">{p.description}</p>}
-                <p className="mt-1 text-[14px] font-semibold text-[var(--muted)]">
-                  {p.actual_completion_date ? `Passed ${fmtDate(p.actual_completion_date)}` : p.firm || isDone || isNow ? `${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}` : weekOf(p.start_date)}
-                </p>
-                {clientDone && (
-                  <div className="mt-2 flex items-center gap-3 text-[14px]">
-                    <span className="font-semibold text-[#7A5A1E]">You reported this complete — awaiting team verification</span>
-                    <button disabled={!action.enabled || busy} onClick={() => action.act("phase", p.id, "uncomplete")}
-                      className="min-h-[36px] font-bold text-[var(--accent-dark)] disabled:opacity-50">{busy ? "Saving…" : "Undo"}</button>
-                  </div>
-                )}
-                {canMark && (
-                  <button disabled={!action.enabled || busy} onClick={() => action.act("phase", p.id, "complete")}
-                    className="btn btn-ghost mt-2 disabled:opacity-50">{busy ? "Saving…" : "✓ Mark complete"}</button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-    </>
   );
 }
 

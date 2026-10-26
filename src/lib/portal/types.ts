@@ -99,9 +99,10 @@ export interface PortalNeed {
   tab?: "selections";
 }
 
+/** A master phase as the client sees it: name, dates and status only. */
 export interface PortalPhase {
   actual_completion_date?: string | null;
-  id: string; name: string; description: string | null; start_date: string | null; end_date: string | null;
+  id: string; name: string; start_date: string | null; end_date: string | null;
   status: string | null; color: string | null; firm: boolean; event_type?: string | null; sort_order?: number | null;
   /** The client marked it complete on their portal (board status unchanged). */
   client_completed?: boolean;

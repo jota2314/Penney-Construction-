@@ -123,9 +123,11 @@ export async function loadPortalData(
       .single(),
     supabase
       .from("schedule_phases")
-      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, is_manually_scheduled, sort_order, color, event_type, phase_scope, client_completed_at, actual_completed_at")
+      .select("id, name, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, is_manually_scheduled, sort_order, color, event_type, phase_scope, client_completed_at, actual_completed_at")
       .eq("project_id", projectId)
       // Master schedule only — daily crew plans are internal (phase_scope 'daily').
+      // No description or notes: master descriptions carry sub names, payment
+      // amounts and internal hedges. The client sees name, dates and status.
       .or("phase_scope.eq.master,phase_scope.is.null")
       .order("sort_order", { ascending: true })
       .order("start_date", { ascending: true, nullsFirst: false }),
@@ -194,16 +196,16 @@ export async function loadPortalData(
   const proj = projectRes.data;
   if (!proj) return null;
 
-  // ---- schedule (live cascade: confirmed phases firm, the rest estimated)
+  // ---- schedule (live cascade: confirmed phases firm, the rest estimated).
+  // Cancelled phases are dropped after the cascade so the dates match the board.
   const rawPhases = ((scheduleRes.data || []) as CascadeInput[]).filter(isMasterPhase);
   const cascade = cascadeSchedule(rawPhases);
-  const schedule = rawPhases.map((p) => {
+  const schedule = rawPhases.filter((p) => p.status !== "cancelled").map((p) => {
     const c = cascade.get(p.id);
-    const row = p as unknown as { name: string; description: string | null; color: string | null; event_type: string | null; client_completed_at: string | null };
+    const row = p as unknown as { name: string; color: string | null; event_type: string | null; client_completed_at: string | null };
     return {
       id: p.id,
       name: row.name,
-      description: row.description,
       status: p.status,
       color: row.color,
       event_type: row.event_type,
