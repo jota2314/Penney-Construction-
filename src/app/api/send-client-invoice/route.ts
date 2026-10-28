@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     subject: overrideSubject,
     body: overrideBody,
     cc: overrideCc,
+    reminder,
   } = await request.json();
   if (!invoiceId) {
     return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
@@ -41,6 +42,12 @@ export async function POST(request: Request) {
     .single();
 
   if (!inv) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  if (reminder && (!inv.sent_to_client_at || inv.status === "draft")) {
+    return NextResponse.json({ error: "This invoice hasn't been sent yet. Send it first." }, { status: 400 });
+  }
+  if (reminder && inv.status === "paid") {
+    return NextResponse.json({ error: "This invoice is already marked paid." }, { status: 400 });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const proj = inv.projects as any;
@@ -58,9 +65,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const total = Math.round(Number(inv.amount) || 0).toLocaleString();
-  const defaultSubject = `Invoice #${inv.invoice_number} — ${proj?.name || "Project"} | Penney Construction`;
-  const defaultBody = `Hi ${clientName},
+  // To the penny: a $35,870.40 invoice must not read $35,870 in the email.
+  const dollars = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const total = dollars(Number(inv.amount) || 0);
+  const invoiceSubject = `Invoice #${inv.invoice_number} — ${proj?.name || "Project"} | Penney Construction`;
+  const invoiceBody = `Hi ${clientName},
 
 Please find attached Invoice #${inv.invoice_number} for ${proj?.name || "your project"}.
 
@@ -71,6 +80,25 @@ Terms: ${inv.terms || "Due on receipt"}
 Please make checks payable to Penney Construction, Inc.
 
 Thank you,`;
+
+  // A reminder re-attaches the same PDF and asks for what is still open.
+  const sentOn = inv.sent_to_client_at
+    ? new Date(inv.sent_to_client_at).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "long", day: "numeric" })
+    : null;
+  const stillDue = dollars(Math.max(0, (Number(inv.amount) || 0) - (Number(inv.paid_amount) || 0)));
+  const reminderSubject = `Reminder: Invoice #${inv.invoice_number}, ${proj?.name || "Project"} | Penney Construction`;
+  const reminderBody = `Hi ${clientName},
+
+Just a friendly reminder about Invoice #${inv.invoice_number} for ${proj?.name || "your project"}${sentOn ? `, sent ${sentOn}` : ""}. I attached it again.
+
+Amount Due: $${stillDue}
+
+Please make checks payable to Penney Construction, Inc.
+
+Thank you,`;
+
+  const defaultSubject = reminder ? reminderSubject : invoiceSubject;
+  const defaultBody = reminder ? reminderBody : invoiceBody;
 
   // Preview mode: return the prefilled email for the compose dialog, send nothing.
   if (preview) {
@@ -116,14 +144,18 @@ Thank you,`;
       attachments,
     });
 
-    // A test send doesn't change invoice state — it's just a preview.
+    // A test send doesn't change invoice state — it's just a preview. A
+    // reminder doesn't either: the original send date is what Collections
+    // counts the wait from.
     if (!testOnly) {
-      await supabase.from("client_invoices").update({
-        sent_to_client_at: new Date().toISOString(),
-        client_email: resolvedEmail,
-        status: inv.status === "draft" ? "sent" : inv.status,
-        updated_at: new Date().toISOString(),
-      }).eq("id", invoiceId);
+      if (!reminder) {
+        await supabase.from("client_invoices").update({
+          sent_to_client_at: new Date().toISOString(),
+          client_email: resolvedEmail,
+          status: inv.status === "draft" ? "sent" : inv.status,
+          updated_at: new Date().toISOString(),
+        }).eq("id", invoiceId);
+      }
 
       await supabase.from("email_logs").insert({
         gmail_message_id: sent.id,
@@ -141,7 +173,9 @@ Thank you,`;
       success: true,
       message: testOnly
         ? `Test invoice sent to ${toEmail}`
-        : `Invoice #${inv.invoice_number} sent to ${toEmail}`,
+        : reminder
+          ? `Reminder for Invoice #${inv.invoice_number} sent to ${toEmail}`
+          : `Invoice #${inv.invoice_number} sent to ${toEmail}`,
     });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Send failed" }, { status: 500 });

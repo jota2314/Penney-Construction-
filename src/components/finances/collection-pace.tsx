@@ -63,11 +63,20 @@ export function CollectionPaceSummary({ pace }: { pace: CollectionPace }) {
 }
 
 export function CollectionPace({ pace }: { pace: CollectionPace }) {
+  return (
+    <div className="space-y-4">
+      <CollectionPaceSummary pace={pace} />
+      <CollectionPaceHistory pace={pace} />
+    </div>
+  );
+}
+
+/** Week by week, who paid this week, and month by month — without the headline cards. */
+export function CollectionPaceHistory({ pace }: { pace: CollectionPace }) {
   const { weeks, months, thisWeek, month } = pace;
   const monthTarget = weeks.reduce((s, w) => s + (w.target ?? 0), 0);
   return (
     <div className="space-y-4">
-      <CollectionPaceSummary pace={pace} />
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="overflow-hidden rounded-xl border bg-card">
           <div className="border-b px-4 py-3">

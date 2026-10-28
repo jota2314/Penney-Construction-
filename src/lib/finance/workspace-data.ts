@@ -66,7 +66,7 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
     financialRows((f, t) =>
       db
         .from("payments_received")
-        .select("id,project_id,client_invoice_id,amount")
+        .select("id,project_id,client_invoice_id,amount,received_date,reference_number")
         .order("id")
         .range(f, t),
     ),
@@ -74,7 +74,7 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
       db
         .from("client_invoices")
         .select(
-          "id,project_id,invoice_number,title,amount,paid_amount,status,sent_to_client_at,due_date",
+          "id,project_id,invoice_number,title,amount,paid_amount,status,sent_to_client_at,due_date,invoice_date",
         )
         .order("id")
         .range(f, t),
@@ -130,12 +130,22 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
   ]);
   const records = recordResult.data as FinanceRecord[];
   const names = new Map(projects.map((p) => [p.id, p.name]));
+  const nyDay = (iso: string) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(iso));
+  const daysBetween = (from: string, to: string) =>
+    Math.max(0, Math.floor((Date.parse(to) - Date.parse(from)) / 86400000));
   const collections: CollectionRow[] = invoices.flatMap((i) => {
     const result = collectionBalance(
       i,
       receipts.filter((r) => r.client_invoice_id === i.id),
     );
     if (!result || (!result.balance && !result.issue)) return [];
+    const sent = i.sent_to_client_at ? nyDay(i.sent_to_client_at) : null;
     return [
       {
         id: i.id,
@@ -154,10 +164,46 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
               ),
             )
           : 0,
+        sent,
+        daysWaiting: sent ? daysBetween(sent, today) : 0,
+        loggedPayment: null,
         issue: result.issue,
       },
     ];
   });
+  // Checks are often logged from the deposit side without being linked to the
+  // invoice, so a paid invoice keeps showing as owed. Flag an unlinked receipt
+  // for exactly the open balance, received after the invoice was issued; each
+  // receipt can flag one invoice, oldest invoice first.
+  const issuedOn = new Map(
+    invoices.map((i) => {
+      const sentDay = i.sent_to_client_at ? nyDay(i.sent_to_client_at) : null;
+      const day = [sentDay, i.invoice_date].filter(Boolean).sort()[0] ?? null;
+      return [i.id, day];
+    }),
+  );
+  const claimed = new Set<string>();
+  for (const row of [...collections].sort((a, b) => (a.sent ?? "").localeCompare(b.sent ?? ""))) {
+    const from = issuedOn.get(row.id);
+    if (row.issue || !row.balance || !from) continue;
+    const earliest = new Date(Date.parse(from) - 3 * 86400000).toISOString().slice(0, 10);
+    const match = receipts.find(
+      (r) =>
+        !r.client_invoice_id &&
+        !claimed.has(r.id) &&
+        r.project_id === row.projectId &&
+        cents(r.amount) === row.balance &&
+        !!r.received_date &&
+        r.received_date >= earliest,
+    );
+    if (!match) continue;
+    claimed.add(match.id);
+    row.loggedPayment = {
+      amount: row.balance,
+      date: match.received_date,
+      reference: match.reference_number ?? null,
+    };
+  }
   const jobs: ProjectHealth[] = projects
     .filter((p) => !p.is_overhead)
     .map((p) => {

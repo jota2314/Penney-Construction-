@@ -63,6 +63,15 @@ export type CollectionRow = {
   balance: number;
   due: string | null;
   daysLate: number;
+  /** Day the invoice was (last) emailed, America/New_York. */
+  sent: string | null;
+  daysWaiting: number;
+  /**
+   * A recorded receipt on this job, not linked to any invoice, for exactly this
+   * balance and received after the invoice went out. Display only: it still has
+   * to be reviewed and applied before the invoice counts as paid.
+   */
+  loggedPayment: { amount: number; date: string; reference: string | null } | null;
   issue: string | null;
 };
 export const cents = (value: unknown): number | null =>
