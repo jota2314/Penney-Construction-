@@ -19,7 +19,7 @@ const { collectionPlanProjectIds: identities, publishedCollectionPlan: plan } = 
 test('every dated-plan row resolves to a verified project identity, including similar-name jobs', () => {
   const rows = [...plan.managers.flatMap(m => m.items), ...plan.comingUp.flatMap(w => w.items), ...plan.conditional];
   for (const row of rows) assert.match(identities[row.project], /^[a-f0-9-]{36}$/);
-  assert.equal(identities.Conway, 'b12ec6da-a6ca-4d9e-92ae-80c334c49517');
+  assert.equal(identities['McNamara chimney repair'], '2663e3eb-e1d6-455a-85e5-b15d2a514190');
   assert.equal(identities.LaPointe, 'c6e28677-095c-450c-993c-9d5454d4d1fb');
   assert.equal(identities.Dougherty, '6021d4a6-7e8a-4df5-b4d0-420583cf1415');
 });
