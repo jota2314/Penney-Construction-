@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Plus, Receipt, Trash2 } from "lucide-react";
 import { BottomSheet, BottomSheetBody, BottomSheetContent, BottomSheetDescription, BottomSheetFooter, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { createClientInvoice, updateClientInvoice } from "@/lib/actions/invoices";
+import { hasQuickBooksCopy, isIssuedInvoice } from "@/lib/finance/client-invoice-revision";
 import { formatMoney, parseMoney } from "@/lib/money";
 
 interface InvoiceEditorValue {
@@ -12,10 +13,17 @@ interface InvoiceEditorValue {
   updated_at: string;
   invoice_number: number;
   title: string;
-  line_items: { description: string; amount: number }[] | null;
+  description?: string | null;
+  line_items: { description: string; amount: number; change_order_id?: string }[] | null;
   amount: number;
   terms: string | null;
+  status?: string;
+  sent_to_client_at?: string | null;
+  quickbooks_invoice_id?: string | null;
+  quickbooks_id?: string | null;
+  quickbooks_doc_number?: string | null;
 }
+type EditorLine = { description: string; amount: string; change_order_id?: string };
 export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLabel }: { projectId: string; invoice?: InvoiceEditorValue; projectName?: string; triggerLabel?: string }) {
   const [open, setOpen] = useState(false);
   const [editVersion, setEditVersion] = useState("");
@@ -23,10 +31,17 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [terms, setTerms] = useState("Due on receipt");
-  const [lines, setLines] = useState<{ description: string; amount: string }[]>([
+  const [description, setDescription] = useState("");
+  const [reason, setReason] = useState("");
+  const [lines, setLines] = useState<EditorLine[]>([
     { description: "", amount: "" },
   ]);
   const router = useRouter();
+  // A sent invoice is corrected under its own number; the client already has it.
+  const issued = !!invoice && isIssuedInvoice({ status: invoice.status ?? "draft", sent_to_client_at: invoice.sent_to_client_at });
+  const quickBooksCopy = !!invoice && hasQuickBooksCopy(invoice);
+  // Callers that do not load the description (CEO collections) must not clear it.
+  const editsDescription = !invoice || invoice.description !== undefined;
 
   const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0), 0);
 
@@ -46,15 +61,20 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
     setError(null);
     const line_items = lines
       .filter((l) => l.description.trim())
-      .map((l) => ({ description: l.description.trim(), amount: parseMoney(l.amount) ?? 0 }));
+      .map((l) => ({
+        description: l.description.trim(),
+        amount: parseMoney(l.amount) ?? 0,
+        ...(l.change_order_id ? { change_order_id: l.change_order_id } : {}),
+      }));
     const input = {
       project_id: projectId,
       title: title.trim(),
+      description: editsDescription ? description.trim() : undefined,
       line_items,
       terms: terms.trim() || "Due on receipt",
     };
     const res = invoice
-      ? await updateClientInvoice(invoice.id, projectId, editVersion, input)
+      ? await updateClientInvoice(invoice.id, projectId, editVersion, { ...input, reason: reason.trim() })
       : await createClientInvoice(input);
     setSaving(false);
     if (res.error) {
@@ -64,6 +84,8 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
     setOpen(false);
     setTitle("");
     setTerms("Due on receipt");
+    setDescription("");
+    setReason("");
     setLines([{ description: "", amount: "" }]);
     router.refresh();
   }
@@ -76,9 +98,15 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
           setEditVersion(invoice?.updated_at ?? "");
           setTitle(invoice?.title ?? "");
           setTerms(invoice?.terms ?? "Due on receipt");
+          setDescription(invoice?.description ?? "");
+          setReason("");
           setLines(invoice
             ? (invoice.line_items?.length ? invoice.line_items : [{ description: invoice.title, amount: invoice.amount }])
-                .map((line) => ({ description: line.description, amount: String(line.amount) }))
+                .map((line): EditorLine => ({
+                  description: line.description,
+                  amount: String(line.amount),
+                  ...("change_order_id" in line && line.change_order_id ? { change_order_id: line.change_order_id } : {}),
+                }))
             : [{ description: "", amount: "" }]);
           setOpen(true);
         }}
@@ -95,10 +123,19 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
               {invoice ? `Edit Invoice #${invoice.invoice_number}` : "New Client Invoice"}
             </BottomSheetTitle>
             <BottomSheetDescription>
-              {projectName ? `${projectName}. ` : ""}Itemize what the client owes — branded PDF, one-click send.
+              {projectName ? `${projectName}. ` : ""}
+              {issued
+                ? `Corrects Invoice #${invoice?.invoice_number} in place: same number, same date. Send the corrected PDF to the client after saving.`
+                : "Itemize what the client owes — branded PDF, one-click send."}
             </BottomSheetDescription>
           </BottomSheetHeader>
           <BottomSheetBody className="space-y-3">
+            {quickBooksCopy && (
+              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+                QuickBooks is not changed. After saving, the invoice is flagged until the QuickBooks copy
+                {invoice?.quickbooks_doc_number ? ` ${invoice.quickbooks_doc_number}` : ""} is updated by hand.
+              </p>
+            )}
             <div>
               <label className="text-xs font-medium text-muted-foreground">Title *</label>
               <input
@@ -124,13 +161,15 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
                       value={l.amount}
                       onChange={(e) => updateLine(idx, "amount", e.target.value)}
                       placeholder="$"
-                      className="w-24 px-3 py-2 rounded-xl border bg-background text-sm"
+                      readOnly={!!l.change_order_id}
+                      title={l.change_order_id ? "Applied change order credit. Change it through its change order." : undefined}
+                      className="w-24 px-3 py-2 rounded-xl border bg-background text-sm read-only:opacity-60"
                     />
                     <button
                       onClick={() => removeLine(idx)}
                       className="text-muted-foreground hover:text-red-400 p-1 disabled:opacity-30"
-                      disabled={lines.length === 1}
-                      title="Remove line"
+                      disabled={lines.length === 1 || !!l.change_order_id}
+                      title={l.change_order_id ? "Applied change order credits stay on the invoice" : "Remove line"}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -157,15 +196,38 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLa
                 className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
               />
             </div>
+            {editsDescription && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Optional note shown on the invoice PDF"
+                  className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
+                />
+              </div>
+            )}
+            {issued && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Reason for the correction *</label>
+                <input
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="e.g. Credit for door items removed from scope per Bill 10/21"
+                  className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
+                />
+              </div>
+            )}
             {error && <p className="text-xs text-red-400">{error}</p>}
           </BottomSheetBody>
           <BottomSheetFooter>
             <button
               onClick={handleCreate}
-              disabled={saving || !title.trim()}
+              disabled={saving || !title.trim() || (issued && !reason.trim())}
               className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
             >
-              {saving ? "Saving..." : invoice ? "Save Invoice" : "Create Invoice"}
+              {saving ? "Saving..." : issued ? "Save Correction" : invoice ? "Save Invoice" : "Create Invoice"}
             </button>
           </BottomSheetFooter>
         </BottomSheetContent>

@@ -29,6 +29,13 @@ async function run(patch={},payload=input,stamp='2026-10-01T00:00:00Z'){
  assert.equal(args.p_expected_updated_at,'2026-10-01T00:00:00Z');
  assert.equal(JSON.stringify(args.p_line_items),JSON.stringify(input.line_items));
  assert.deepEqual(state.invalidations,['/projects/test-job','/ceo','/money']);
+ assert.equal(args.p_description,null);assert.equal(args.p_reason,'Revised through the Penney app invoice editor');
+ // Sent-invoice corrections forward the user's reason, description and applied credit links.
+ const credit={description:'Credit: closet doors',amount:-548.23,change_order_id:'00000000-0000-4000-8000-000000000009'};
+ await run({},{...input,description:'Less the door credit',reason:'Per Bill 10/21',line_items:[...input.line_items,credit]});
+ assert.equal(state.calls[0].args.p_description,'Less the door credit');assert.equal(state.calls[0].args.p_reason,'Per Bill 10/21');
+ assert.deepEqual(state.calls[0].args.p_line_items.at(-1),credit);
+ assert.ok((await run({},{...input,line_items:[{...credit,change_order_id:'nope'}]})).error);assert.equal(state.calls.length,0);
  for(const patch of [{signedIn:false},{role:'field'}]){
   assert.ok((await run(patch)).error);assert.equal(state.calls.length,0);
  }

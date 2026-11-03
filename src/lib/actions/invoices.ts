@@ -66,6 +66,8 @@ export async function createInvoice(input: InvoiceInput) {
 interface ClientInvoiceLineItem {
   description: string;
   amount: number;
+  /** Set on a credit applied from a change order; the database keeps it intact. */
+  change_order_id?: string;
 }
 
 interface ClientInvoiceInput {
@@ -130,19 +132,28 @@ export async function createClientInvoice(input: ClientInvoiceInput) {
   return { data };
 }
 
-/** Revise an unpaid draft in place; keep its identity and milestone link. */
+/**
+ * Revise an unpaid invoice in place, draft or already sent, and keep its number,
+ * date, status and milestone link. Never reissue under a new number (Jorge,
+ * 11/3/26). The database refuses paid invoices and ones with applied receipts,
+ * audits every revision, and flags a QuickBooks copy as out of date instead of
+ * pushing to QuickBooks.
+ */
 export async function updateClientInvoice(
   invoiceId: string,
   projectId: string,
   expectedUpdatedAt: string,
-  input: Pick<ClientInvoiceInput, "title" | "line_items" | "terms">,
+  input: Pick<ClientInvoiceInput, "title" | "line_items" | "terms" | "description"> & { reason?: string },
 ) {
   const parsed = z.object({
     title: z.string().trim().min(1).max(500),
     terms: z.string().trim().max(2000).optional(),
+    description: z.string().trim().max(4000).optional(),
+    reason: z.string().trim().max(2000).optional(),
     line_items: z.array(z.object({
       description: z.string().trim().min(1).max(4000),
       amount: z.number().finite().min(-100000000).max(100000000),
+      change_order_id: z.string().uuid().optional(),
     })).min(1).max(200),
   }).safeParse(input);
   if (!parsed.success || !expectedUpdatedAt) return { error: "Enter a title and valid invoice lines, then try again." };
@@ -157,13 +168,35 @@ export async function updateClientInvoice(
     p_invoice_id: invoiceId, p_project_id: projectId,
     p_expected_updated_at: expectedUpdatedAt, p_title: parsed.data.title,
     p_terms: parsed.data.terms || 'Due on receipt', p_line_items: parsed.data.line_items,
-    p_reason: 'Draft revised through the Penney app invoice editor',
+    p_reason: parsed.data.reason || 'Revised through the Penney app invoice editor',
+    // Omitted keeps the stored description; an empty string clears it.
+    p_description: parsed.data.description ?? null,
   });
   if (error) return { error: error.message };
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/ceo");
   revalidatePath("/money");
   return { data };
+}
+
+/**
+ * Clear the "QuickBooks copy is out of date" flag after someone updated the
+ * QuickBooks invoice by hand. Nothing is sent to QuickBooks. Passing the flag
+ * time the user saw keeps a later revision flagged.
+ */
+export async function markClientInvoiceQuickBooksCurrent(invoiceId: string, projectId: string, outOfDateAt: string) {
+  if (![invoiceId, projectId].every((id) => z.string().uuid().safeParse(id).success) || !outOfDateAt) {
+    return { error: "Choose a valid invoice." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+  const { error } = await supabase.rpc("mark_client_invoice_quickbooks_current", {
+    p_invoice_id: invoiceId, p_project_id: projectId, p_expected_out_of_date_at: outOfDateAt,
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
 }
 
 /** Manually (re)push a client invoice to QuickBooks. */

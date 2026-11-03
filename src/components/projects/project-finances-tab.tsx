@@ -44,6 +44,7 @@ import {
   X,
   Lock,
   LockOpen,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -60,7 +61,8 @@ import { ClientInvoiceDialog } from "@/components/invoices/client-invoice-dialog
 import { SendInvoiceButton } from "@/components/invoices/send-invoice-button";
 import { ClientInvoiceCreditDialog } from "@/components/invoices/client-invoice-credit-dialog";
 import { canCreditSentInvoice } from "@/lib/finance/client-invoice-credits";
-import { deleteClientInvoice, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
+import { canReviseClientInvoice } from "@/lib/finance/client-invoice-revision";
+import { deleteClientInvoice, markClientInvoiceQuickBooksCurrent, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
 import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
@@ -108,6 +110,7 @@ interface PaymentRow {
   method: string | null;
   reference_number: string | null;
   description: string | null;
+  client_invoice_id?: string | null;
 }
 
 interface ChangeOrderRow {
@@ -134,7 +137,7 @@ interface ClientInvoiceRow {
   invoice_number: number;
   title: string;
   description: string | null;
-  line_items: { description: string; amount: number }[] | null;
+  line_items: { description: string; amount: number; change_order_id?: string }[] | null;
   amount: number;
   terms: string | null;
   due_date: string | null;
@@ -147,6 +150,8 @@ interface ClientInvoiceRow {
   quickbooks_invoice_id: string | null;
   quickbooks_id?: string | null;
   quickbooks_doc_number: string | null;
+  /** Revised in the app after QuickBooks got its copy; cleared once QuickBooks is fixed by hand. */
+  quickbooks_out_of_date_at?: string | null;
 }
 
 interface BudgetVsActualRow {
@@ -299,6 +304,11 @@ export function ProjectFinancesTab({
     const totalReceived = paymentsReceived.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     return { totalReceived };
   }, [paymentsReceived]);
+  // Invoices with an applied receipt stay locked; the rest are corrected in place.
+  const receiptInvoiceIds = useMemo(
+    () => new Set(paymentsReceived.map((p) => p.client_invoice_id).filter(Boolean) as string[]),
+    [paymentsReceived],
+  );
 
   // ── Client invoices: live vs premade-at-signing ──
   // Signing a contract premakes one draft invoice per payment milestone. Those
@@ -731,6 +741,14 @@ export function ProjectFinancesTab({
                   <div className="font-bold text-green-400">{formatMoney(Number(inv.amount))}</div>
                 </div>
               </div>
+              {inv.quickbooks_out_of_date_at && (
+                <QuickBooksOutOfDateFlag
+                  invoiceId={inv.id}
+                  projectId={projectId}
+                  docNumber={inv.quickbooks_doc_number}
+                  outOfDateAt={inv.quickbooks_out_of_date_at}
+                />
+              )}
               <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-t border-border/30 bg-muted/20">
                 <a
                   href={`/api/generate-client-invoice?invoiceId=${inv.id}`}
@@ -755,7 +773,7 @@ export function ProjectFinancesTab({
                   qbDocNumber={inv.quickbooks_doc_number}
                 />
                 <div className="flex-1" />
-                {inv.status === "draft" && !inv.paid_at && !Number(inv.paid_amount) && !inv.quickbooks_invoice_id && !inv.sent_to_client_at && (
+                {canReviseClientInvoice(inv, receiptInvoiceIds.has(inv.id)) && (
                   <ClientInvoiceDialog projectId={projectId} invoice={inv} />
                 )}
                 <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
@@ -810,7 +828,7 @@ export function ProjectFinancesTab({
                       qbDocNumber={inv.quickbooks_doc_number}
                     />
                     <div className="flex-1" />
-                    {inv.status === "draft" && !inv.paid_at && !Number(inv.paid_amount) && !inv.quickbooks_invoice_id && !inv.sent_to_client_at && (
+                    {canReviseClientInvoice(inv, receiptInvoiceIds.has(inv.id)) && (
                   <ClientInvoiceDialog projectId={projectId} invoice={inv} />
                 )}
                 <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
@@ -2274,6 +2292,57 @@ function CreateInQuickBooksButton({
       </button>
       {error && <span className="text-[9px] text-red-400 shrink-0">{error}</span>}
     </>
+  );
+}
+
+/**
+ * The invoice was corrected in the app after QuickBooks got its copy. Push to
+ * QuickBooks is manual-only, so the copy stays wrong until someone fixes it
+ * there by hand and clears this flag.
+ */
+function QuickBooksOutOfDateFlag({
+  invoiceId,
+  projectId,
+  docNumber,
+  outOfDateAt,
+}: {
+  invoiceId: string;
+  projectId: string;
+  docNumber: string | null;
+  outOfDateAt: string;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const revisedOn = new Date(outOfDateAt).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
+
+  async function handleMarkCurrent() {
+    setSaving(true);
+    setError(null);
+    const res = await markClientInvoiceQuickBooksCurrent(invoiceId, projectId, outOfDateAt);
+    setSaving(false);
+    if (res.error) setError(res.error);
+    else router.refresh();
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-t border-amber-500/30 bg-amber-500/10 text-xs text-amber-500">
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="font-semibold">QuickBooks copy is out of date, update it.</span>{" "}
+        Revised here {revisedOn}; QuickBooks{docNumber ? ` ${docNumber}` : ""} still shows the old invoice.
+      </span>
+      <button
+        onClick={handleMarkCurrent}
+        disabled={saving}
+        className="shrink-0 inline-flex h-7 items-center gap-1.5 rounded-lg border border-amber-500/40 px-2.5 text-[11px] font-medium hover:bg-amber-500/15 transition-colors disabled:opacity-50"
+        title="Clears this flag. Nothing is sent to QuickBooks."
+      >
+        <CheckCircle2 className="h-3 w-3" />
+        {saving ? "Saving..." : "I updated QuickBooks"}
+      </button>
+      {error && <span className="w-full text-[10px] text-red-400">{error}</span>}
+    </div>
   );
 }
 

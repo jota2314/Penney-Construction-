@@ -11,6 +11,7 @@ const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 await db.exec(read('./client-invoice-credit-test-schema.sql'));
 await db.exec(read('../supabase/migrations/20261001005249_mcp_client_finance.sql'));
 await db.exec(read('../supabase/migrations/20261021203124_apply_approved_client_invoice_credit.sql'));
+await db.exec(read('../supabase/migrations/20261103150000_revise_sent_client_invoice_in_place.sql'));
 after(() => db.close());
 const owner = '00000000-0000-4000-8000-000000000001';
 const field = '00000000-0000-4000-8000-000000000002';
@@ -235,7 +236,7 @@ test('separate estimate-line and source deletion requests both preserve an appli
   assert.equal((await db.query('select * from estimate_line_items where id=$1',[unlinked.id])).rows.length,0);
 });
 
-test('authorization, non-public execute grants, and original draft-only restriction remain intact', async () => {
+test('authorization, non-public execute grants, and the paid-invoice revision restriction remain intact', async () => {
   const f = await fixture();
   for (const actor of ['',field]) {
     await db.query("select set_config('test.uid',$1,false)",[actor]);
@@ -247,12 +248,16 @@ test('authorization, non-public execute grants, and original draft-only restrict
     try { await assert.rejects(()=>apply(f),/permission denied/); }
     finally { await db.exec('reset role'); }
   }
+  // Sent invoices are now corrected in place (scripts/client-invoice-revise-sent-db.test.mjs);
+  // a paid one still is not.
+  await db.query(`update client_invoices set status='paid' where id=$1`,[f.bill.id]);
+  const paid = await invoice(f.bill.id);
   await db.exec('set role authenticated');
   try {
     await assert.rejects(()=>db.query('select finance_internal.apply_invoice_credit($1,$2,$3,$4,$5,$6,$7)',
       [owner,f.bill.id,f.project,f.bill.stamp,f.credit.id,f.credit.stamp,'credit']),/permission denied/);
     await assert.rejects(()=>db.query('select public.revise_client_invoice($1,$2,$3,$4,$5,$6,$7)',
-      [f.bill.id,f.project,f.bill.stamp,'Revised','Due',f.bill.line_items,'revision']),/unsent draft/);
+      [f.bill.id,f.project,paid.stamp,'Revised','Due',f.bill.line_items,'revision']),/paid invoice/);
   } finally { await db.exec('reset role'); }
   assert.equal((await history(f.bill.id)).rows.length,0);
 });

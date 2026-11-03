@@ -18,7 +18,7 @@ create table public.projects(
 create table public.client_invoices(
   id uuid primary key default gen_random_uuid(), project_id uuid references public.projects(id),
   invoice_number integer, title text, description text, line_items jsonb, amount numeric,
-  terms text, due_date date, status text, notes text, approval_token uuid default gen_random_uuid(),
+  terms text, due_date date, invoice_date date, status text, notes text, approval_token uuid default gen_random_uuid(),
   sent_to_client_at timestamptz, client_email text, client_viewed_at timestamptz,
   client_view_count integer, paid_at timestamptz, paid_amount numeric, gmail_message_id text,
   created_by uuid, created_at timestamptz default now(), updated_at timestamptz default now(),
