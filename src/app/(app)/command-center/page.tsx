@@ -3,6 +3,8 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import type { UserRole } from "@/types/auth";
 import { CommandCenterFeed, type RoleId } from "@/components/field-feed/command-center-feed";
 import { getCommandCenterFeedData } from "@/lib/actions/command-center-feed";
+import { getWebsiteInquirySummary } from "@/lib/actions/website-inquiries";
+import { canManageWebsiteInquiries, type InquirySummary } from "@/lib/inquiries/model";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
 
@@ -32,7 +34,12 @@ export default async function CommandCenterPage({
   const viewerId = user.profile?.id ?? user.id;
 
   const { post } = await searchParams;
-  const { feed, jobsites } = await getCommandCenterFeedData(role, viewerId);
+  const canSeeInquiries = canManageWebsiteInquiries(user.profile?.role) && canManageWebsiteInquiries(user.realProfile?.role);
+  const [{ feed, jobsites }, inquiries] = await Promise.all([
+    getCommandCenterFeedData(role, viewerId),
+    canSeeInquiries ? getWebsiteInquirySummary().catch((): InquirySummary => ({ open: 0, new: 0, overdue: 0, unavailable: true })) : Promise.resolve(null),
+  ]);
+  if (inquiries) feed.unshift({ type: "websiteInquiries", summary: inquiries });
 
   return (
     <CommandCenterFeed

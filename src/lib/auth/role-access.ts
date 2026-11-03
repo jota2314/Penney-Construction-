@@ -1,4 +1,5 @@
 import { canManageMarketing } from "@/lib/marketing/access";
+import { canManageWebsiteInquiries } from "@/lib/inquiries/model";
 import type { UserRole } from "@/types/auth";
 
 /**
@@ -421,6 +422,9 @@ export function canAccessPath(
   viewer: AccessViewer,
   pathname: string,
 ): boolean {
+  if (pathname === "/command-center/inquiries" || pathname.startsWith("/command-center/inquiries/")) {
+    return canManageWebsiteInquiries(viewer.role);
+  }
   if (pathname === "/marketing" || pathname.startsWith("/marketing/")) {
     return canManageMarketing(viewer.role);
   }

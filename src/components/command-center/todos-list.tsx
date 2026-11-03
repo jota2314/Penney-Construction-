@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -658,6 +659,11 @@ function TodoCard({
           <p className="text-sm text-muted-foreground mt-1">
             {todo.description}
           </p>
+          {todo.source === "website" && (
+            <Link href={`/command-center/inquiries/${todo.id}`} onClick={(event) => event.stopPropagation()} className="mt-2 inline-block text-sm font-medium underline underline-offset-4">
+              Open website inquiry →
+            </Link>
+          )}
           <div className="flex items-center gap-3 mt-1">
             {todo.due_date && (
               <span

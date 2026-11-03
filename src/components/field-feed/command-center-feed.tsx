@@ -28,6 +28,8 @@ import { CompanyPostCard } from "./company-post-card";
 import { ReceiptTile, DepositTile } from "./money-tiles";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import type { CompanyFeedPost } from "@/lib/actions/company-feed";
+import { WebsiteInquirySummary } from "@/components/inquiries/inquiry-summary";
+import type { InquirySummary } from "@/lib/inquiries/model";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,6 +94,7 @@ export type SwipeSection = {
 };
 
 export type FeedItem =
+  | { type: "websiteInquiries"; summary: InquirySummary }
   | { type: "today"; events: { time: string; what: string; tag: Priority; done: boolean }[] }
   | { type: "section"; label: string }
   | ActionCardData
@@ -1349,6 +1352,7 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
 
   const renderItem = (item: RenderItem, compact = false) => {
     switch (item.type) {
+      case "websiteInquiries": return <WebsiteInquirySummary summary={item.summary} />;
       case "today":       return <TodayStrip   events={item.events} />;
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
@@ -1404,6 +1408,7 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
   if (desktop) {
     const span = (item: RenderItem): string => {
       switch (item.type) {
+        case "websiteInquiries": return "col-span-12";
         case "today":       return "col-span-12 lg:col-span-7";
         case "dailyLog":    return "col-span-12 lg:col-span-5";
         case "actionStack": return "col-span-12 lg:col-span-7";
