@@ -4,14 +4,14 @@ import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/auth/get-user";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { canManageWebsiteInquiries, INTAKE_STATUSES, inquiryDueIso, inquiryText, summarizeInquiries, type Inquiry, type InquiryState, type IntakeStatus, type MatchingInquiryLead } from "@/lib/inquiries/model";
+import { canManageWebsiteInquiries, WEBSITE_INQUIRY_EMAILS, INTAKE_STATUSES, inquiryDueIso, inquiryText, summarizeInquiries, type Inquiry, type InquiryState, type IntakeStatus, type MatchingInquiryLead } from "@/lib/inquiries/model";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COLUMNS = "id,contact_name,description,created_at,updated_at,assignee,due_date,status,snooze_until,intake_status,lead_id,website_inquiry";
 async function inquiryAccess(write = false) {
   const user = await getUser();
-  if (!user || !canManageWebsiteInquiries(user.realProfile?.role) || !canManageWebsiteInquiries(user.profile?.role)) {
-    throw new Error("Website inquiries are available to the office team.");
+  if (!user || !canManageWebsiteInquiries(user.realProfile?.email) || !canManageWebsiteInquiries(user.profile?.email)) {
+    throw new Error("Website inquiries are available only to Jorge, Ryan, Nico, and Shannon.");
   }
   if (write && user.isImpersonating) throw new Error("Exit View as before changing an inquiry.");
   return { user, db: await createClient() };
@@ -37,7 +37,7 @@ export async function getWebsiteInquiry(id: string): Promise<Inquiry | null> {
 }
 export async function listInquiryAssignees(): Promise<string[]> {
   const { db } = await inquiryAccess();
-  const { data, error } = await db.from("profiles").select("full_name").in("role", ["owner", "precon_manager", "office_admin"]);
+  const { data, error } = await db.from("profiles").select("full_name").in("email", [...WEBSITE_INQUIRY_EMAILS]);
   if (error) throw new Error("The office team could not be loaded. Please refresh.");
   return [...new Set((data || []).map((row) => (row.full_name as string | null)?.trim().split(/\s+/)[0]).filter((name): name is string => !!name))].sort();
 }

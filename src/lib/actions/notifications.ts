@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
 import { createClient } from "@/lib/supabase/server";
+import { canManageWebsiteInquiries } from "@/lib/inquiries/model";
 
 export type AppNotification = {
   id: string;
@@ -25,21 +26,26 @@ export async function listMyNotifications(limit = 20): Promise<{
 
   const supabase = await createClient();
   const safeLimit = Math.min(Math.max(Math.round(limit), 1), 50);
-  const [{ data: rows, error }, { count }] = await Promise.all([
-    supabase
+  let rowsQuery = supabase
       .from("app_notifications")
       .select(
         "id, title, body, url, read_at, created_at, actor:profiles!actor_profile_id(full_name)",
       )
       .eq("recipient_profile_id", profileId)
       .order("created_at", { ascending: false })
-      .limit(safeLimit),
-    supabase
+      .limit(safeLimit);
+  let countQuery = supabase
       .from("app_notifications")
       .select("id", { count: "exact", head: true })
       .eq("recipient_profile_id", profileId)
-      .is("read_at", null),
-  ]);
+      .is("read_at", null);
+  // The database sees the real identity, so also filter View as notifications.
+  if (!canManageWebsiteInquiries(user?.realProfile?.email) || !canManageWebsiteInquiries(user?.profile?.email)) {
+    const visibleSources = "source_type.is.null,and(source_type.neq.website_inquiry,source_type.neq.website_inquiry_overdue)";
+    rowsQuery = rowsQuery.or(visibleSources);
+    countQuery = countQuery.or(visibleSources);
+  }
+  const [{ data: rows, error }, { count }] = await Promise.all([rowsQuery, countQuery]);
 
   if (error || !rows) return { notifications: [], unreadCount: count ?? 0 };
 

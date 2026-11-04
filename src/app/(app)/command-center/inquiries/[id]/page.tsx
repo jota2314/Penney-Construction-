@@ -9,7 +9,7 @@ import { InquiryDetail } from "@/components/inquiries/inquiry-detail";
 export const metadata: Metadata = { title: "Inquiry | Penney Construction" };
 export default async function WebsiteInquiryPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAuth();
-  if (!canManageWebsiteInquiries(user.profile?.role) || !canManageWebsiteInquiries(user.realProfile?.role)) redirect("/command-center");
+  if (!canManageWebsiteInquiries(user.profile?.email) || !canManageWebsiteInquiries(user.realProfile?.email)) redirect("/command-center");
   const { id } = await params;
   const [inquiry, assignees, matchingLeads] = await Promise.all([getWebsiteInquiry(id), listInquiryAssignees(), listMatchingInquiryLeads(id)]);
   if (!inquiry) notFound();

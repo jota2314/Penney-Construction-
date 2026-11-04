@@ -9,7 +9,7 @@ import { InquiryList } from "@/components/inquiries/inquiry-list";
 export const metadata: Metadata = { title: "Website inquiries | Penney Construction" };
 export default async function WebsiteInquiriesPage() {
   const user = await requireAuth();
-  if (!canManageWebsiteInquiries(user.profile?.role) || !canManageWebsiteInquiries(user.realProfile?.role)) redirect("/command-center");
+  if (!canManageWebsiteInquiries(user.profile?.email) || !canManageWebsiteInquiries(user.realProfile?.email)) redirect("/command-center");
   let rows; let failed = false;
   try { rows = await listWebsiteInquiries(); } catch { failed = true; }
   // One server snapshot keeps age/overdue labels identical during hydration.

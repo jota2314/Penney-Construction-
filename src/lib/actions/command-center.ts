@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/auth/get-user";
+import { canManageWebsiteInquiries } from "@/lib/inquiries/model";
 import { revalidatePath } from "next/cache";
 import { notifyAssignee } from "@/lib/actions/notify-assignee";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
@@ -193,12 +195,18 @@ export async function getQuoteStatusCounts() {
 
 export async function getTodos(status?: TodoStatus, category?: TodoCategory) {
   const supabase = await createClient();
+  const user = await getUser();
 
   let query = supabase
     .from("todos")
     .select("*")
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false });
+
+  // RLS checks the signed-in person; View as must also honor the viewed person.
+  if (!canManageWebsiteInquiries(user?.realProfile?.email) || !canManageWebsiteInquiries(user?.profile?.email)) {
+    query = query.or("source.is.null,source.neq.website");
+  }
 
   if (status) {
     query = query.eq("status", status);
@@ -275,11 +283,16 @@ export async function snoozeTodo(id: string, until: string) {
 
 export async function getTodoCategoryCounts() {
   const supabase = await createClient();
+  const user = await getUser();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("todos")
     .select("category")
     .eq("status", "open");
+  if (!canManageWebsiteInquiries(user?.realProfile?.email) || !canManageWebsiteInquiries(user?.profile?.email)) {
+    query = query.or("source.is.null,source.neq.website");
+  }
+  const { data, error } = await query;
 
   if (error) throw error;
 
