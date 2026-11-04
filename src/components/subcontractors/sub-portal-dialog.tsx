@@ -20,7 +20,6 @@ import {
 } from "@/lib/actions/sub-portal";
 import { fmtShort, fmtTime } from "@/lib/portal-kit/format";
 import { AddCellField, SubInviteFlow } from "./sub-invite-flow";
-import { SubGoogleLoginSetup } from "./sub-google-login-setup";
 import type { Subcontractor } from "@/types/database";
 
 interface SubPortalDialogProps {
@@ -148,31 +147,19 @@ export function SubPortalDialog({ open, onOpenChange, subcontractor, onChanged }
             {/* the login */}
             <div className="space-y-2 text-xs text-muted-foreground">
               <p>
-                They sign in at <span className="font-medium text-foreground">{LOGIN_URL}</span>
-                {status?.google_email ? " with Google." : <> with their cell {cell ? <span className="font-medium text-foreground">{cell}</span> : "(none on file)"} and a PIN, or enable Google below.</>}
+                They sign in at <span className="font-medium text-foreground">{LOGIN_URL}</span> with their
+                cell {cell ? <span className="font-medium text-foreground">{cell}</span> : "(none on file)"} and a PIN.
               </p>
               {!cell && (
-                <div className="space-y-1">
-                  <p>Cell for text invitations. Optional when they use Google.</p>
-                  <AddCellField
-                    subId={subcontractor.id}
-                    onSaved={() => {
-                      setReloadKey((k) => k + 1);
-                      onChanged?.();
-                    }}
-                  />
-                </div>
+                <AddCellField
+                  subId={subcontractor.id}
+                  onSaved={() => {
+                    setReloadKey((k) => k + 1);
+                    onChanged?.();
+                  }}
+                />
               )}
             </div>
-
-            <SubGoogleLoginSetup
-              key={`${subcontractor.id}:${status?.google_email ?? ""}`}
-              subId={subcontractor.id}
-              currentEmail={status?.google_email ?? null}
-              suggestedEmail={activity.email ?? subcontractor.email}
-              disabled={status?.enabled === false}
-              onSaved={setStatus}
-            />
 
             {/* activity */}
             <div className="space-y-2 rounded-lg border p-3 text-sm">
@@ -215,27 +202,25 @@ export function SubPortalDialog({ open, onOpenChange, subcontractor, onChanged }
             {/* invites + preview */}
             <div className="space-y-2">
               <div className="grid grid-cols-3 gap-2">
-                <Button size="sm" onClick={() => setInvite("text")} disabled={!cell || status?.enabled === false} className="gap-1.5">
+                <Button size="sm" onClick={() => setInvite("text")} disabled={!cell} className="gap-1.5">
                   <MessageSquare className="h-3.5 w-3.5" /> Text
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setInvite("email")}
-                  disabled={status?.enabled === false || (!status?.google_email && (!cell || !activity.email))}
+                  disabled={!cell || !activity.email}
                   className="gap-1.5"
-                  title={status?.google_email || activity.email ? undefined : "No email on file"}
+                  title={activity.email ? undefined : "No email on file"}
                 >
                   <Mail className="h-3.5 w-3.5" /> Email
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setInvite("copy")} disabled={status?.enabled === false || (!cell && !status?.google_email)} className="gap-1.5">
+                <Button size="sm" variant="outline" onClick={() => setInvite("copy")} disabled={!cell} className="gap-1.5">
                   <Copy className="h-3.5 w-3.5" /> Copy
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                {status?.google_email
-                  ? `The invitation asks them to use Google with ${status.google_email}. No PIN is needed.`
-                  : status?.has_pin
+                {status?.has_pin
                   ? "He keeps his PIN unless you choose a new one."
                   : "The first invite sets a 4-digit PIN and shows it to you once."}
               </p>
@@ -258,7 +243,7 @@ export function SubPortalDialog({ open, onOpenChange, subcontractor, onChanged }
             {/* PIN by hand */}
             <div className="space-y-2 rounded-lg border p-3">
               <label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                {status?.has_pin ? "Reset PIN" : status?.google_email ? "Optional PIN fallback" : "Set PIN"}
+                {status?.has_pin ? "Reset PIN" : "Set PIN"}
               </label>
               <div className="flex items-center gap-2">
                 <Input

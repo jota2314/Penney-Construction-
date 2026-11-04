@@ -198,21 +198,21 @@ async function signup(supabase: SupabaseClient, project: SiteProject, body: Reco
 
   const hasLogin = () =>
     NextResponse.json(
-      { error: "This number already has a login. Use your invited Google account or your phone and PIN.", hasLogin: true },
+      { error: "This number already has a login. Sign in with your PIN.", hasLogin: true },
       { status: 409 },
     );
 
   // 1) This phone already signs in to the portal.
   const { data: byPhone } = await supabase
     .from("sub_portal_access")
-    .select("id, subcontractor_id, pin_hash, google_email, enabled")
+    .select("id, subcontractor_id, pin_hash, enabled")
     .eq("phone_login", phone)
     .limit(1);
   const phoneAccess = byPhone?.[0] ?? null;
   if (phoneAccess && !phoneAccess.enabled) {
     return NextResponse.json({ error: "Your portal access is turned off. Call the Penney office." }, { status: 403 });
   }
-  if (phoneAccess?.pin_hash || phoneAccess?.google_email) return hasLogin();
+  if (phoneAccess?.pin_hash) return hasLogin();
 
   // 1) + 2) This cell is already in Penney's records: an office-made access
   //    row with no PIN yet, or a directory record with this phone. Typing a
@@ -235,19 +235,16 @@ async function signup(supabase: SupabaseClient, project: SiteProject, body: Reco
   if (matched) {
     const { data: existing } = await supabase
       .from("sub_portal_access")
-      .select("id, pin_hash, google_email, enabled")
+      .select("id, pin_hash, enabled")
       .eq("subcontractor_id", matched.id)
       .maybeSingle();
     // The company already has a login under a different number. Don't
     // hand out a second key to the same billing — the office sorts it.
-    if (existing?.pin_hash || existing?.google_email || existing?.enabled === false) {
+    if (existing?.pin_hash || existing?.enabled === false) {
       return NextResponse.json(
         {
           error:
-            existing?.enabled === false
-              ? "Your portal access is turned off. Call the Penney office."
-              : "Your company already has a portal login. Use your invited Google account or your phone and PIN, or call the Penney office.",
-          hasLogin: existing?.enabled !== false,
+            "Your company already has a portal login under another phone number. Sign in with that number, or call the Penney office.",
         },
         { status: 409 },
       );
@@ -567,7 +564,7 @@ async function findKnownCompany(
   );
   if (hits.length === 0) return null;
 
-  // Which of them already sign in (enabled, Google or PIN). Only the id comes back.
+  // Which of them already sign in (enabled, PIN set). Only the id comes back.
   const { data: logins } = await supabase
     .from("sub_portal_access")
     .select("subcontractor_id")
@@ -576,7 +573,7 @@ async function findKnownCompany(
       hits.map((h) => h.id),
     )
     .eq("enabled", true)
-    .or("pin_hash.not.is.null,google_email.not.is.null");
+    .not("pin_hash", "is", null);
   const withLogin = new Set(((logins as { subcontractor_id: string }[] | null) ?? []).map((l) => l.subcontractor_id));
 
   const rank = (s: DirectorySub) => [linked.has(s.id) ? 0 : 1, withLogin.has(s.id) ? 0 : 1, s.is_active ? 0 : 1];
@@ -629,7 +626,7 @@ function notifyKnownCompanySignup(
     : !known.hasLogin
       ? `${company} has no portal login yet, so they were told to call the office. Set one up from Subcontractors.`
       : sameFirstName
-        ? `${company} already has a portal login (${contact}). They were told to use their invited Google account or phone and PIN, or call the office.`
+        ? `${company} already has a portal login (${contact}), possibly theirs under another phone number. They were told to sign in with that number or call the office.`
         : `${company} already has a portal login${contact ? ` (${contact})` : ""}, so they were told to ask ${contact ?? "them"} to post today or call the office.`;
   notifyLater({
     subName: name,

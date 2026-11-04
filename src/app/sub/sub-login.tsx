@@ -4,7 +4,6 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { PortalHeader, PortalNotice, PortalTheme } from "@/components/portal-kit";
 import { telHref } from "@/lib/portal-kit/format";
-import { SubGoogleLogin } from "@/components/sub-portal/google-login";
 
 const OFFICE_PHONE = "978-621-4387";
 const PHONE_KEY = "sub_portal_phone";
@@ -104,10 +103,7 @@ export function SubLogin({ loomUrl }: { loomUrl: string | null }) {
           Your jobs, dates, drawings and daily photos with Penney, in one place.
         </p>
 
-        <SubGoogleLogin />
-
         <form onSubmit={submit} className="card mt-5 space-y-5 p-4">
-          <p className="text-[16px] font-bold">Or use your phone and PIN</p>
           <label className="block">
             <span className="label">Cell phone number</span>
             <input

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { HeaderAction, PortalHeader, PortalNotice, PortalTheme, type PortalNoticeValue } from "@/components/portal-kit";
 import { telHref } from "@/lib/portal-kit/format";
-import { SubGoogleLogin } from "@/components/sub-portal/google-login";
 
 const PHONE_KEY = "sub_portal_phone";
 const OFFICE_PHONE = "978-621-4387";
@@ -420,21 +419,20 @@ export function SiteJoin({ code }: { code: string }) {
         <p className="text-[18px] font-extrabold leading-snug">
           {!known.hasLogin
             ? `${known.company} is already in Penney's list.`
-            : `${known.company} is already set up.`}
+            : known.sameFirstName
+              ? `${known.company} is already set up under another phone number.`
+              : `${known.company} is already set up.`}
         </p>
         <p className="mt-2 text-[16px] text-[var(--muted)]">
           {!known.hasLogin
             ? "Call the office and they'll set up your login."
             : known.sameFirstName
-              ? "Use your invited Google account or your phone and PIN, or call the office."
+              ? "Sign in with that number, or call the office."
               : `Ask ${who} to post today, or call the office for your own login.`}
         </p>
         <p className="mt-2 text-[14px] text-[var(--muted)]">The Penney office has your name and number.</p>
         <div className="mt-5 space-y-3">
           {callButton}
-          {known.hasLogin && (
-            <SubGoogleLogin onSignedIn={() => window.location.reload()} />
-          )}
           {known.hasLogin && known.sameFirstName && (
             <button
               type="button"
@@ -457,8 +455,6 @@ export function SiteJoin({ code }: { code: string }) {
     content = (
       <>
         <p className="text-[16px] text-[var(--muted)]">Add photos and see the drawings for this job.</p>
-
-        <SubGoogleLogin onSignedIn={() => window.location.reload()} />
 
         <div className="card grid grid-cols-2 gap-1 p-1" role="group" aria-label="Sign up or sign in">
           {(
