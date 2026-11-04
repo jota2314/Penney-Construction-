@@ -35,8 +35,11 @@ begin
  begin perform public.begin_website_walkthrough(gen_random_uuid(),inquiry2,actor,stamp,starts+interval '4 hours',starts+interval '5 hours','Rollback-only address','walkthrough-test-2@example.invalid','rpenney@penneyconstructioninc.com','Test','Draft',false,'',gen_random_uuid()); exception when others then rejected:=true; end;
  if not rejected then raise exception 'Unagreed alternative was confirmed'; end if;
  rejected:=false;
- begin update public.todos set intake_status='walkthrough' where id=inquiry2; exception when others then rejected:=true; end;
+ begin update public.todos set intake_status='walkthrough' where id=inquiry; exception when others then rejected:=true; end;
  if not rejected then raise exception 'Manual booking without receipt was allowed'; end if;
+ -- Legacy inquiries preserve their pre-rollout manual status workflow.
+ update public.todos set intake_status='walkthrough' where id=inquiry2;
+ update public.todos set intake_status='new' where id=inquiry2;
  perform public.record_website_walkthrough_event(booking,'fixture','https://calendar.google.com/calendar/event?eid=fixture',op);
  email_id:=(result->>'confirmation_email_id')::uuid;
  insert into public.website_inquiry_emails(id,inquiry_id,sender_profile_id,recipient_email,subject,body,status,gmail_message_id,sent_at)
