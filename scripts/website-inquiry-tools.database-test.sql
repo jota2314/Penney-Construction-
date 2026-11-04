@@ -165,7 +165,7 @@ begin
   end if;
   if not exists(select 1 from public.app_notifications where id=ordinary_notification_id) then raise exception 'Unrelated notification deleted'; end if;
   if not exists(select 1 from public.leads where id=linked_lead_id) then raise exception 'Linked lead deleted'; end if;
-  if (select count(*) from public.website_inquiry_emails where id in (email_id,second_email_id) and inquiry_id is null and status='sent') <> 2 then
+  if (select count(*) from public.website_inquiry_emails e where e.id in (email_id,second_email_id) and e.inquiry_id is null and e.status='sent') <> 2 then
     raise exception 'Delete did not preserve sent email history';
   end if;
   if (select count(*) from public.activity_log where entity_id=inquiry_id and action='website_inquiry_deleted') <> 1 then raise exception 'Delete audit missing'; end if;
