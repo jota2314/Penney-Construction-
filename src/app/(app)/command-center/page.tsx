@@ -34,7 +34,7 @@ export default async function CommandCenterPage({
   const viewerId = user.profile?.id ?? user.id;
 
   const { post } = await searchParams;
-  const canSeeInquiries = canManageWebsiteInquiries(user.profile?.role) && canManageWebsiteInquiries(user.realProfile?.role);
+  const canSeeInquiries = canManageWebsiteInquiries(user.profile?.email) && canManageWebsiteInquiries(user.realProfile?.email);
   const [{ feed, jobsites }, inquiries] = await Promise.all([
     getCommandCenterFeedData(role, viewerId),
     canSeeInquiries ? getWebsiteInquirySummary().catch((): InquirySummary => ({ open: 0, new: 0, overdue: 0, unavailable: true })) : Promise.resolve(null),

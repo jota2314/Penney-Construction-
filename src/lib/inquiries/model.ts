@@ -6,8 +6,16 @@ export const INTAKE_LABELS: Record<IntakeStatus, string> = {
   new: "New", contacted: "Contacted", walkthrough: "Walkthrough booked",
   qualified: "Qualified", closed: "Closed", spam: "Spam",
 };
-export function canManageWebsiteInquiries(role: string | null | undefined): boolean {
-  return !!role && ["owner", "precon_manager", "office_admin"].includes(role);
+/** Jorge's two sign-ins, Ryan, Nicole (Nico), and Shannon only. */
+export const WEBSITE_INQUIRY_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+  "rpenney@penneyconstructioninc.com",
+  "nsmith@penneyconstructioninc.com",
+  "spenney@penneyconstructioninc.com",
+];
+export function canManageWebsiteInquiries(email: string | null | undefined): boolean {
+  return !!email && WEBSITE_INQUIRY_EMAILS.includes(email.trim().toLowerCase());
 }
 export type Inquiry = {
   id: string; contact_name: string; description: string; created_at: string; updated_at: string;

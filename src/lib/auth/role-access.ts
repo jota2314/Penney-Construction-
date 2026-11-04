@@ -423,7 +423,7 @@ export function canAccessPath(
   pathname: string,
 ): boolean {
   if (pathname === "/command-center/inquiries" || pathname.startsWith("/command-center/inquiries/")) {
-    return canManageWebsiteInquiries(viewer.role);
+    return canManageWebsiteInquiries(viewer.email);
   }
   if (pathname === "/marketing" || pathname.startsWith("/marketing/")) {
     return canManageMarketing(viewer.role);
