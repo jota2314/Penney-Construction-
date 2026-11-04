@@ -93,3 +93,19 @@ export async function convertWebsiteInquiry(id: string, existingLeadId: string |
     return { error: null, leadId: data };
   } catch (error) { return { error: error instanceof Error ? error.message : "The inquiry could not be converted." }; }
 }
+
+export async function deleteWebsiteInquiry(input: { id: string; expectedUpdatedAt: string }): Promise<{ error: string | null }> {
+  try {
+    const { db } = await inquiryAccess(true);
+    if (!input || !UUID.test(input.id) || typeof input.expectedUpdatedAt !== "string" || !Number.isFinite(Date.parse(input.expectedUpdatedAt))) {
+      return { error: "The inquiry is invalid. Refresh before deleting." };
+    }
+    const { data, error } = await db.rpc("delete_website_inquiry", {
+      p_todo_id: input.id, p_expected_updated_at: input.expectedUpdatedAt,
+    });
+    if (error) return { error: error.message };
+    if (data?.deleted !== true || data?.id !== input.id) return { error: "Deletion could not be confirmed. Refresh before continuing." };
+    refreshInquiry(input.id);
+    return { error: null };
+  } catch (error) { return { error: error instanceof Error ? error.message : "The inquiry could not be deleted." }; }
+}
