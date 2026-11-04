@@ -61,11 +61,20 @@ async function ryanToken(): Promise<string> {
         refresh_token: profile.google_refresh_token, grant_type: "refresh_token" }),
       cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) unavailable();
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({})) as { error?: string };
+      if (problem.error === "unauthorized_client" || problem.error === "invalid_client") {
+        throw new CalendarBookingError("Ryan’s Google connection could not be refreshed. The app’s Google OAuth configuration must match its Google sign-in configuration before Ryan reconnects in Settings.", true);
+      }
+      unavailable();
+    }
     const result = await response.json() as { access_token?: unknown };
     if (typeof result.access_token !== "string" || !result.access_token) unavailable();
     return result.access_token;
-  } catch { unavailable(); }
+  } catch (error) {
+    if (error instanceof CalendarBookingError) throw error;
+    unavailable();
+  }
 }
 
 async function request(token: string, path: string, init: RequestInit = {}): Promise<Response> {
