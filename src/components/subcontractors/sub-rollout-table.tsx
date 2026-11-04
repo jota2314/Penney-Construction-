@@ -22,7 +22,7 @@ type Filter = "all" | "not_invited" | "invited" | "on" | "need_cell" | "hidden";
 const PORTAL_PILL: Record<SubPortalState, { label: string; className: string }> = {
   on: { label: "On", className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
   invited: { label: "Invited", className: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
-  set_up: { label: "PIN set", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+  set_up: { label: "Ready", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
   never: { label: "Never", className: "bg-muted text-muted-foreground" },
   off: { label: "Off", className: "bg-red-500/15 text-red-700 dark:text-red-400" },
 };
@@ -245,7 +245,7 @@ function RolloutRow({
   onChanged: () => void;
 }) {
   const pill = PORTAL_PILL[r.portal];
-  const canInvite = !!r.cell && r.portal !== "off" && !isHidden(r);
+  const canInvite = (!!r.cell || !!r.google_email) && r.portal !== "off" && !isHidden(r);
   const why = [
     r.next_phase
       ? `${r.next_phase.start_date <= today ? "On" : "Next"}: ${r.next_phase.name} at ${r.next_phase.project_name} ${fmtShort(r.next_phase.start_date)}${r.phases_30d > 1 ? ` (+${r.phases_30d - 1} more)` : ""}`
@@ -301,6 +301,7 @@ function RolloutRow({
         <span className={cn("block truncate", !r.email && "text-muted-foreground")} title={r.email ?? undefined}>
           {r.email ?? "None"}
         </span>
+        {r.google_email && <span className="block truncate text-xs text-muted-foreground" title={r.google_email}>Google: {r.google_email}</span>}
       </div>
 
       {/* portal */}
@@ -326,20 +327,20 @@ function RolloutRow({
             <Button
               size="sm"
               onClick={() => onInvite("text")}
-              disabled={!canInvite}
+              disabled={!canInvite || !r.cell}
               className="h-8 gap-1.5"
-              title={canInvite ? undefined : r.portal === "off" ? "Portal is turned off" : "Add a cell first"}
+              title={r.portal === "off" ? "Portal is turned off" : !r.cell ? "Add a cell to send a text" : undefined}
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              {r.has_pin ? "Text" : "Set up + text"}
+              {r.has_pin || r.google_email ? "Text" : "Set up + text"}
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={() => onInvite("email")}
-              disabled={!canInvite || !r.email}
+              disabled={!canInvite || (!r.email && !r.google_email)}
               className="h-8 gap-1.5"
-              title={!r.email ? "No email on file" : undefined}
+              title={!r.email && !r.google_email ? "No email on file" : undefined}
             >
               <Mail className="h-3.5 w-3.5" /> Email
             </Button>

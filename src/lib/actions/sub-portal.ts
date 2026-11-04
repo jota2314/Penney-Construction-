@@ -44,6 +44,7 @@ async function officeUser(): Promise<AuthUser | null> {
 export interface SubPortalStatus {
   id: string;
   phone_login: string | null;
+  google_email: string | null;
   has_pin: boolean;
   enabled: boolean;
   /** Bumped by the sub's own page loads (office previews too, before Oct 17). */
@@ -57,6 +58,7 @@ export interface SubPortalStatus {
 type StatusRow = {
   id: string;
   phone_login: string | null;
+  google_email: string | null;
   pin_hash: string | null;
   enabled: boolean;
   last_viewed_at: string | null;
@@ -66,7 +68,7 @@ type StatusRow = {
 };
 
 /** Never includes `token`. pin_hash is read only to say whether a PIN is set. */
-const STATUS_COLS = "id, phone_login, pin_hash, enabled, last_viewed_at, view_count, link_sent_at, invite_channel";
+const STATUS_COLS = "id, phone_login, google_email, pin_hash, enabled, last_viewed_at, view_count, link_sent_at, invite_channel";
 
 const CHANNELS: readonly SubInviteChannel[] = ["text", "email", "copy", "qr"];
 
@@ -74,6 +76,7 @@ function toStatus(row: StatusRow): SubPortalStatus {
   return {
     id: row.id,
     phone_login: row.phone_login,
+    google_email: row.google_email ?? null,
     has_pin: !!row.pin_hash,
     enabled: row.enabled,
     last_viewed_at: row.last_viewed_at,
@@ -97,6 +100,50 @@ async function readStatus(admin: Admin, subId: string): Promise<SubPortalStatus 
 export async function getSubPortalStatus(subcontractorId: string): Promise<SubPortalStatus | null> {
   if (!(await officeUser())) return null;
   return readStatus(createAdminClient(), subcontractorId);
+}
+
+/** Only an explicit office action grants a Google account access to this sub. */
+export async function setSubGoogleEmail(
+  subcontractorId: string,
+  input: string,
+): Promise<{ status?: SubPortalStatus; error?: string }> {
+  const user = await officeUser();
+  if (!user) return { error: NOT_OFFICE };
+  const email = validEmail(input)?.toLowerCase();
+  if (!email || email.length > 254) return { error: "Enter the Google account email they will use to sign in." };
+
+  const admin = createAdminClient();
+  const [{ data: sub, error: subError }, { data: access, error: accessError }] = await Promise.all([
+    admin.from("subcontractors").select("id").eq("id", subcontractorId).maybeSingle(),
+    admin.from("sub_portal_access").select("id, google_email, enabled").eq("subcontractor_id", subcontractorId).maybeSingle(),
+  ]);
+  if (subError || accessError) return { error: "Couldn't check this sub's login. Try again." };
+  if (!sub) return { error: "That sub isn't in the directory any more." };
+  if (access && !access.enabled) return { error: "Their portal is turned off. Turn it on first." };
+
+  // The unique database index arbitrates concurrent grants to the same email.
+  // An existing mapping is never silently transferred to a different company.
+  let write = access
+    ? admin.from("sub_portal_access").update({
+        google_email: email,
+        ...(access.google_email !== email ? { google_subject: null } : {}),
+        updated_at: new Date().toISOString(),
+      }).eq("id", access.id).eq("enabled", true)
+    : admin.from("sub_portal_access").insert({
+        subcontractor_id: subcontractorId,
+        google_email: email,
+        created_by: user.id,
+      });
+  if (access) {
+    write = access.google_email === null
+      ? write.is("google_email", null)
+      : write.eq("google_email", access.google_email);
+  }
+  const { data, error } = await write.select(STATUS_COLS).single();
+  if (error) return { error: error.code === "23505"
+    ? "That Google email already belongs to a portal login. Open that record instead, or use a different Google account."
+    : "Couldn't save the Google login. Refresh and try again." };
+  return { status: toStatus(data as StatusRow) };
 }
 
 // ───────────────────────────────────────── PIN
@@ -297,6 +344,7 @@ export interface SubInvitePreview {
   /** "978-430-0049", or null when there's no usable cell. */
   cell: string | null;
   email: string | null;
+  google_email: string | null;
   has_access: boolean;
   has_pin: boolean;
   enabled: boolean;
@@ -316,6 +364,7 @@ export interface SubInviteResult {
   channel: SubInviteSendChannel;
   /** The PIN this click set. Shown once to the clicking user; never stored. */
   pin: string | null;
+  google_email: string | null;
   cell: string;
   /** The text body (the same words go in the email). */
   text: string;
@@ -367,6 +416,7 @@ function inviteText(opts: {
   sender: string;
   cell: string;
   pin: string | null;
+  googleEmail: string | null;
   loom: string | null;
 }): { text: string; subject: string; body: string } {
   const hi = firstName(opts.sub) ? `Hi ${firstName(opts.sub)}` : "Hi";
@@ -374,13 +424,17 @@ function inviteText(opts: {
     ? `PIN: ${opts.pin}`
     : `PIN: the one Penney gave you (forgot it? call ${OFFICE_PHONE})`;
   const watch = opts.loom ? [`Watch how (1 min): ${opts.loom}`] : [];
-  const pt = `Português: entre em ${PORTAL_LOGIN_URL} com o seu celular e o PIN acima.`;
+  const loginLines = opts.googleEmail
+    ? ["Choose Continue with Google.", `Google account: ${opts.googleEmail}`]
+    : [`Cell: ${opts.cell}`, pinLine];
+  const pt = opts.googleEmail
+    ? `Português: entre em ${PORTAL_LOGIN_URL} com a conta Google ${opts.googleEmail}.`
+    : `Português: entre em ${PORTAL_LOGIN_URL} com o seu celular e o PIN acima.`;
 
   const text = [
     `${hi}, it's ${opts.sender} at Penney Construction. Your sub portal is ready: your dates, drawings and one place to post your job photos.`,
     `Sign in: ${PORTAL_LOGIN_URL}`,
-    `Cell: ${opts.cell}`,
-    pinLine,
+    ...loginLines,
     ...watch,
     pt,
   ].join("\n");
@@ -388,7 +442,7 @@ function inviteText(opts: {
   const body = [
     `${hi},`,
     "Your Penney Construction sub portal is ready: your dates, drawings and one place to post your job photos.",
-    [`Sign in: ${PORTAL_LOGIN_URL}`, `Cell: ${opts.cell}`, pinLine].join("\n"),
+    [`Sign in: ${PORTAL_LOGIN_URL}`, ...loginLines].join("\n"),
     "Save it to your home screen. When you get to a job, scan the sign at the door and add your photos before you leave.",
     ...watch,
     pt,
@@ -410,7 +464,7 @@ function smsHref(cellDigits: string, text: string): string {
 }
 
 async function loadInviteContext(admin: Admin, subId: string) {
-  const [{ data: sub }, { data: access }, loom, testMode] = await Promise.all([
+  const [{ data: sub, error: subError }, { data: access, error: accessError }, loom, testMode] = await Promise.all([
     admin
       .from("subcontractors")
       .select("id, company_name, contact_name, phone, email")
@@ -429,23 +483,28 @@ async function loadInviteContext(admin: Admin, subId: string) {
     access: access as StatusRow | null,
     loom,
     testMode,
+    error: subError || accessError ? "Couldn't check this sub's login. Refresh and try again." : null,
   };
 }
 
 /** What an invite would say and whether it can go out. Read-only. */
 export async function previewSubInvite(
   subcontractorId: string,
+  channel?: SubInviteSendChannel,
 ): Promise<{ preview?: SubInvitePreview; error?: string }> {
   const user = await officeUser();
   if (!user) return { error: NOT_OFFICE };
   const admin = createAdminClient();
-  const { sub, access, loom, testMode } = await loadInviteContext(admin, subcontractorId);
+  const { sub, access, loom, testMode, error: contextError } = await loadInviteContext(admin, subcontractorId);
+  if (contextError) return { error: contextError };
   if (!sub) return { error: "That sub isn't in the directory any more." };
 
   const digits = normalizePhone(sub.phone || "");
   const problems: string[] = [];
-  if (digits.length < 10) problems.push("Add a cell first. The cell is his login.");
-  else if (await phoneTakenBy(admin, digits, subcontractorId)) {
+  const googleEmail = access?.google_email ?? null;
+  if (digits.length < 10 && (channel === "text" || !googleEmail)) {
+    problems.push(googleEmail ? "Add a cell to send a text, or use Email or Copy." : "Add a cell or enable Google sign-in first.");
+  } else if (!googleEmail && await phoneTakenBy(admin, digits, subcontractorId)) {
     problems.push("Another sub already uses this cell number to sign in.");
   }
   if (access && !access.enabled) problems.push("His portal is turned off. Turn it on first.");
@@ -456,6 +515,7 @@ export async function previewSubInvite(
     sender: senderName(user),
     cell: cell ?? "(no cell yet)",
     pin: access?.pin_hash ? null : "(new PIN)",
+    googleEmail,
     loom,
   });
   return {
@@ -463,7 +523,8 @@ export async function previewSubInvite(
       company_name: sub.company_name,
       first_name: firstName(sub),
       cell,
-      email: validEmail(sub.email),
+      email: googleEmail ?? validEmail(sub.email),
+      google_email: googleEmail,
       has_access: !!access,
       has_pin: !!access?.pin_hash,
       enabled: access ? access.enabled : true,
@@ -502,29 +563,34 @@ export async function inviteSubToPortal(
   }
 
   const admin = createAdminClient();
-  const { sub, access, loom, testMode } = await loadInviteContext(admin, subcontractorId);
+  const { sub, access, loom, testMode, error: contextError } = await loadInviteContext(admin, subcontractorId);
+  if (contextError) return { error: contextError };
   if (!sub) return { error: "That sub isn't in the directory any more." };
 
   const digits = normalizePhone(sub.phone || "");
-  if (digits.length < 10) return { error: "Add a cell first. The cell is his login." };
+  const googleEmail = access?.google_email ?? null;
+  if (digits.length < 10 && (channel === "text" || !googleEmail)) {
+    return { error: googleEmail ? "Add a cell to send a text, or use Email or Copy." : "Add a cell or enable Google sign-in first." };
+  }
   if (access && !access.enabled) return { error: "His portal is turned off. Turn it on first." };
-  if (await phoneTakenBy(admin, digits, subcontractorId)) {
+  if (!googleEmail && await phoneTakenBy(admin, digits, subcontractorId)) {
     return { error: "Another sub already uses this cell number to sign in." };
   }
   const cell = formatPhone(digits);
-  const emailTo = validEmail(sub.email);
+  const emailTo = googleEmail ?? validEmail(sub.email);
   if (channel === "email" && !emailTo) return { error: "There's no email on file for this sub." };
 
   // Test mode keeps a real sub's login exactly as it is: the email goes to the
   // tester, so a new PIN would lock him out with nobody told.
   const dryRun = channel === "email" && testMode && !isTestSub(sub);
-  const needPin = !dryRun && (!access?.pin_hash || !!opts.newPin);
+  const needPin = !googleEmail && !dryRun && (!access?.pin_hash || !!opts.newPin);
   const pin = needPin ? generatePin() : null;
   const words = inviteText({
     sub,
     sender: senderName(user),
     cell,
     pin: dryRun ? "(test mode: no PIN was set)" : pin,
+    googleEmail,
     loom,
   });
 
@@ -601,6 +667,7 @@ export async function inviteSubToPortal(
     result: {
       channel,
       pin,
+      google_email: googleEmail,
       cell,
       text: words.text,
       sms_href: smsHref(digits, words.text),
@@ -730,6 +797,7 @@ export interface SubRolloutRow {
   phone_on_file: string | null;
   email: string | null;
   portal: SubPortalState;
+  google_email: string | null;
   has_access: boolean;
   has_pin: boolean;
   invited_at: string | null;
@@ -893,7 +961,7 @@ export async function getSubRollout(): Promise<{ data?: SubRolloutData; error?: 
             ? "on"
             : status.invited_at
               ? "invited"
-              : status.has_pin
+              : status.has_pin || status.google_email
                 ? "set_up"
                 : "never";
       return {
@@ -904,6 +972,7 @@ export async function getSubRollout(): Promise<{ data?: SubRolloutData; error?: 
         cell: digits.length >= 10 ? formatPhone(digits) : null,
         phone_on_file: digits.length >= 10 ? null : s.phone || null,
         email: validEmail(s.email),
+        google_email: status?.google_email ?? null,
         portal,
         has_access: !!status,
         has_pin: !!status?.has_pin,
