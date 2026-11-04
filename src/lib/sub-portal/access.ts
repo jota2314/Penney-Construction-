@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SUB_PORTAL_COOKIE, getSubPortalClient } from "@/lib/sub-portal/auth";
+import { readSubGoogleSession } from "@/lib/sub-portal/google-session";
 import { SUB_AGREEMENT_AWAITING_SIGN, SUB_AWARDED_QUOTE_STATUSES } from "@/lib/sub-portal/statuses";
 
 export type SubAccess = {
@@ -46,15 +47,19 @@ export function readSubPortalToken(request: NextRequest): string | null {
  */
 export async function resolveSubAccessResult(request: NextRequest): Promise<SubAccessResult> {
   const token = readSubPortalToken(request);
-  // The token column is a uuid; anything else can't match and isn't worth a query.
-  if (!token || !UUID_RE.test(token)) return { ok: false, status: 401, error: "Not signed in" };
+  // Google sessions bind to the invited account. Replacing its email/subject
+  // invalidates those sessions without rotating the existing phone/PIN salt.
+  const google = token?.startsWith("g1.") ? await readSubGoogleSession(token) : null;
+  if (!token || (!google && !UUID_RE.test(token))) return { ok: false, status: 401, error: "Not signed in" };
 
   const supabase = getSubPortalClient();
-  const { data: access } = await supabase
+  let query = supabase
     .from("sub_portal_access")
-    .select("id, subcontractor_id, enabled, last_viewed_at, view_count")
-    .eq("token", token)
-    .maybeSingle();
+    .select("id, subcontractor_id, enabled, last_viewed_at, view_count");
+  query = google
+    ? query.eq("id", google.accessId).eq("google_subject", google.subject).eq("google_email", google.email)
+    : query.eq("token", token);
+  const { data: access } = await query.maybeSingle();
   if (!access) return { ok: false, status: 401, error: "Not signed in" };
   if (!access.enabled) {
     return { ok: false, status: 403, error: "Portal access has been turned off. Contact Penney Construction." };

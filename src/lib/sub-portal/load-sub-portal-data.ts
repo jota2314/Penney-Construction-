@@ -661,6 +661,7 @@ interface PreviewAccess {
   id: string | null;
   enabled: boolean;
   pinSet: boolean;
+  googleLogin: boolean;
   linkSentAt: string | null;
   inviteChannel: SubInviteChannel | null;
   lastViewedAt: string | null;
@@ -675,7 +676,7 @@ async function loadPreviewAccess(supabase: SupabaseClient, subId: string): Promi
   const [row, pin] = await Promise.all([
     supabase
       .from("sub_portal_access")
-      .select("id, enabled, link_sent_at, invite_channel, last_viewed_at, view_count")
+      .select("id, enabled, google_email, link_sent_at, invite_channel, last_viewed_at, view_count")
       .eq("subcontractor_id", subId)
       .order("created_at", { ascending: true })
       .limit(1)
@@ -692,6 +693,7 @@ async function loadPreviewAccess(supabase: SupabaseClient, subId: string): Promi
     id: a.id as string,
     enabled: !!a.enabled,
     pinSet: (pin.count ?? 0) > 0,
+    googleLogin: !!a.google_email,
     linkSentAt: (a.link_sent_at as string | null) ?? null,
     inviteChannel: INVITE_CHANNELS.includes(a.invite_channel ?? "") ? (a.invite_channel as SubInviteChannel) : null,
     lastViewedAt: (a.last_viewed_at as string | null) ?? null,
@@ -705,7 +707,9 @@ function previewMeta(companyName: string, access: PreviewAccess | null): SubPrev
     parts.push("No portal login yet");
   } else {
     parts.push(access.enabled ? "Portal on" : "Portal off");
-    parts.push(access.pinSet ? "PIN set" : "No PIN yet");
+    if (access.googleLogin) parts.push("Google sign-in ready");
+    if (access.pinSet) parts.push("PIN set");
+    else if (!access.googleLogin) parts.push("No login method yet");
     parts.push(
       access.linkSentAt
         ? `Invited ${fmtShort(access.linkSentAt)}${access.inviteChannel ? ` ${INVITE_WORD[access.inviteChannel]}` : ""}`
