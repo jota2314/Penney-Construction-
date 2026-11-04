@@ -14,12 +14,16 @@ export async function GET(request: Request) {
   if (!key || !supplied || !timingSafeEqual(createHash("sha256").update(key).digest(), createHash("sha256").update(supplied).digest())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers });
   }
-  const from = new URL(request.url).searchParams.get("from");
+  const params = new URL(request.url).searchParams;
+  const from = params.get("from");
   if (!validAvailabilityDay(from)) return NextResponse.json({ error: "Choose a date within the next 60 days." }, { status: 400, headers });
   const result = await getRyanAvailability(from);
   // Deliberately omit busy intervals, calendar links, IDs, titles and attendees.
   return NextResponse.json({ connected: result.connected, timeZone: result.timeZone,
     durationMinutes: result.durationMinutes, slots: result.slots,
     ...(result.connected ? {} : { message: "Available times could not be checked. You can still send your inquiry and we will arrange a visit with you." }),
+    // This opt-in remains behind the service credential. Only allowlisted
+    // stages/codes and scope booleans are included, never a Google response.
+    ...(params.get("diagnostics") === "1" && result.diagnostic ? { diagnostic: result.diagnostic } : {}),
   }, { headers });
 }

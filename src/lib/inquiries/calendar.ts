@@ -13,12 +13,25 @@ const RYAN_ID = "7a44f1ab-70db-4d9a-af26-dc2a37f89091";
 const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const CALENDAR_URL = `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(RYAN_EMAIL)}`;
-const UNAVAILABLE = "Ryan's calendar could not be checked. Reconnect his Google account in Settings before confirming a walkthrough.";
+const UNAVAILABLE = "Ryan's calendar could not be checked. Try again before confirming a walkthrough.";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type CalendarDiagnosticStage = "profile" | "configuration" | "refresh" | "primary" | "calendar_list" | "free_busy" | "reservations" | "validation" | "availability" | "complete";
+const DIAGNOSTIC_REASONS = ["invalid_client", "unauthorized_client", "invalid_grant", "invalid_scope", "access_denied",
+  "temporarily_unavailable", "server_error", "insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "accessNotConfigured",
+  "SERVICE_DISABLED", "forbidden", "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded", "quotaExceeded",
+  "RATE_LIMIT_EXCEEDED", "notFound", "internalError", "tooManyCalendarsRequested", "groupTooBig",
+  "http_error", "network_error", "timeout", "invalid_response", "database_error", "missing_refresh_token",
+  "missing_client_credentials", "account_mismatch", "too_many_calendars", "invalid_day", "unknown", "ok"] as const;
+export type CalendarDiagnosticReason = (typeof DIAGNOSTIC_REASONS)[number];
+type CalendarScopeFlags = { calendarMetadata: boolean; calendarList: boolean; freeBusy: boolean; calendarWrite: boolean };
+export type CalendarAvailabilityDiagnostic = {
+  stage: CalendarDiagnosticStage; reason: CalendarDiagnosticReason; status?: number; scopes?: CalendarScopeFlags;
+};
 
 export type RyanAvailability = {
   connected: boolean; timeZone: typeof WALKTHROUGH_TIME_ZONE; durationMinutes: typeof WALKTHROUGH_DURATION_MINUTES;
-  slots: CalendarInterval[]; busy: CalendarInterval[]; message?: string; calendarUrl?: string;
+  slots: CalendarInterval[]; busy: CalendarInterval[]; message?: string; calendarUrl?: string; diagnostic?: CalendarAvailabilityDiagnostic;
 };
 export type RyanWalkthroughInput = {
   bookingId: string; inquiryId: string; clientName: string; clientEmail: string;
@@ -34,47 +47,104 @@ type GoogleEvent = {
 
 /** retrySafe means this write was not attempted or was explicitly rejected; ambiguous attempts retain their reservation. */
 export class CalendarBookingError extends Error {
-  constructor(message: string, public readonly retrySafe: boolean) { super(message); this.name = "CalendarBookingError"; }
+  constructor(message: string, public readonly retrySafe: boolean, public readonly diagnostic?: CalendarAvailabilityDiagnostic) { super(message); this.name = "CalendarBookingError"; }
 }
 
-function unavailable(): never { throw new CalendarBookingError(UNAVAILABLE, true); }
+function availabilityMessage(stage: CalendarDiagnosticStage, reason: CalendarDiagnosticReason): string {
+  if (reason === "missing_refresh_token" || reason === "invalid_grant") return "Ryan’s saved Google connection is missing, expired or revoked. Ryan needs to reconnect Google in Settings.";
+  if (reason === "account_mismatch") return "The saved Google connection does not match Ryan’s account. Ryan needs to reconnect the correct Google account in Settings.";
+  if (stage === "configuration") return "The app’s Google sign-in credentials could not be loaded. Check the app’s Google configuration before reconnecting.";
+  if (reason === "invalid_client" || reason === "unauthorized_client") return "Google rejected Ryan’s saved connection. Verify the app’s Google configuration, then have Ryan reconnect Google in Settings.";
+  if (["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "invalid_scope"].includes(reason)) return "Ryan’s Google connection lacks the Calendar permissions needed to check availability. Ryan needs to reconnect Google in Settings and allow the requested Calendar permissions.";
+  if (["accessNotConfigured", "SERVICE_DISABLED"].includes(reason)) return "The Google Calendar API is not enabled for the app’s Google project. The app’s Google configuration needs to be checked.";
+  if (["rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded", "quotaExceeded", "RATE_LIMIT_EXCEEDED"].includes(reason)) return "Google is limiting Calendar requests. Wait a few minutes, then check availability again.";
+  if (stage === "reservations") return "Saved walkthrough reservations could not be checked. Try again before confirming a time; the booking records may need attention.";
+  if (stage === "profile") return "Ryan’s saved Google connection could not be read. Try again; the app’s connection records may need attention.";
+  if (stage === "free_busy" && ["notFound", "forbidden", "groupTooBig", "tooManyCalendarsRequested"].includes(reason)) return "One of Ryan’s selected calendars could not be checked. Review his selected calendars and their permissions before confirming a walkthrough.";
+  if (reason === "too_many_calendars") return "Ryan has more than 50 selected calendars. Choose the calendars used for scheduling before booking a walkthrough.";
+  if (reason === "timeout" || reason === "network_error") return "The calendar service did not respond. Try checking availability again.";
+  if (reason === "forbidden" || reason === "access_denied") return "Google denied access to Ryan’s calendar. Check the Calendar permissions on his Google connection.";
+  return UNAVAILABLE;
+}
 
-async function ryanToken(): Promise<string> {
-  const db = createAdminClient();
-  const { data: profile, error } = await db.from("profiles").select("id,email,google_refresh_token")
-    .eq("id", RYAN_ID).maybeSingle();
-  if (error || profile?.email?.trim().toLowerCase() !== RYAN_EMAIL || !profile?.google_refresh_token) unavailable();
+function unavailable(stage: CalendarDiagnosticStage, reason: CalendarDiagnosticReason, status?: number, scopes?: CalendarScopeFlags): never {
+  throw new CalendarBookingError(availabilityMessage(stage, reason), true, { stage, reason,
+    ...(status && status >= 100 && status <= 599 ? { status } : {}), ...(scopes ? { scopes } : {}) });
+}
+
+async function availabilityStep<T>(stage: CalendarDiagnosticStage, run: () => PromiseLike<T>, scopes?: CalendarScopeFlags): Promise<T> {
+  try { return await run(); }
+  catch (error) {
+    if (error instanceof CalendarBookingError) throw error;
+    const name = error && typeof error === "object" && "name" in error ? error.name : "";
+    const reason = name === "AbortError" || name === "TimeoutError" ? "timeout" :
+      ["profile", "configuration", "reservations"].includes(stage) ? "database_error" : "network_error";
+    unavailable(stage, reason, undefined, scopes);
+  }
+}
+
+/** Keep only documented codes. Never retain Google's message, body, IDs or credentials. */
+function safeGoogleReason(body: unknown): CalendarDiagnosticReason {
+  if (!body || typeof body !== "object") return "http_error";
+  const error = (body as { error?: unknown }).error;
+  const candidates: unknown[] = [error];
+  if (error && typeof error === "object") {
+    const detail = error as { errors?: { reason?: unknown }[]; details?: { reason?: unknown }[]; status?: unknown };
+    candidates.push(...(Array.isArray(detail.errors) ? detail.errors.map((item) => item?.reason) : []));
+    candidates.push(...(Array.isArray(detail.details) ? detail.details.map((item) => item?.reason) : []), detail.status);
+  }
+  return candidates.find((value): value is CalendarDiagnosticReason => typeof value === "string" && (DIAGNOSTIC_REASONS as readonly string[]).includes(value)) || "http_error";
+}
+
+async function requireGoogleOk(response: Response, stage: CalendarDiagnosticStage, scopes?: CalendarScopeFlags) {
+  if (!response.ok) unavailable(stage, safeGoogleReason(await response.json().catch(() => null)), response.status, scopes);
+}
+
+async function googleJson<T>(response: Response, stage: CalendarDiagnosticStage, scopes?: CalendarScopeFlags): Promise<T> {
+  try { return await response.json() as T; }
+  catch { unavailable(stage, "invalid_response", response.status, scopes); }
+}
+
+function scopeFlags(value: unknown): CalendarScopeFlags | undefined {
+  if (typeof value !== "string") return undefined;
+  const scopes = new Set(value.split(/\s+/));
+  const has = (...names: string[]) => names.some((name) => scopes.has(`https://www.googleapis.com/auth/${name}`));
+  return {
+    calendarMetadata: has("calendar", "calendar.readonly", "calendar.calendars", "calendar.calendars.readonly", "calendar.app.created"),
+    calendarList: has("calendar", "calendar.readonly", "calendar.calendarlist", "calendar.calendarlist.readonly"),
+    freeBusy: has("calendar", "calendar.readonly", "calendar.events.freebusy", "calendar.freebusy"),
+    calendarWrite: has("calendar", "calendar.events", "calendar.events.owned", "calendar.app.created"),
+  };
+}
+
+async function ryanToken(): Promise<{ token: string; scopes?: CalendarScopeFlags }> {
+  const { data: profile, error } = await availabilityStep("profile", () => createAdminClient().from("profiles").select("id,email,google_refresh_token")
+    .eq("id", RYAN_ID).maybeSingle().then((result) => result));
+  if (error) unavailable("profile", "database_error");
+  if (profile?.email?.trim().toLowerCase() !== RYAN_EMAIL) unavailable("profile", "account_mismatch");
+  if (!profile?.google_refresh_token) unavailable("profile", "missing_refresh_token");
   let clientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    const { data: settings, error: settingsError } = await db.from("app_settings").select("key,value")
-      .in("key", ["google_client_id", "google_client_secret"]);
-    if (settingsError) unavailable();
+    const { data: settings, error: settingsError } = await availabilityStep("configuration", () => createAdminClient().from("app_settings").select("key,value")
+      .in("key", ["google_client_id", "google_client_secret"]).then((result) => result));
+    if (settingsError) unavailable("configuration", "database_error");
     clientId = settings?.find((row) => row.key === "google_client_id")?.value;
     clientSecret = settings?.find((row) => row.key === "google_client_secret")?.value;
   }
-  if (!clientId || !clientSecret) unavailable();
-  try {
+  if (!clientId || !clientSecret) unavailable("configuration", "missing_client_credentials");
+  return availabilityStep("refresh", async () => {
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret,
         refresh_token: profile.google_refresh_token, grant_type: "refresh_token" }),
       cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) {
-      const problem = await response.json().catch(() => ({})) as { error?: string };
-      if (problem.error === "unauthorized_client" || problem.error === "invalid_client") {
-        throw new CalendarBookingError("Ryan’s Google connection could not be refreshed. The app’s Google OAuth configuration must match its Google sign-in configuration before Ryan reconnects in Settings.", true);
-      }
-      unavailable();
-    }
-    const result = await response.json() as { access_token?: unknown };
-    if (typeof result.access_token !== "string" || !result.access_token) unavailable();
-    return result.access_token;
-  } catch (error) {
-    if (error instanceof CalendarBookingError) throw error;
-    unavailable();
-  }
+    await requireGoogleOk(response, "refresh");
+    const result = await googleJson<{ access_token?: unknown; scope?: unknown }>(response, "refresh");
+    if (typeof result.access_token !== "string" || !result.access_token) unavailable("refresh", "invalid_response", response.status);
+    return { token: result.access_token, scopes: scopeFlags(result.scope) };
+  });
 }
 
 async function request(token: string, path: string, init: RequestInit = {}): Promise<Response> {
@@ -84,42 +154,46 @@ async function request(token: string, path: string, init: RequestInit = {}): Pro
   return fetch(`${CALENDAR_API}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(12_000) });
 }
 
-async function verifiedConnection(): Promise<{ token: string; calendars: string[] }> {
-  const token = await ryanToken();
-  const primary = await request(token, "/calendars/primary?fields=id");
-  if (!primary.ok || (await primary.json() as { id?: string }).id?.toLowerCase() !== RYAN_EMAIL) unavailable();
+async function verifiedConnection(): Promise<{ token: string; calendars: string[]; scopes?: CalendarScopeFlags }> {
+  const { token, scopes } = await ryanToken();
+  const primary = await availabilityStep("primary", () => request(token, "/calendars/primary?fields=id"), scopes);
+  await requireGoogleOk(primary, "primary", scopes);
+  const primaryCalendar = await googleJson<{ id?: unknown }>(primary, "primary", scopes);
+  if (typeof primaryCalendar.id !== "string") unavailable("primary", "invalid_response", primary.status, scopes);
+  if (primaryCalendar.id.toLowerCase() !== RYAN_EMAIL) unavailable("primary", "account_mismatch", primary.status, scopes);
   const calendars = new Set([RYAN_EMAIL]);
   let pageToken: string | undefined;
   do {
     const params = new URLSearchParams({ maxResults: "250", fields: "items(id,selected,primary,deleted),nextPageToken" });
     if (pageToken) params.set("pageToken", pageToken);
-    const response = await request(token, `/users/me/calendarList?${params}`);
-    if (!response.ok) unavailable();
-    const result = await response.json() as { items?: { id?: string; selected?: boolean; primary?: boolean; deleted?: boolean }[]; nextPageToken?: string };
-    if (!Array.isArray(result.items)) unavailable();
+    const response = await availabilityStep("calendar_list", () => request(token, `/users/me/calendarList?${params}`), scopes);
+    await requireGoogleOk(response, "calendar_list", scopes);
+    const result = await googleJson<{ items?: { id?: string; selected?: boolean; primary?: boolean; deleted?: boolean }[]; nextPageToken?: string }>(response, "calendar_list", scopes);
+    if (!Array.isArray(result.items)) unavailable("calendar_list", "invalid_response", response.status, scopes);
     for (const item of result.items) if (item.id && !item.deleted && (item.selected || item.primary)) calendars.add(item.id);
     pageToken = result.nextPageToken;
     // Google's free/busy API supports at most 50 calendars. Never silently drop one.
-    if (calendars.size > 50) throw new CalendarBookingError("Ryan has more than 50 selected calendars. Choose the calendars used for scheduling before booking a walkthrough.", true);
+    if (calendars.size > 50) unavailable("calendar_list", "too_many_calendars", response.status, scopes);
   } while (pageToken);
-  return { token, calendars: [...calendars] };
+  return { token, calendars: [...calendars], scopes };
 }
 
-async function readBusy(connection: { token: string; calendars: string[] }, range: CalendarInterval): Promise<CalendarInterval[]> {
+async function readBusy(connection: { token: string; calendars: string[]; scopes?: CalendarScopeFlags }, range: CalendarInterval): Promise<CalendarInterval[]> {
   // Include adjacent bookings so a visit at the edge of the range still gets travel time.
-  const response = await request(connection.token, "/freeBusy", { method: "POST", body: JSON.stringify({
+  const response = await availabilityStep("free_busy", () => request(connection.token, "/freeBusy", { method: "POST", body: JSON.stringify({
     timeMin: new Date(Date.parse(range.start) - WALKTHROUGH_BUFFER_MINUTES * 60_000).toISOString(),
     timeMax: new Date(Date.parse(range.end) + WALKTHROUGH_BUFFER_MINUTES * 60_000).toISOString(),
     timeZone: WALKTHROUGH_TIME_ZONE, calendarExpansionMax: 50, items: connection.calendars.map((id) => ({ id })),
-  }) });
-  if (!response.ok) unavailable();
-  const result = await response.json() as { calendars?: Record<string, { errors?: unknown[]; busy?: CalendarInterval[] }> };
+  }) }), connection.scopes);
+  await requireGoogleOk(response, "free_busy", connection.scopes);
+  const result = await googleJson<{ calendars?: Record<string, { errors?: { reason?: unknown }[]; busy?: CalendarInterval[] }> }>(response, "free_busy", connection.scopes);
   const busy: CalendarInterval[] = [];
   for (const id of connection.calendars) {
     const calendar = result.calendars?.[id];
-    if (!calendar || (calendar.errors?.length ?? 0) > 0 || !Array.isArray(calendar.busy)) unavailable();
+    if (calendar?.errors?.length) unavailable("free_busy", safeGoogleReason({ error: { errors: calendar.errors } }), response.status, connection.scopes);
+    if (!calendar || !Array.isArray(calendar.busy)) unavailable("free_busy", "invalid_response", response.status, connection.scopes);
     for (const item of calendar.busy) {
-      if (!item || !Number.isFinite(Date.parse(item.start)) || !Number.isFinite(Date.parse(item.end)) || Date.parse(item.end) <= Date.parse(item.start)) unavailable();
+      if (!item || !Number.isFinite(Date.parse(item.start)) || !Number.isFinite(Date.parse(item.end)) || Date.parse(item.end) <= Date.parse(item.start)) unavailable("free_busy", "invalid_response", response.status, connection.scopes);
       busy.push({ start: item.start, end: item.end });
     }
   }
@@ -128,15 +202,15 @@ async function readBusy(connection: { token: string; calendars: string[] }, rang
 
 async function reservedBusy(range: CalendarInterval): Promise<CalendarInterval[]> {
   const buffer = WALKTHROUGH_BUFFER_MINUTES * 60_000;
-  const { data, error } = await createAdminClient().from("website_walkthrough_bookings")
+  const { data, error } = await availabilityStep("reservations", () => createAdminClient().from("website_walkthrough_bookings")
     .select("start_at,end_at")
     .in("status", ["confirming", "calendar_created", "confirmed", "needs_attention", "cancelling"])
     .lt("start_at", new Date(Date.parse(range.end) + buffer).toISOString())
-    .gt("end_at", new Date(Date.parse(range.start) - buffer).toISOString());
+    .gt("end_at", new Date(Date.parse(range.start) - buffer).toISOString()).then((result) => result));
   // A missing/unreadable reservation ledger must not expose apparently free times.
-  if (error || !Array.isArray(data)) unavailable();
+  if (error || !Array.isArray(data)) unavailable("reservations", "database_error");
   return data.map((row) => {
-    if (!Number.isFinite(Date.parse(row.start_at)) || !Number.isFinite(Date.parse(row.end_at)) || Date.parse(row.end_at) <= Date.parse(row.start_at)) unavailable();
+    if (!Number.isFinite(Date.parse(row.start_at)) || !Number.isFinite(Date.parse(row.end_at)) || Date.parse(row.end_at) <= Date.parse(row.start_at)) unavailable("reservations", "invalid_response");
     return { start: row.start_at as string, end: row.end_at as string };
   });
 }
@@ -144,15 +218,17 @@ async function reservedBusy(range: CalendarInterval): Promise<CalendarInterval[]
 /** Called by authorized staff actions or the service-authenticated website endpoint only. */
 export async function getRyanAvailability(fromDay: string): Promise<RyanAvailability> {
   const base = { timeZone: WALKTHROUGH_TIME_ZONE, durationMinutes: WALKTHROUGH_DURATION_MINUTES, slots: [], busy: [] };
-  if (!validAvailabilityDay(fromDay)) return { ...base, connected: false, message: "Choose a date within the next 60 days." };
+  if (!validAvailabilityDay(fromDay)) return { ...base, connected: false, message: "Choose a date within the next 60 days.", diagnostic: { stage: "validation", reason: "invalid_day" } };
   try {
     const connection = await verifiedConnection();
     const range = availabilityRange(fromDay);
     const [calendarBusy, bookingBusy] = await Promise.all([readBusy(connection, range), reservedBusy(range)]);
     const busy = [...calendarBusy, ...bookingBusy].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
-    return { ...base, connected: true, slots: walkthroughSlots(fromDay, busy), busy, calendarUrl: CALENDAR_URL };
+    return { ...base, connected: true, slots: walkthroughSlots(fromDay, busy), busy, calendarUrl: CALENDAR_URL,
+      diagnostic: { stage: "complete", reason: "ok", ...(connection.scopes ? { scopes: connection.scopes } : {}) } };
   } catch (error) {
-    return { ...base, connected: false, message: error instanceof CalendarBookingError ? error.message : UNAVAILABLE };
+    return { ...base, connected: false, message: error instanceof CalendarBookingError ? error.message : UNAVAILABLE,
+      diagnostic: error instanceof CalendarBookingError && error.diagnostic ? error.diagnostic : { stage: "availability", reason: "unknown" } };
   }
 }
 

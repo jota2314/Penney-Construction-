@@ -29,9 +29,9 @@ const db = {
   from(table) {
     const query = { table, filters: [] };
     state.dbCalls.push(query);
-    const result = () => table === "profiles" ? { data: { email: state.profileEmail, google_refresh_token: state.refresh }, error: null } :
+    const result = () => table === "profiles" ? { data: { email: state.profileEmail, google_refresh_token: state.refresh }, error: state.profileError } :
       table === "website_walkthrough_bookings" ? { data: state.reservations, error: state.reservationError } :
-        { data: [{ key: "google_client_id", value: "test-id" }, { key: "google_client_secret", value: "test-secret" }], error: null };
+        { data: [{ key: "google_client_id", value: "test-id" }, { key: "google_client_secret", value: "test-secret" }], error: state.settingsError };
     return {
       select(columns) { query.columns = columns; return this; },
       eq(column, value) { query.filters.push([column, value]); return this; },
@@ -48,15 +48,20 @@ async function mockFetch(url, options = {}) {
   state.calls.push({ url, options });
   if (url === "https://oauth2.googleapis.com/token") {
     assert.equal(options.body.get("refresh_token"), "test-refresh");
-    return reply({ access_token: "test-access" });
+    if (state.tokenError) return reply({ error: state.tokenError.reason, error_description: "PRIVATE_TOKEN_DETAILS" }, state.tokenError.status);
+    return reply({ access_token: "test-access", ...(state.scopes ? { scope: state.scopes } : {}) });
   }
   assert.equal(options.headers.get("Authorization"), "Bearer test-access");
   const path = new URL(url).pathname;
-  if (path.endsWith("/calendars/primary")) return reply({ id: state.primary });
-  if (path.endsWith("/users/me/calendarList")) return reply({ items: [{ id: RYAN, primary: true }, { id: OTHER, selected: true }, { id: "unselected@example.com", selected: false }] });
+  if (path.endsWith("/calendars/primary")) {
+    if (state.primaryTimeout) throw Object.assign(new Error("PRIVATE_NETWORK_DETAILS"), { name: "TimeoutError" });
+    return state.primaryError ? reply(state.primaryError.body, state.primaryError.status) : reply({ id: state.primary });
+  }
+  if (path.endsWith("/users/me/calendarList")) return state.listError ? reply(state.listError.body, state.listError.status) : reply({ items: [{ id: RYAN, primary: true }, { id: OTHER, selected: true }, { id: "unselected@example.com", selected: false }] });
   if (path.endsWith("/freeBusy")) {
     const sent = JSON.parse(options.body);
     assert.deepEqual(sent.items, [{ id: RYAN }, { id: OTHER }]);
+    if (state.freeBusyError) return reply(state.freeBusyError.body, state.freeBusyError.status);
     return reply({ calendars: { [RYAN]: { busy: state.busy }, [OTHER]: state.calendarError ? { errors: [{ reason: "notFound" }] } : { busy: [] } } });
   }
   if (path.includes("/events/") && !options.method) return state.event ? reply(state.event) : reply({}, 404);
@@ -125,6 +130,37 @@ const cancelCount = () => state.calls.filter((x) => x.options.method === "DELETE
     assert.equal(result.connected, false); assert.equal(result.slots.length, 0);
   }
 
+  // Diagnostics identify failure stages without reflecting response bodies, IDs or tokens.
+  const insufficient = { status: 403, body: { error: { errors: [{ reason: "insufficientPermissions" }], message: "PRIVATE_GOOGLE_MESSAGE" } } };
+  for (const [patch, stage, reason, status] of [
+    [{ tokenError: { reason: "unauthorized_client", status: 401 } }, "refresh", "unauthorized_client", 401],
+    [{ tokenError: { reason: "invalid_grant", status: 400 } }, "refresh", "invalid_grant", 400],
+    [{ tokenError: { reason: "PRIVATE_UNKNOWN_ERROR", status: 400 } }, "refresh", "http_error", 400],
+    [{ primaryError: insufficient }, "primary", "insufficientPermissions", 403],
+    [{ listError: { status: 403, body: { error: { details: [{ reason: "SERVICE_DISABLED", metadata: { secret: "PRIVATE_METADATA" } }] } } } }, "calendar_list", "SERVICE_DISABLED", 403],
+    [{ freeBusyError: { status: 503, body: { error: { errors: [{ reason: "PRIVATE_BAD_REASON" }], message: "PRIVATE_GOOGLE_MESSAGE" } } } }, "free_busy", "http_error", 503],
+    [{ calendarError: true }, "free_busy", "notFound", 200],
+    [{ primaryTimeout: true }, "primary", "timeout", undefined],
+    [{ profileError: { message: "PRIVATE_DB_ERROR" } }, "profile", "database_error", undefined],
+    [{ settingsError: { message: "PRIVATE_CONFIG_ERROR" } }, "configuration", "database_error", undefined],
+    [{ reservationError: { message: "PRIVATE_RESERVATION_ERROR" } }, "reservations", "database_error", undefined],
+    [{ primary: "PRIVATE_WRONG_ACCOUNT@example.com" }, "primary", "account_mismatch", 200],
+  ]) {
+    reset(patch); result = await calendar.getRyanAvailability("2026-11-05");
+    assert.equal(result.connected, false); assert.equal(result.diagnostic.stage, stage); assert.equal(result.diagnostic.reason, reason); assert.equal(result.diagnostic.status, status);
+    assert.equal(JSON.stringify(result).includes("PRIVATE_"), false);
+    assert.equal(JSON.stringify(result).includes("test-access"), false);
+    assert.equal(JSON.stringify(result).includes("test-refresh"), false);
+  }
+  reset({ primaryError: insufficient, scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.send" });
+  result = await calendar.getRyanAvailability("2026-11-05");
+  assert.deepEqual(JSON.parse(JSON.stringify(result.diagnostic.scopes)), { calendarMetadata: false, calendarList: false, freeBusy: false, calendarWrite: true });
+  assert.match(result.message, /Calendar permissions/);
+  reset({ scopes: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events" });
+  result = await calendar.getRyanAvailability("2026-11-05");
+  assert.equal(result.diagnostic.stage, "complete");
+  assert(Object.values(result.diagnostic.scopes).every(Boolean));
+
   reset();
   result = await calendar.ensureRyanWalkthroughEvent(input);
   assert.match(result.id, /^[a-v0-9]{5,1024}$/); assert.equal(insertCount(), 1);
@@ -184,18 +220,22 @@ const cancelCount = () => state.calls.filter((x) => x.options.method === "DELETE
   const route = load("src/app/api/website-walkthrough/availability/route.ts", {
     "node:crypto": crypto, "next/server": { NextResponse: Response },
     "@/lib/inquiries/calendar-time": time,
-    "@/lib/inquiries/calendar": { async getRyanAvailability() { availabilityCalls++; return { connected: true, timeZone: "America/New_York", durationMinutes: 60, slots: [{ start: input.start, end: input.end }], busy: [{ start: input.start, end: input.end }], calendarUrl: "PRIVATE" }; } },
+    "@/lib/inquiries/calendar": { async getRyanAvailability() { availabilityCalls++; return { connected: true, timeZone: "America/New_York", durationMinutes: 60, slots: [{ start: input.start, end: input.end }], busy: [{ start: input.start, end: input.end }], calendarUrl: "PRIVATE", diagnostic: { stage: "complete", reason: "ok" } }; } },
   }, { process: { env: { SUPABASE_SERVICE_ROLE_KEY: "test-server-key" } } });
   for (const authorization of ["", "test-server-key", "Bearer bad-key"]) {
-    const response = await route.GET(new Request("https://app.example.com/api/website-walkthrough/availability?from=2026-11-05", { headers: { authorization } }));
+    const response = await route.GET(new Request("https://app.example.com/api/website-walkthrough/availability?from=2026-11-05&diagnostics=1", { headers: { authorization } }));
     assert.equal(response.status, 401);
   }
   assert.equal(availabilityCalls, 0);
   let response = await route.GET(new Request("https://app.example.com/api/website-walkthrough/availability?from=2026-11-05", { headers: { authorization: "Bearer test-server-key" } }));
   const payload = await response.json();
-  assert.equal(payload.connected, true); assert.equal("busy" in payload, false); assert.equal("calendarUrl" in payload, false);
+  assert.equal(payload.connected, true); assert.equal("busy" in payload, false); assert.equal("calendarUrl" in payload, false); assert.equal("diagnostic" in payload, false);
+  response = await route.GET(new Request("https://app.example.com/api/website-walkthrough/availability?from=2026-11-05&diagnostics=1", { headers: { authorization: "Bearer test-server-key" } }));
+  const diagnosticPayload = await response.json();
+  assert.deepEqual(diagnosticPayload.diagnostic, { stage: "complete", reason: "ok" });
+  assert.equal("busy" in diagnosticPayload, false); assert.equal("calendarUrl" in diagnosticPayload, false);
   response = await route.GET(new Request("https://app.example.com/api/website-walkthrough/availability?from=2026-02-31", { headers: { authorization: "Bearer test-server-key" } }));
   assert.equal(response.status, 400);
-  assert.equal(availabilityCalls, 1);
+  assert.equal(availabilityCalls, 2);
   console.log("Walkthrough calendar tests passed: DST, timing, travel, reservations, identity, privacy, conflicts, recovery and invitation deduplication.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
