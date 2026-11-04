@@ -1,23 +1,10 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-
-function clearGoogleCookies(response: NextResponse) {
-  response.cookies.set("google-connect-user", "", { httpOnly: true, path: "/auth/callback", maxAge: 0 });
-  for (const name of ["google-access-token", "google-refresh-token"]) {
-    response.cookies.set(name, "", { httpOnly: true, path: "/", maxAge: 0 });
-  }
-}
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const requestedNext = searchParams.get("next");
-  const nextParam = requestedNext?.startsWith("/") && !requestedNext.startsWith("//") && !requestedNext.includes("\\")
-    ? requestedNext : null;
-  const jar = await cookies();
-  const connectUser = jar.get("google-connect-user")?.value;
-  const connectingGoogle = !!connectUser;
+  const nextParam = searchParams.get("next");
 
   if (code) {
     const supabase = await createClient();
@@ -26,8 +13,8 @@ export async function GET(request: Request) {
     if (!error) {
       // Determine redirect based on role
       const userId = data.session?.user?.id;
+      const userEmail = data.session?.user?.email?.toLowerCase();
       let next = nextParam ?? "/command-center";
-      let role: string | null = null;
       if (userId) {
         const { data: profile } = await supabase
           .from("profiles")
@@ -35,28 +22,33 @@ export async function GET(request: Request) {
           .eq("id", userId)
           .single();
 
-        role = profile?.role ?? null;
-        // Trusted invitations/admin changes own roles, never a stale allowlist.
-        if (role === "field") next = "/crew";
-      }
-
-      if (connectingGoogle && (connectUser !== userId || !role ||
-          !["owner", "precon_manager", "project_manager", "office_admin"].includes(role))) {
-        // Only this browser's session belongs to this failed connection.
-        // Explicitly clear its cookies even if the auth server is unavailable.
-        try {
-          await supabase.auth.signOut({ scope: "local" });
-        } catch {
-          // The response below still removes this browser's session cookies.
-        }
-        const denied = NextResponse.redirect(`${origin}/login?error=integration_account_mismatch`);
-        clearGoogleCookies(denied);
-        for (const cookie of jar.getAll()) {
-          if (/^sb-[a-z0-9]+-auth-token(?:\.\d+)?$/i.test(cookie.name)) {
-            denied.cookies.set(cookie.name, "", { path: "/", maxAge: 0 });
+        // Narrow sync: if the user is on the field allowlist but their
+        // auto-created profile got an office role, correct it. Never
+        // downgrade a profile that's already been deliberately set
+        // (owner, precon_manager, office_admin, etc.).
+        if (userEmail && profile?.role !== "field") {
+          const { data: allowed } = await supabase
+            .from("allowed_emails")
+            .select("role")
+            .eq("email", userEmail)
+            .maybeSingle();
+          if (allowed?.role === "field") {
+            await supabase
+              .from("profiles")
+              .update({ role: "field" })
+              .eq("id", userId);
+            // Link any unlinked employee record by email so the crew
+            // dashboard can find their name and assignments.
+            await supabase
+              .from("employees")
+              .update({ profile_id: userId })
+              .eq("email", userEmail)
+              .is("profile_id", null);
+            if (!nextParam) next = "/crew";
           }
+        } else if (profile?.role === "field" && !nextParam) {
+          next = "/crew";
         }
-        return denied;
       }
 
       const forwardedHost = request.headers.get("x-forwarded-host");
@@ -72,15 +64,6 @@ export async function GET(request: Request) {
       }
 
       const response = NextResponse.redirect(redirectUrl);
-      // Replace browser caches with only this account's integration tokens.
-      // A reconnect without new tokens must not retain an older account's cache.
-      clearGoogleCookies(response);
-      if (!connectingGoogle) {
-        // Identity-only tokens cannot operate office integrations. Clear the
-        // previous browser account's cache; office integrations use their own
-        // user's stored refresh token until explicitly reconnected.
-        return response;
-      }
 
       const providerToken = data.session?.provider_token;
       const providerRefreshToken = data.session?.provider_refresh_token;
@@ -153,7 +136,5 @@ export async function GET(request: Request) {
   }
 
   // Auth error — redirect to login with error
-  const failed = NextResponse.redirect(`${origin}/login?error=auth_callback_error`);
-  clearGoogleCookies(failed);
-  return failed;
+  return NextResponse.redirect(`${origin}/login?error=auth_callback_error`);
 }

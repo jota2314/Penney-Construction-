@@ -66,7 +66,7 @@ export function SubInviteFlow({
   // waits on the preview for its explicit Send.
   useEffect(() => {
     let live = true;
-    previewSubInvite(subId, channel).then((res) => {
+    previewSubInvite(subId).then((res) => {
       if (!live) return;
       if (res.error || !res.preview) {
         setError(res.error ?? "Couldn't load this sub.");
@@ -113,7 +113,7 @@ export function SubInviteFlow({
 
   // ── Email: the preview and the explicit Send
   if (channel === "email" && !result) {
-    const willSetPin = !preview.google_email && !preview.has_pin && !(preview.test_mode && !preview.is_test_sub);
+    const willSetPin = !preview.has_pin && !(preview.test_mode && !preview.is_test_sub);
     return (
       <div className="space-y-3">
         {!preview.email ? (
@@ -122,7 +122,7 @@ export function SubInviteFlow({
           <>
             <p className="text-sm">
               Sends from your Gmail to <span className="font-medium">{preview.email}</span>.
-              {preview.google_email ? " They sign in with this Google account. No PIN is needed." : willSetPin ? " It sets his first PIN and puts it in the email." : " He keeps the PIN he has."}
+              {willSetPin ? " It sets his first PIN and puts it in the email." : " He keeps the PIN he has."}
             </p>
             {preview.test_mode && (
               <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
@@ -155,11 +155,7 @@ export function SubInviteFlow({
   // ── Done: the PIN once, then the way out
   return (
     <div className="space-y-3">
-      {result.google_email ? (
-        <p className="text-sm text-muted-foreground">
-          They choose Continue with Google and use <span className="font-medium text-foreground">{result.google_email}</span>.
-        </p>
-      ) : result.pin ? (
+      {result.pin ? (
         <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
           <p className="text-xs text-muted-foreground">New PIN. Shown once; it&apos;s in the {result.channel === "email" ? "email" : "text"}.</p>
           <p className="font-mono text-2xl font-semibold tracking-[0.3em]">{result.pin}</p>
@@ -207,7 +203,7 @@ export function SubInviteFlow({
       )}
       {error && <p className="text-sm text-red-500">{error}</p>}
 
-      {!result.google_email && !result.pin && !(result.channel === "email" && result.test_mode && !preview.is_test_sub) && (
+      {!result.pin && !(result.channel === "email" && result.test_mode && !preview.is_test_sub) && (
         confirmNewPin ? (
           <div className="space-y-2 rounded-md border border-red-500/30 p-3">
             <p className="text-sm">His old PIN stops working. Send him the new one right away.</p>
