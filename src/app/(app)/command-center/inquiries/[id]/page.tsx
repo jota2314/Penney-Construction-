@@ -7,6 +7,8 @@ import { canManageWebsiteInquiries } from "@/lib/inquiries/model";
 import { InquiryDetail } from "@/components/inquiries/inquiry-detail";
 import { listWebsiteInquiryEmails, type WebsiteInquiryEmail } from "@/lib/actions/website-inquiry-email";
 
+export const maxDuration = 90;
+
 export const metadata: Metadata = { title: "Inquiry | Penney Construction" };
 export default async function WebsiteInquiryPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAuth();

@@ -17,7 +17,9 @@ async function getOrigin() {
 // emails (clients sending Google Doc plans, subs sharing Sheets quotes,
 // etc.) — those are owned by the sender, not us. drive.readonly + drive.file
 // together gives "read everything the user can read, write only what we made."
-const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents";
+// Walkthrough scheduling needs calendar.readonly to verify the calendar owner,
+// enumerate selected calendars and check free/busy; events alone cannot do that.
+const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents";
 
 /**
  * Normal sign in — just pick your account, no re-granting permissions.
