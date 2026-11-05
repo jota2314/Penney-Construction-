@@ -43,7 +43,7 @@ function Panel({ title, detail, href, children }: { title: string; detail: strin
 async function monthExpenses(start: string, end: string) {
   const db = await createClient();
   const rows = await financialRows((from, to) => db.from("invoices")
-    .select("id,vendor_name,vendor_type,trade,description,invoice_number,amount,paid_amount,invoice_date,payment_status,payment_method,project_id,split_group_id,estimate_line_item_id,review_status,source,duplicate_of_id,is_capex,projects(name,project_number,is_overhead),estimate_line_items(description)")
+    .select("id,vendor_name,vendor_type,trade,description,invoice_number,amount,paid_amount,invoice_date,payment_status,payment_method,project_id,split_group_id,estimate_line_item_id,review_status,source,duplicate_of_id,is_capex,projects(name,project_number,is_overhead),estimate_line_items(description)").is("non_job_reason", null)
     .is("duplicate_of_id", null).gte("invoice_date", start).lte("invoice_date", end)
     .order("id").range(from, to));
   return buildExpenseView(rows as ExpenseRecord[], { start, end }).summary;

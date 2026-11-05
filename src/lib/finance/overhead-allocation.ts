@@ -30,6 +30,7 @@ export type OverheadPayrollSource = {
 export type OverheadProjectSource = { id: string; is_overhead: boolean };
 export type OverheadBillClassification = {
   duplicate_of_id?: string | null; is_capex?: boolean | null;
+  non_job_reason?: string | null;
   vendor_name?: string | null; payment_method?: string | null;
   estimate_line_items?: { description?: string | null } | { description?: string | null }[] | null;
 };
@@ -51,6 +52,7 @@ export type OverheadAllocationInput = {
 /** Shared with the existing company report: do not create a second expense policy. */
 export function classifyOverheadBill(bill: OverheadBillClassification): "duplicate" | "capex" | "excluded" | "office_payroll" | "running_cost" {
   if (bill.duplicate_of_id) return "duplicate";
+  if (bill.non_job_reason != null) return "excluded";
   if (bill.is_capex) return "capex";
   const vendor = bill.vendor_name ?? "";
   if ((/^adp/i.test(vendor) && !/adpro/i.test(vendor)) || bill.payment_method === "internal") return "excluded";
@@ -147,7 +149,7 @@ export function calculateOverheadAllocation(input: OverheadAllocationInput): Ove
     const month = overheadReceiptMonth(b.invoice_date);
     if (!month || !used.has(month) || !b.project_id || !overheadIds.has(b.project_id)) continue;
     const classification = classifyOverheadBill(b);
-    register[`overhead_bills:${b.id}`] = hash({ id: b.id, project_id: b.project_id, invoice_date: b.invoice_date, amount: cents(b.amount) ?? b.amount, classification, duplicate_of_id: b.duplicate_of_id ?? null });
+    register[`overhead_bills:${b.id}`] = hash({ id: b.id, project_id: b.project_id, invoice_date: b.invoice_date, amount: cents(b.amount) ?? b.amount, classification, ...(b.non_job_reason != null ? { non_job_reason: b.non_job_reason } : {}), duplicate_of_id: b.duplicate_of_id ?? null });
     if (seenBills.has(b.id)) fail(`Bill ${b.id} appears twice in the overhead inventory.`, month);
     seenBills.add(b.id);
     if (classification !== "office_payroll" && classification !== "running_cost") continue;

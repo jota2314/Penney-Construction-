@@ -234,7 +234,7 @@ async function syncBill(supabase: any, bill: QBBill, projectId: string | null = 
 
   const { data: existing } = await supabase
     .from("invoices")
-    .select("id, source")
+    .select("id, source, non_job_reason")
     .eq("quickbooks_id", qbId)
     .maybeSingle();
 
@@ -242,7 +242,7 @@ async function syncBill(supabase: any, bill: QBBill, projectId: string | null = 
   // the right job, budget line, and — on splits — a partial amount. Rewriting
   // it from the QBO copy would clobber the allocation and restate a split
   // child at the full receipt total.
-  if (existing && existing.source !== "quickbooks") return false;
+  if (existing && (existing.non_job_reason || existing.source !== "quickbooks")) return false;
 
   const isPaid = bill.Balance === 0;
   const vendorName = bill.VendorRef?.name || "Unknown Vendor";
@@ -268,7 +268,7 @@ async function syncBill(supabase: any, bill: QBBill, projectId: string | null = 
   if (billSubId) invoiceData.subcontractor_id = billSubId;
 
   if (existing) {
-    await supabase.from("invoices").update(invoiceData).eq("id", existing.id);
+    await supabase.from("invoices").update(invoiceData).eq("id", existing.id).is("non_job_reason", null);
     return false;
   }
 
@@ -283,13 +283,13 @@ async function syncPurchase(supabase: any, purchase: QBPurchase, projectId: stri
 
   const { data: existing } = await supabase
     .from("invoices")
-    .select("id, source")
+    .select("id, source, non_job_reason")
     .eq("quickbooks_id", qbId)
     .maybeSingle();
 
   // Same guard as syncBill: never let the QBO copy overwrite a row the app
   // itself pushed — it would null the job/budget-line coding the capture set.
-  if (existing && existing.source !== "quickbooks") return false;
+  if (existing && (existing.non_job_reason || existing.source !== "quickbooks")) return false;
 
   const vendorName = purchase.EntityRef?.name || purchase.AccountRef?.name || "Direct Purchase";
 
@@ -309,7 +309,7 @@ async function syncPurchase(supabase: any, purchase: QBPurchase, projectId: stri
   if (purchaseSubId) invoiceData.subcontractor_id = purchaseSubId;
 
   if (existing) {
-    await supabase.from("invoices").update(invoiceData).eq("id", existing.id);
+    await supabase.from("invoices").update(invoiceData).eq("id", existing.id).is("non_job_reason", null);
     return false;
   }
 

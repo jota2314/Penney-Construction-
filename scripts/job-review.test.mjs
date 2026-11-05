@@ -12,6 +12,24 @@ const { calculateReview, sourceRegister, changesSince, fingerprint } = await imp
 const sources = ['projects','estimates','lines','invoices','daily_logs','schedule_phases','all_day_shifts','employees','rates','breaks','quotes','material_orders','material_returns','time_entries','job_ledger_entries','change_orders','payments_received','client_invoices','field_report_notes','field_report_photos'];
 const base = () => ({as_of:'2026-10-08T20:00:00Z',records:{...Object.fromEntries(sources.map(s=>[s,[]])),projects:[{id:'job',name:'Test',status:'audit',contract_locked_amount:1000,contract_estimate_id:'e'}],estimates:[{id:'e',version:1}],lines:[{id:'l',estimate_id:'e',description:'Scope',total_cost:100}]}});
 const bill = (id, amount, props={})=>({id,project_id:'job',estimate_line_item_id:'l',amount,review_status:'ok',...props});
+
+test('new null classification columns preserve existing invoice evidence hashes',()=>{
+ const s=base();const original=bill('ordinary',50);s.records.invoices=[original];
+ const legacyHash=fingerprint(original);
+ s.records.invoices=[{...original,non_job_reason:null,non_job_resolved_at:null,non_job_resolved_by:null,non_job_note:null}];
+ assert.equal(sourceRegister(s)['invoices:ordinary'],legacyHash);
+ s.records.invoices[0].non_job_note='Reopened after checking the source';
+ assert.notEqual(sourceRegister(s)['invoices:ordinary'],legacyHash);
+});
+
+test('non-job classification removes cost and payable while retaining source evidence and change detection',()=>{
+ const s=base();s.records.invoices=[bill('ordinary',50),bill('draw',1500,{non_job_reason:'owner_draw'}),bill('transfer',39509.14,{non_job_reason:'card_payment_transfer'})];
+ const r=calculateReview(s);assert.equal(r.money.recorded_cost,5000);assert.deepEqual(r.scopes[0].bill_ids,['ordinary']);
+ const register=sourceRegister(s);assert.ok(register['invoices:draw']);
+ s.records.invoices[1].non_job_reason=null;
+ assert.deepEqual(changesSince(sourceRegister(s),register).changed,['invoices:draw']);
+ assert.equal(calculateReview(s).money.recorded_cost,155000);
+});
 test('current contract estimate only; explicit duplicates excluded, split allocations and credits counted once',()=>{
  const s=base();s.records.estimates.push({id:'other',version:2});s.records.lines.push({id:'old',estimate_id:'other',total_cost:9000});
  s.records.invoices=[bill('a',100,{split_group_id:'split'}),bill('b',50,{split_group_id:'split'}),bill('credit',-20),bill('dupe',150,{duplicate_of_id:'a'})];

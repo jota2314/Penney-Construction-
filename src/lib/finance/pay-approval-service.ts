@@ -53,6 +53,7 @@ export async function listBillsAwaitingApproval(
   let query = admin
     .from("invoices")
     .select("id, project_id, vendor_name, description, amount, paid_amount, payment_status, payment_method, invoice_date, due_date, invoice_number, source, review_status, review_reason, duplicate_of_id, split_group_id, estimate_line_item_id, pay_approval_status, approved_for_pay_at, projects(name, project_number)")
+    .is("non_job_reason", null)
     .is("duplicate_of_id", null)
     .or("payment_status.is.null,payment_status.neq.paid")
     .order("invoice_date", { ascending: true })
@@ -104,7 +105,7 @@ export async function approveBillsForPayAsActor(
   }
 
   const columns = "id, vendor_name, amount, payment_status, pay_approval_status, approved_for_pay_at, invoice_number, due_date, split_group_id, project_id, projects(name, project_number)";
-  const { data: given, error } = await admin.from("invoices").select(columns).in("id", invoiceIds);
+  const { data: given, error } = await admin.from("invoices").select(columns).is("non_job_reason", null).in("id", invoiceIds);
   if (error) throw new PayApprovalError("Unable to load the bill", 500);
   if (!given || given.length !== new Set(invoiceIds).size) throw new PayApprovalError("Bill not found", 404);
 
@@ -114,6 +115,7 @@ export async function approveBillsForPayAsActor(
     const { data: siblings, error: siblingError } = await admin
       .from("invoices")
       .select(columns)
+      .is("non_job_reason", null)
       .in("split_group_id", groups)
       .is("duplicate_of_id", null);
     if (siblingError) throw new PayApprovalError("Unable to load the split bill", 500);
@@ -152,6 +154,7 @@ export async function approveBillsForPayAsActor(
       updated_at: approvedAt,
     })
     .in("id", result.approved_ids)
+    .is("non_job_reason", null)
     .is("approved_for_pay_at", null)
     .or("payment_status.is.null,payment_status.neq.paid")
     .select("id, amount");

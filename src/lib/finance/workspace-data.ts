@@ -59,7 +59,7 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
         .from("invoices")
         .select(
           "id,project_id,amount,paid_amount,payment_status,payment_method,source,review_status,review_reason,duplicate_of_id,estimate_line_item_id,vendor_name,invoice_number,invoice_date,due_date,split_group_id,pay_approval_status,approved_for_pay_at,description,projects(name,project_number)",
-        )
+        ).is("non_job_reason", null)
         .is("duplicate_of_id", null)
         .order("id")
         .range(f, t),

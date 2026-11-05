@@ -65,7 +65,7 @@ export default async function CeoPage() {
     fetchAllRows((from, to) =>
       supabase
         .from("invoices")
-        .select("id, project_id, vendor_name, vendor_type, description, amount, paid_amount, payment_status, payment_method, invoice_date, due_date, trade, invoice_number, source, review_status, review_reason, duplicate_of_id, split_group_id, estimate_line_item_id, pay_approval_status, approved_for_pay_at, projects(name, project_number, is_overhead)")
+        .select("id, project_id, vendor_name, vendor_type, description, amount, paid_amount, payment_status, payment_method, invoice_date, due_date, trade, invoice_number, source, review_status, review_reason, duplicate_of_id, split_group_id, estimate_line_item_id, pay_approval_status, approved_for_pay_at, projects(name, project_number, is_overhead)").is("non_job_reason", null)
         .order("invoice_date", { ascending: false })
         .order("id")
         .range(from, to)

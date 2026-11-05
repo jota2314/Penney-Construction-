@@ -231,10 +231,10 @@ async function loadFiledBills(
 /** His bills plus any filed-from-portal bills not already among them. */
 function mergeFiled(bills: SubBillRow[], filedByPath: Map<string, SubBillRow[]>): SubBillRow[] {
   const seen = new Set(bills.map((b) => b.id));
-  const out = [...bills];
+  const out = bills.filter((b) => b.non_job_reason == null);
   for (const rows of filedByPath.values()) {
     for (const b of rows) {
-      if (!seen.has(b.id)) {
+      if (b.non_job_reason == null && !seen.has(b.id)) {
         seen.add(b.id);
         out.push(b);
       }

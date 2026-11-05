@@ -11,6 +11,7 @@ export type ExpenseRecord = {
   estimate_line_items?: { description: string | null } | { description: string | null }[] | null;
   duplicate_of_id?: string | null; source?: string | null; review_status?: string | null;
   is_capex?: boolean | null;
+  non_job_reason?: string | null;
 };
 export type ExpenseAllocation = {
   record: ExpenseRecord; category: SpendCategory; assignment: "project" | "overhead" | "unassigned";
@@ -136,7 +137,7 @@ export function buildExpenseView(records: ExpenseRecord[], options: {
     return true;
   });
   const inPeriod = (row: ExpenseRecord) => isDay(row.invoice_date) && row.invoice_date >= options.start && row.invoice_date <= options.end;
-  const external = eligible.filter(row => !isInternal(row));
+  const external = eligible.filter(row => !isInternal(row) && row.non_job_reason == null);
   const periodAllocations = external.filter(inPeriod).map(allocationFor);
   // Same vendor/reference/date with different captures is a candidate repeat,
   // not a legitimate extra split allocation. Keep it visible for source review.

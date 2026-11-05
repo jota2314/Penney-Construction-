@@ -91,7 +91,7 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
   const rows = overheadIds.length
     ? await fetchAllRows((f,t) => supabase
         .from("invoices")
-        .select("invoice_date, amount, vendor_name, is_capex, payment_method, estimate_line_items(description)")
+        .select("invoice_date, amount, vendor_name, is_capex, payment_method, non_job_reason, estimate_line_items(description)")
         .is("duplicate_of_id",null)
         .in("project_id", overheadIds)
         .gte("invoice_date", from)
@@ -212,7 +212,7 @@ const allocationYearSources = cache(async (year: string, overheadIdsKey: string)
     // Keep excluded rows in the register so changes to their flags invalidate
     // an accepted allocation instead of hiding a newly included expense.
     overheadIds.length ? fetchAllRows<OverheadBillSource>((f, t) => supabase.from("invoices")
-      .select("id,project_id,invoice_date,amount,vendor_name,is_capex,payment_method,duplicate_of_id,estimate_line_items(description)")
+      .select("id,project_id,invoice_date,amount,vendor_name,is_capex,payment_method,duplicate_of_id,non_job_reason,estimate_line_items(description)")
       .in("project_id", overheadIds).gte("invoice_date", from).lt("invoice_date", to).order("id").range(f, t)) : [],
   ]);
   return { companyReceipts, payroll, bills };

@@ -24,7 +24,7 @@ export default async function DailyLogPage({ searchParams }: { searchParams: Pro
     const rows: DailyExpense[] = [];
     for (let start = 0; ; start += 500) {
       const { data, error } = await db.from("invoices")
-        .select("id, project_id, vendor_name, amount, description, source, review_status, invoice_number, invoice_date, split_group_id, payment_status, payment_method, duplicate_of_id, attachment_storage_path, projects(name, project_number)")
+        .select("id, project_id, vendor_name, amount, description, source, review_status, invoice_number, invoice_date, split_group_id, payment_status, payment_method, duplicate_of_id, attachment_storage_path, projects(name, project_number)").is("non_job_reason", null)
         .is("duplicate_of_id", null).order("id").range(start, start + 499);
       if (error) throw new Error("Expenses could not be loaded");
       rows.push(...data as DailyExpense[]);

@@ -94,6 +94,8 @@ export type CaptureForReview = {
   description: string | null;
   review_reason: string | null;
   created_at: string | null;
+  updated_at?: string | null;
+  non_job_block_reason?: string | null;
   project_id: string | null;
   project_label: string;
   line_item_id: string | null;
@@ -173,7 +175,7 @@ export async function listCapturesForReview(invoiceIds?: string[]): Promise<Capt
   // Everything that still needs a home: rows the AI flagged for review PLUS
   // rows that carry no project at all (mostly bank-statement lines from the
   // reconcile passes). One queue, so nothing hides below a filter.
-  const reviewColumns = "id, split_group_id, review_status, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)" as const;
+  const reviewColumns = "id, split_group_id, review_status, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, updated_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description,is_locked)" as const;
   const fetchPage = (offset: number) => {
     let query = supabase
     .from("invoices")
@@ -181,6 +183,7 @@ export async function listCapturesForReview(invoiceIds?: string[]): Promise<Capt
       reviewColumns,
     )
     .is("duplicate_of_id", null)
+    .is("non_job_reason", null)
     .order("invoice_date", { ascending: false })
     .order("id")
     .range(offset, offset + 499);
@@ -206,7 +209,7 @@ export async function listCapturesForReview(invoiceIds?: string[]): Promise<Capt
   for (let start = 0; start < groupIds.length; start += 100) {
     for (let offset = 0; ; offset += 500) {
       const page = await supabase.from("invoices").select(reviewColumns)
-        .is("duplicate_of_id", null).in("split_group_id", groupIds.slice(start, start + 100))
+        .is("duplicate_of_id", null).is("non_job_reason", null).in("split_group_id", groupIds.slice(start, start + 100))
         .order("id").range(offset, offset + 499);
       if (page.error) throw new Error(page.error.message);
       for (const row of page.data ?? []) {
@@ -249,6 +252,34 @@ export async function listCapturesForReview(invoiceIds?: string[]): Promise<Capt
   }
 
   const projectIds = [...new Set(rows.map((r) => r.project_id).filter((id): id is string => Boolean(id)))];
+  const duplicateLinkedIds = new Set<string>();
+  const finalProjectIds = new Set<string>();
+  for (let start = 0; start < rows.length; start += 100) {
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await supabase.from("invoices").select("id,duplicate_of_id")
+        .in("duplicate_of_id", rows.slice(start, start + 100).map(row => row.id))
+        .order("id").range(offset, offset + 499);
+      if (error) throw new Error(error.message);
+      for (const row of data ?? []) if (row.duplicate_of_id) duplicateLinkedIds.add(row.duplicate_of_id);
+      if ((data?.length ?? 0) < 500) break;
+    }
+  }
+  for (let start = 0; start < projectIds.length; start += 100) {
+    const seenProjects = new Set<string>();
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await supabase.from("project_finance_records").select("id,project_id,kind")
+        .in("project_id", projectIds.slice(start, start + 100)).neq("kind", "forecast")
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .range(offset, offset + 499);
+      if (error) throw new Error(error.message);
+      for (const row of data ?? []) {
+        if (seenProjects.has(row.project_id)) continue;
+        seenProjects.add(row.project_id);
+        if (row.kind === "final") finalProjectIds.add(row.project_id);
+      }
+      if ((data?.length ?? 0) < 500) break;
+    }
+  }
   const linesByProject = new Map<string, CaptureBudgetLine[]>();
   await Promise.all(
     projectIds.map(async (id) => {
@@ -264,7 +295,7 @@ export async function listCapturesForReview(invoiceIds?: string[]): Promise<Capt
       | null;
     const line = (Array.isArray(r.estimate_line_items)
       ? r.estimate_line_items[0]
-      : r.estimate_line_items) as { description: string } | null;
+      : r.estimate_line_items) as { description: string; is_locked: boolean } | null;
 
 
     return {
@@ -281,6 +312,12 @@ export async function listCapturesForReview(invoiceIds?: string[]): Promise<Capt
       description: r.description,
       review_reason: r.review_reason,
       created_at: r.created_at,
+      updated_at: r.updated_at,
+      non_job_block_reason: r.split_group_id ? "Review the split transaction first"
+        : duplicateLinkedIds.has(r.id) ? "Review the linked duplicate first"
+        : line?.is_locked ? "Reopen the closed budget line through job review first"
+        : r.project_id && finalProjectIds.has(r.project_id) ? "Reopen the final job audit first"
+        : !r.updated_at ? "This older transaction needs a saved version before it can be resolved" : null,
       project_id: r.project_id,
       project_label: project
         ? [project.project_number, project.name].filter(Boolean).join(" ")
@@ -307,7 +344,7 @@ export async function countCapturesForReview(): Promise<number> {
   const keys = new Set<string>();
   for (let offset = 0; ; offset += 500) {
     const { data, error } = await supabase.from("invoices").select("id, split_group_id")
-      .is("duplicate_of_id", null).or("review_status.eq.needs_review,project_id.is.null")
+      .is("duplicate_of_id", null).is("non_job_reason", null).or("review_status.eq.needs_review,project_id.is.null")
       .order("id").range(offset, offset + 499);
     if (error) throw new Error(error.message);
     for (const row of data ?? []) keys.add(row.split_group_id ? `split:${row.split_group_id}` : `row:${row.id}`);

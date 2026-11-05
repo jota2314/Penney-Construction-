@@ -97,6 +97,7 @@ export interface SubLogLiteRow {
 /** One of his bills to Penney (an `invoices` row). */
 export interface SubBillRow {
   id: string;
+  non_job_reason?: string | null;
   project_id: string | null;
   subcontractor_id: string | null;
   invoice_number: string | null;
@@ -113,7 +114,7 @@ export interface SubBillRow {
 }
 
 export const SUB_BILL_COLUMNS =
-  "id, project_id, subcontractor_id, invoice_number, invoice_date, description, amount, paid_amount, payment_status, paid_date, review_status, split_group_id, attachment_storage_path, created_at";
+  "id, non_job_reason, project_id, subcontractor_id, invoice_number, invoice_date, description, amount, paid_amount, payment_status, paid_date, review_status, split_group_id, attachment_storage_path, created_at";
 
 /** One sub_bill_submissions row (an invoice he sent from the portal). */
 export interface SubSubmissionRow {
@@ -263,7 +264,7 @@ export async function loadSubSignals(supabase: SupabaseClient, subId: string, to
       .limit(500),
     supabase
       .from("invoices")
-      .select(SUB_BILL_COLUMNS)
+      .select(SUB_BILL_COLUMNS).is("non_job_reason", null)
       .eq("subcontractor_id", subId)
       .order("invoice_date", { ascending: false, nullsFirst: false })
       .limit(1000),
@@ -457,7 +458,7 @@ export async function isSubOnJob(
       .gte("started_at", etStartOfDay(activityFloor).toISOString()),
     supabase
       .from("invoices")
-      .select("id", head)
+      .select("id", head).is("non_job_reason", null)
       .eq("project_id", projectId)
       .eq("subcontractor_id", subId)
       .or(`invoice_date.gte.${billFloor},and(invoice_date.is.null,created_at.gte."${billFloorTs}")`),
@@ -525,7 +526,7 @@ export async function canSubViewJob(
   const [onJob, project, bills, submissions] = await Promise.all([
     isSubOnJob(supabase, subId, projectId, opts),
     supabase.from("projects").select(SUB_JOB_PROJECT_COLUMNS).eq("id", projectId).maybeSingle(),
-    supabase.from("invoices").select("id", head).eq("project_id", projectId).eq("subcontractor_id", subId),
+    supabase.from("invoices").select("id", head).is("non_job_reason", null).eq("project_id", projectId).eq("subcontractor_id", subId),
     supabase.from("sub_bill_submissions").select("id", head).eq("project_id", projectId).eq("subcontractor_id", subId),
   ]);
   if (onJob) return { view: true, post: true };

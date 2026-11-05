@@ -14,6 +14,18 @@ const { buildOpenBills } = load('src/lib/finance/open-bills.ts');
 const bill = (overrides = {}) => ({ id: 'bill', project_id: 'job', vendor_name: 'Vendor', invoice_number: '100', invoice_date: '2026-10-01', due_date: null, amount: 100, paid_amount: 0, payment_status: 'unpaid', payment_method: null, source: 'office_entry', review_status: 'ok', review_reason: null, duplicate_of_id: null, split_group_id: null, estimate_line_item_id: 'line', pay_approval_status: 'pending', approved_for_pay_at: null, projects: { name: 'Completed project', project_number: 'PC-1' }, ...overrides });
 const build = rows => buildOpenBills(rows, '2026-10-09');
 
+test('resolved non-job transactions remain outside payable and review totals even with stale unpaid status', () => {
+  const result = build([
+    bill({ id: 'ordinary', amount: 200 }),
+    bill({ id: 'draw', amount: 1500, non_job_reason: 'owner_draw', project_id: null, estimate_line_item_id: null }),
+    bill({ id: 'transfer', amount: 39509.14, non_job_reason: 'card_payment_transfer', project_id: null, estimate_line_item_id: null }),
+  ]);
+  assert.equal(result.total, 200);
+  assert.equal(result.bills.length, 1);
+  assert.equal(result.reviewBalance, 0);
+  assert.equal(result.review.length, 0);
+});
+
 test('zero balance with unpaid status stays a conflict, not a payable', () => {
   const summary = build([bill({ paid_amount: 100 })]);
   assert.equal(summary.bills.length, 0);

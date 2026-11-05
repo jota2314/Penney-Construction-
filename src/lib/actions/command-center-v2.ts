@@ -168,7 +168,7 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
     // project progress bar — from less than half the data.
     fetchAllRows<InvoiceRow>((from, to) =>
       supabase.from("invoices")
-        .select("project_id, amount, payment_status, invoice_date")
+        .select("project_id, amount, payment_status, invoice_date").is("non_job_reason", null)
         .order("id")
         .range(from, to)),
     fetchAllRows<EstimateRow>((from, to) =>

@@ -121,7 +121,7 @@ export default async function ProjectDetailPage({
       : Promise.resolve({ data: [] }),
     supabase
       .from("invoices")
-      .select("*")
+      .select("*").is("non_job_reason", null)
       .eq("project_id", id)
       .order("invoice_date", { ascending: false }),
     supabase

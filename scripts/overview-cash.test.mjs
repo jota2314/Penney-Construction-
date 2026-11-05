@@ -12,6 +12,22 @@ const bill = (overrides = {}) => ({ invoice_date: '2026-10-08', paid_date: '2026
 const bank = (overrides = {}) => ({ txn_date: '2026-09-30', source: 'eastern_ach', direction: 'debit', amount: 100, ...overrides });
 const receipt = (overrides = {}) => ({ received_date: '2026-10-09', amount: 100, ...overrides });
 
+test('non-job invoice resolution excludes paid-bill comparisons but preserves actual bank cash movements', () => {
+  const result = summarizeCashFlow([], [
+    bill({ id: 'ordinary', amount: 100 }),
+    bill({ id: 'draw', amount: 1500, non_job_reason: 'owner_draw' }),
+    bill({ id: 'payoff', amount: 39509.14, non_job_reason: 'card_payment_transfer' }),
+  ], [
+    bank({ id: 'bank-draw', txn_date: '2026-10-09', amount: 1500, description: 'Owner draw' }),
+    bank({ id: 'bank-payoff', txn_date: '2026-10-09', amount: 39509.14, category_key: 'card_payoff' }),
+  ], '2026-11-05');
+  assert.equal(result.yearToDate.paidBills, 100);
+  assert.equal(result.yearToDate.paidBillCount, 1);
+  assert.equal(result.bank.spent, 41009.14);
+  assert.equal(result.bank.cardPayoff, 39509.14);
+  assert.equal(result.bank.count, 2);
+});
+
 test('unlinked bank payroll is included once independently of payroll bills and internal labor', () => {
   const payroll = bank({ id: 'payroll', description: 'ADP WAGE PAY', amount: '15000.25' });
   const result = summarizeCashFlow([], [bill({ amount: 15000.25 }), bill({ amount: 500, payment_method: 'internal' })], [payroll, { ...payroll }], '2026-10-17');

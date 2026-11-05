@@ -526,7 +526,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     supabase.from("employees").select("id, first_name, last_name, profile_id"),
     supabase.from("subcontractors").select("id, company_name, contact_name"),
     financeIds.length
-      ? supabase.from("invoices").select("project_id, amount, paid_amount").in("project_id", financeIds)
+      ? supabase.from("invoices").select("project_id, amount, paid_amount").is("non_job_reason", null).in("project_id", financeIds)
       : empty,
     financeIds.length
       ? supabase.from("payments_received").select("project_id, amount").in("project_id", financeIds)

@@ -37,7 +37,7 @@ export default async function CashPage({ searchParams }: {
       .order("id").range(from, to)).catch(() => null),
     // Older bills can be paid this year. Missing/backfilled payment dates remain visible.
     financialRows((from, to) => db.from("invoices")
-      .select("id, invoice_date, paid_date, paid_date_source, amount, paid_amount, payment_status, payment_method, duplicate_of_id, vendor_name, source")
+      .select("id, invoice_date, paid_date, paid_date_source, amount, paid_amount, payment_status, payment_method, duplicate_of_id, vendor_name, source").is("non_job_reason", null)
       .is("duplicate_of_id", null).in("payment_status", ["paid", "partial"])
       .order("id").range(from, to)).catch(() => null),
     getFinanceWorkspace().catch(() => null), getCollectionInvoices().catch(() => null),

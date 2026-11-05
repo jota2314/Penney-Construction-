@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     // Canonical current estimate — a status filter here returned nothing for
     // signed jobs, so financial reports lost their budget baseline.
     supabase.rpc("current_estimate_id", { p_project_id: projectId }),
-    supabase.from("invoices").select("*, estimate_line_items:estimate_line_item_id(description, trade)").eq("project_id", projectId).order("invoice_date"),
+    supabase.from("invoices").select("*, estimate_line_items:estimate_line_item_id(description, trade)").is("non_job_reason", null).eq("project_id", projectId).order("invoice_date"),
     supabase.from("payments_received").select("*").eq("project_id", projectId).order("received_date"),
     supabase.from("change_orders").select("*").eq("project_id", projectId).order("change_order_number"),
   ]);
