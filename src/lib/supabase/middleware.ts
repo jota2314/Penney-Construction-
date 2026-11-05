@@ -43,13 +43,18 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
-  // The job QR photo form is public by possession of its job code. A stale
-  // team cookie must not turn a photo submission into a login redirect.
-  // Project tools and server actions still use the complete session gate.
+  // Public job QR pages and their read-only documents use the job code.
+  // A stale team cookie must not turn these into login redirects. Account
+  // tools, unrelated routes and server actions still use the session gate.
   const guestPhotoPage = request.method === "GET" && /^\/sub\/j\/[^/]+\/?$/.test(request.nextUrl.pathname)
     && request.nextUrl.searchParams.get("tools") !== "1";
   const guestPhotoUpload = request.method === "POST" && request.nextUrl.pathname === "/api/site-photos";
-  if (!request.headers.has("next-action") && (guestPhotoPage || guestPhotoUpload)) return supabaseResponse;
+  const guestDocumentsPage = request.method === "GET" && /^\/sub\/j\/[^/]+\/documents\/?$/.test(request.nextUrl.pathname);
+  const guestDocumentRead = request.method === "GET" && (
+    /^\/api\/site-documents\/[^/]+\/[^/]+\/?$/.test(request.nextUrl.pathname) ||
+    /^\/api\/site-scope\/[^/]+\/?$/.test(request.nextUrl.pathname)
+  );
+  if (!request.headers.has("next-action") && (guestPhotoPage || guestPhotoUpload || guestDocumentsPage || guestDocumentRead)) return supabaseResponse;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

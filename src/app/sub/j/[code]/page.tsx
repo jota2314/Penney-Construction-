@@ -9,7 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { findProjectBySiteCode, isSiteOpen, normalizeSiteCode } from "@/lib/sub-portal/site-code";
 import { PortalHeader, PortalTheme } from "@/components/portal-kit";
 
-export const metadata: Metadata = { title: "Post job photos | Penney Construction" };
+export const metadata: Metadata = { title: "Job daily logs | Penney Construction", referrer: "no-referrer", robots: { index: false, follow: false } };
 
 /**
  * Every printed QR opens the photo form immediately. Account-based project

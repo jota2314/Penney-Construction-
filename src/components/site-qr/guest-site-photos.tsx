@@ -153,6 +153,11 @@ export function GuestSitePhotos({ code, project }: { code: string; project: Gues
           <p className="mt-1 text-[15px] text-[var(--muted)]">No account or PIN needed.</p>
         </div>
 
+        <a href={`/sub/j/${encodeURIComponent(code)}/documents`} className="card block space-y-1 p-4">
+          <span className="block text-base font-extrabold">Drawings, specs &amp; scope of work</span>
+          <span className="block text-sm text-[var(--muted)]">Open job documents and download a scope PDF without prices.</span>
+        </a>
+
         {posted && <div role="status" className="card flex gap-3 p-4 text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0" />
           <div><p className="font-extrabold">Update posted</p><p className="mt-1 text-sm">Saved to {project.name}&apos;s Daily Logs. You&apos;re all set.</p></div>
@@ -194,7 +199,7 @@ export function GuestSitePhotos({ code, project }: { code: string; project: Gues
           {posting && <p role="status" className="text-center text-sm text-[var(--muted)]">Keep this page open until your update is posted.</p>}
         </form>
 
-        <a href={`/sub/j/${encodeURIComponent(code)}?tools=1`} className="block py-2 text-center text-sm text-[var(--muted)] underline underline-offset-2">Project tools / drawings</a>
+        <a href={`/sub/j/${encodeURIComponent(code)}?tools=1`} className="block py-2 text-center text-sm text-[var(--muted)] underline underline-offset-2">Team sign-in / more project tools</a>
       </main>
     </PortalTheme>
   );

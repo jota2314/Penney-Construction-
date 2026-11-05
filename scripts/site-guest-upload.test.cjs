@@ -252,16 +252,27 @@ async function main() {
     method, nextUrl: new URL(path, "https://www.penneyconstruction.build"), headers: new Headers(headers),
     cookies: { getAll() { throw new Error("Guest flow must not inspect stale team cookies"); } },
   });
-  for (const [method, path] of [["GET", `/sub/j/${CODE}`], ["GET", `/sub/j/${CODE}/`], ["POST", "/api/site-photos"]]) {
+  for (const [method, path] of [
+    ["GET", `/sub/j/${CODE}`], ["GET", `/sub/j/${CODE}/`], ["POST", "/api/site-photos"],
+    ["GET", `/sub/j/${CODE}/documents`], ["GET", `/api/site-documents/${CODE}/${ID}`],
+    ["GET", `/api/site-scope/${CODE}?trade=plumbing`],
+  ]) {
     assert.deepEqual(await middleware.updateSession(middlewareRequest(method, path)), { pass: true });
   }
   assert.equal(authGate, 0);
-  for (const [method, path, headers] of [
+  const protectedRequests = [
     ["GET", `/sub/j/${CODE}?tools=1`, {}], ["GET", `/sub/j/${CODE}`, { "next-action": "some-action" }],
     ["POST", "/api/site-photos", { "next-action": "some-action" }], ["POST", `/sub/j/${CODE}`, {}],
     ["GET", "/api/site-photos", {}], ["GET", `/sub/j/${CODE}/private`, {}], ["GET", `/projects/${PROJECT}`, {}],
-  ]) await assert.rejects(middleware.updateSession(middlewareRequest(method, path, headers)), /AUTH_GATE_REACHED/);
-  assert.equal(authGate, 7);
+    ["POST", `/sub/j/${CODE}/documents`, {}], ["POST", `/api/site-documents/${CODE}/${ID}`, {}],
+    ["POST", `/api/site-scope/${CODE}`, {}], ["GET", `/api/site-scope/${CODE}/private`, {}],
+    ["GET", `/api/site-documents/${CODE}/${ID}/private`, {}],
+    ["GET", `/sub/j/${CODE}/documents`, { "next-action": "some-action" }],
+    ["GET", `/api/site-documents/${CODE}/${ID}`, { "next-action": "some-action" }],
+    ["GET", `/api/site-scope/${CODE}`, { "next-action": "some-action" }],
+  ];
+  for (const [method, path, headers] of protectedRequests) await assert.rejects(middleware.updateSession(middlewareRequest(method, path, headers)), /AUTH_GATE_REACHED/);
+  assert.equal(authGate, protectedRequests.length);
   console.log("Passed: no-login worker name/trade/company/work-description persistence, required-field validation, legacy retry acknowledgement, real image normalization, project scope, idempotency, cleanup, caps and middleware isolation.");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
