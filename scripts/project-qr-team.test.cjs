@@ -89,9 +89,13 @@ function findElement(element, type) {
     "next/link": "Link",
     "@/components/sub-portal/site-join": { SiteJoin: "SiteJoin" },
     "@/components/crew/crew-job-folder": { CrewJobFolder: "CrewJobFolder" },
+    "@/components/site-qr/guest-site-photos": { GuestSitePhotos: "GuestSitePhotos" },
+    "@/components/portal-kit": { PortalTheme: "PortalTheme", PortalHeader: "PortalHeader" },
+    "@/lib/supabase/admin": {},
+    "@/lib/sub-portal/site-code": {},
     "@/components/schedule/upload-queue-banner": { UploadQueueBanner: "UploadQueueBanner" },
     "@/lib/site-qr/team-job": { getTeamSiteJob: async () => team },
-  }).default({ params: Promise.resolve({ code: "ABCDEFGH" }) });
+  }).default({ params: Promise.resolve({ code: "ABCDEFGH" }), searchParams: Promise.resolve({ tools: "1" }) });
   const publicPage = await route({ kind: "signed_out" });
   assert.equal(publicPage.type, "SiteJoin");
   assert.deepEqual(publicPage.props, { code: "ABCDEFGH" }, "public route has no project documents or prices");

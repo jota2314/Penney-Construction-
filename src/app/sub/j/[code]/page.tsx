@@ -4,15 +4,43 @@ import type { Metadata } from "next";
 import { CrewJobFolder } from "@/components/crew/crew-job-folder";
 import { getTeamSiteJob } from "@/lib/site-qr/team-job";
 import { UploadQueueBanner } from "@/components/schedule/upload-queue-banner";
+import { GuestSitePhotos } from "@/components/site-qr/guest-site-photos";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { findProjectBySiteCode, isSiteOpen, normalizeSiteCode } from "@/lib/sub-portal/site-code";
+import { PortalHeader, PortalTheme } from "@/components/portal-kit";
 
-export const metadata: Metadata = { title: "Job site | Penney Construction" };
+export const metadata: Metadata = { title: "Post job photos | Penney Construction" };
 
 /**
- * Keep every printed QR working. Team members open the scanned job with
- * their own identity; subcontractors keep the existing portal sign-in.
+ * Every printed QR opens the photo form immediately. Account-based project
+ * tools are available only when someone explicitly chooses them.
  */
-export default async function SubSiteQrPage({ params }: { params: Promise<{ code: string }> }) {
+export default async function SubSiteQrPage({ params, searchParams }: {
+  params: Promise<{ code: string }>;
+  searchParams?: Promise<{ tools?: string }>;
+}) {
   const { code } = await params;
+  const query = await searchParams;
+  if (query?.tools !== "1") {
+    const normalized = normalizeSiteCode(code);
+    const project = normalized.length === 8
+      ? await findProjectBySiteCode(createAdminClient(), normalized)
+      : null;
+    if (!project || !isSiteOpen(project)) {
+      return (
+        <PortalTheme variant="field">
+          <PortalHeader title="Job photos" safeTop />
+          <main className="mx-auto max-w-md space-y-4 px-4 py-6">
+            <h1 className="text-xl font-extrabold">{project ? "This job isn't open for photos right now" : "This QR code isn't active"}</h1>
+            <p className="text-[var(--muted)]">Call the Penney office and we&apos;ll help you get your pictures to the right job.</p>
+            <a href="tel:9786214387" className="btn btn-primary btn-lg btn-block">Call the office</a>
+          </main>
+        </PortalTheme>
+      );
+    }
+    return <GuestSitePhotos code={normalized} project={{ name: project.name, number: project.project_number, town: project.city }} />;
+  }
+
   const team = await getTeamSiteJob(code);
   if (team.kind === "unavailable") {
     return (

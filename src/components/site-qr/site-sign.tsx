@@ -7,8 +7,7 @@ import { portalFont } from "@/components/portal/portal-font";
  * the entry door) and the half-page binder-cover label. Shared by
  * /job-qr/{id} and the bulk print page /job-qr/all. Server-safe: no hooks.
  *
- * One code for Penney crew and subcontractors: daily logs, photos and the
- * job's drawings, through their existing sign-in and project access.
+ * One code for everyone on site: add photos and post straight to this job.
  */
 
 const INK = "#252D2B";
@@ -17,11 +16,11 @@ const LINE = "#E4E0D8";
 const ACCENT_DARK = "#9E4E28";
 
 export const SITE_SIGN_COPY = {
-  headline: "Your job. Scan to open.",
-  steps: ["Daily logs", "Photos", "Drawings"],
-  pt: "Escaneie para acessar os registros diários, fotos e plantas da obra.",
-  es: "Escanea para ver los registros diarios, fotos y planos de la obra.",
-  firstTime: "Penney crew: sign in with your Penney account.",
+  headline: "Scan to post your job photos",
+  steps: ["Scan", "Add photos", "Post"],
+  pt: "Escaneie, adicione fotos e envie. Não precisa de conta ou PIN.",
+  es: "Escanea, agrega fotos y envía. No necesitas cuenta ni PIN.",
+  firstTime: "No account or PIN needed.",
   watch: "Watch how · 1 min",
 } as const;
 
@@ -148,7 +147,7 @@ export function SiteSign({
         <div className="min-w-0 flex-1">
           <p className="text-[16px] font-extrabold">Penney office {officePhone}</p>
           <p className="mt-0.5 text-[13px]" style={{ color: MUTED }}>
-            Subcontractors: use your cell and PIN, or sign up here.
+            Take pictures or choose from your photo library.
           </p>
           <p className="mt-1 break-all font-mono text-[12px] tracking-wide" style={{ color: MUTED }}>
             {url.replace("https://", "")}
@@ -195,7 +194,7 @@ export function BinderLabel({ job, url, officePhone }: { job: SiteSignJob; url: 
           <Steps size="sm" align="start" />
         </div>
         <p className="mt-3 text-[13px] font-semibold">{SITE_SIGN_COPY.firstTime}</p>
-        <p className="mt-1 text-[13px]">Subs: cell and PIN, or sign up here.</p>
+        <p className="mt-1 text-[13px]">Your photos go straight to this job.</p>
         <p className="mt-1 text-[13px] font-extrabold">Penney office {officePhone}</p>
       </div>
     </section>

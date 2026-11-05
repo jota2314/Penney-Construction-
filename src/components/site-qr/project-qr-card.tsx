@@ -49,10 +49,10 @@ export function ProjectQrCard({
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold md:text-base">Project QR</h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground md:text-sm">
-            Scan on site for daily logs, photos and this job&apos;s drawings.
+            Anyone on site can scan, add photos and post straight to this job.
           </p>
           <p className="mt-1 hidden text-xs text-muted-foreground sm:block">
-            Penney crew and subcontractors use their own sign-in.
+            No account or PIN needed to post photos.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Link
@@ -77,7 +77,7 @@ export function ProjectQrCard({
       </div>
       {!open && (
         <p className="mt-2 text-xs text-muted-foreground">
-          Subcontractor check-in opens when this is a live job. The printed code stays the same.
+          Photo posting opens when this is a live job. The printed code stays the same.
         </p>
       )}
       {!url && (

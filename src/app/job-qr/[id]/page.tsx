@@ -88,10 +88,10 @@ export default async function JobQrPage({ params }: { params: Promise<{ id: stri
         {!open && (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 print:hidden">
             {internal ? (
-              <>This is an office job, so the QR says it isn&apos;t open for check-in.</>
+              <>This is an office job, so the QR says it isn&apos;t open for photo posting.</>
             ) : (
               <>
-                This job is <strong>{statusName}</strong>. Subs can only check in while a job is Contracted, In
+                This job is <strong>{statusName}</strong>. Photo posting opens while a job is Contracted, In
                 Progress or On Hold, so the QR will say the job isn&apos;t open until then.
               </>
             )}
