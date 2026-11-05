@@ -265,3 +265,113 @@ test('absence of imported payroll has null coverage, not a complete zero-payroll
   assert.equal(result.months[9].payroll.bankPayrollCount, 0);
   assert.equal('complete' in result.payroll, false);
 });
+
+test('internal labor vendors never enter paid records even with missing or wrong payment methods', () => {
+  const result = summarizeRecordedActivity([], [
+    bill({ id: 'placeholder-null', vendor_name: 'In-House Labor', payment_method: null, amount: 100 }),
+    bill({ id: 'placeholder-card', vendor_name: 'Penney Construction (Labor)', payment_method: 'capital_one', amount: 200 }),
+    bill({ id: 'placeholder-check', vendor_name: ' in house labor ', payment_method: 'check', amount: 300 }),
+    bill({ id: 'disposal', vendor_name: 'In House Disposal LLC', amount: 40 }),
+    bill({ id: 'subcontractor', vendor_name: 'Other Labor Contractor', amount: 50 }),
+  ], '2026-10-01', '2026-10-31');
+  assert.equal(result.paidBills, 90);
+  assert.equal(result.directPayments, 90);
+  assert.equal(result.cardPurchases, 0);
+  assert.equal(result.unclassifiedPayments, 0);
+  assert.equal(result.paidBillCount, 2);
+  assert.equal(result.paymentIssueCount, 0);
+});
+
+test('explicit zero on a paid bill is held for review while null legacy paid amount may use the book status', () => {
+  const result = summarizeRecordedActivity([], [
+    bill({ id: 'explicit-zero', amount: 1000, paid_amount: 0 }),
+    bill({ id: 'credit-zero', amount: -25, paid_amount: 0 }),
+    bill({ id: 'legacy-null', amount: 20, paid_amount: null }),
+    bill({ id: 'empty-bill', amount: 0, paid_amount: 0 }),
+  ], '2026-10-01', '2026-10-31');
+  assert.equal(result.paidBills, 20);
+  assert.equal(result.paidBillCount, 2);
+  assert.equal(result.paymentIssueCount, 2);
+  assert.deepEqual(result.paymentIssueIds, ['explicit-zero', 'credit-zero']);
+  assert.equal(result.unresolvedPaymentAmounts, 0); // This older counter is partial records only.
+});
+
+test('paid status must agree with the full face amount and valid partial payments stay strictly inside it', () => {
+  const invalid = [
+    bill({ id: 'paid-short', amount: 100, paid_amount: 40 }),
+    bill({ id: 'paid-over', amount: 100, paid_amount: 110 }),
+    bill({ id: 'paid-negative', amount: 100, paid_amount: -10 }),
+    bill({ id: 'partial-zero', payment_status: 'partial', amount: 100, paid_amount: 0 }),
+    bill({ id: 'partial-full', payment_status: 'partial', amount: 100, paid_amount: 100 }),
+    bill({ id: 'partial-over', payment_status: 'partial', amount: 100, paid_amount: 110 }),
+    bill({ id: 'partial-negative', payment_status: 'partial', amount: 100, paid_amount: -10 }),
+  ];
+  const result = summarizeRecordedActivity([], [...invalid,
+    bill({ id: 'valid-partial', payment_status: 'partial', amount: 100, paid_amount: 30 }),
+    bill({ id: 'valid-paid', amount: 100, paid_amount: 100 }),
+  ], '2026-10-01', '2026-10-31');
+  assert.equal(result.paidBills, 130);
+  assert.equal(result.paidBillCount, 2);
+  assert.equal(result.paymentIssueCount, 7);
+  assert.deepEqual(result.paymentIssueIds, invalid.map(row => row.id));
+  assert.equal(result.unresolvedPaymentAmounts, 4);
+});
+
+test('credit records preserve signed amounts but inconsistent signs or excessive applications stay unresolved', () => {
+  const result = summarizeRecordedActivity([], [
+    bill({ id: 'paid-credit', amount: -100, paid_amount: -100, payment_method: 'credit_card' }),
+    bill({ id: 'legacy-credit', amount: -20, paid_amount: null, payment_method: 'credit_card' }),
+    bill({ id: 'partial-credit', amount: -100, paid_amount: -30, payment_status: 'partial', payment_method: 'credit_card' }),
+    bill({ id: 'positive-credit-payment', amount: -100, paid_amount: 30, payment_status: 'partial' }),
+    bill({ id: 'excess-credit-payment', amount: -100, paid_amount: -130, payment_status: 'partial' }),
+    bill({ id: 'full-partial-credit', amount: -100, paid_amount: -100, payment_status: 'partial' }),
+    bill({ id: 'short-paid-credit', amount: -100, paid_amount: -30 }),
+    bill({ id: 'unrelated-bill', amount: 200, paid_amount: 200 }),
+  ], '2026-10-01', '2026-10-31');
+  assert.equal(result.paidBills, 50);
+  assert.equal(result.cardPurchases, -150);
+  assert.equal(result.directPayments, 200);
+  assert.equal(result.paymentIssueCount, 4);
+  assert.equal(result.unresolvedPaymentAmounts, 3);
+});
+
+test('payment issue warnings follow the selected period while partial inventory issues stay visible', () => {
+  const result = summarizeRecordedActivity([], [
+    bill({ id: 'october-zero', paid_amount: 0 }),
+    bill({ id: 'september-zero', paid_date: '2026-09-30', paid_amount: 0 }),
+    bill({ id: 'november-partial', paid_date: '2026-11-01', payment_status: 'partial', paid_amount: 0 }),
+    bill({ id: 'undated-paid', invoice_date: null, paid_date: null, paid_amount: 0 }),
+    bill({ id: 'undated-partial', invoice_date: null, paid_date: null, payment_status: 'partial', paid_amount: null }),
+    bill({ id: 'coherent', amount: 10, paid_amount: 10 }),
+  ], '2026-10-01', '2026-10-31');
+  assert.equal(result.paidBills, 10);
+  assert.equal(result.paymentIssueCount, 1);
+  assert.deepEqual(result.paymentIssueIds, ['october-zero']);
+  assert.equal(result.unresolvedPaymentAmounts, 2);
+  assert.deepEqual(result.unresolvedPaymentIds, ['november-partial', 'undated-partial']);
+  assert.equal(result.undatedPayments, 2);
+  assert.equal(result.undatedPaymentAmount, 0);
+});
+
+test('missing or malformed face/payment values stay unresolved instead of becoming a paid subtotal', () => {
+  const result = summarizeRecordedActivity([], [
+    bill({ id: 'missing-face', amount: null, paid_amount: 50 }),
+    bill({ id: 'bad-face', amount: 'bad', paid_amount: 50 }),
+    bill({ id: 'bad-paid', amount: 100, paid_amount: 'bad' }),
+    bill({ id: 'valid', amount: 15, paid_amount: 15 }),
+  ], '2026-10-01', '2026-10-31');
+  assert.equal(result.paidBills, 15);
+  assert.equal(result.paymentIssueCount, 3);
+  assert.equal(result.paidBillCount, 1);
+});
+
+test('contradictory ADP bill evidence keeps payroll overlap unresolved even if the recorded subtotal matches by coincidence', () => {
+  const result = summarizeCashFlow([], [
+    bill({ id: 'valid-adp', vendor_name: 'ADP', paid_date: '2026-09-30', amount: 100, paid_amount: 100 }),
+    bill({ id: 'zero-adp', vendor_name: 'ADP', paid_date: '2026-09-30', amount: 100, paid_amount: 0 }),
+  ], [bank({ description: 'ADP WAGE PAY', amount: 100 })], '2026-10-17');
+  assert.equal(result.payroll.recordedADPpayroll, 100);
+  assert.equal(result.payroll.additionalBankPayroll, 0);
+  assert.deepEqual(result.payroll.uncertainOverlapMonths, ['2026-09']);
+  assert.equal(result.months[8].records.paymentIssueCount, 1);
+});

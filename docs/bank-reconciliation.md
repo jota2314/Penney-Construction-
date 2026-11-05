@@ -6,6 +6,28 @@ do not change with expense category or job filters. The selected Cash flow month
 uses the same panel. An explicitly requested empty month stays empty; invalid or
 unloaded years never silently substitute another month's money.
 
+Cash flow leads with the selected period's bank panel, always expanded. Its
+default is the latest imported month, named explicitly; `m=ytd` selects the
+current year through today. Month navigation changes the bank panel and the
+separate, collapsed bill/receipt comparison together. A monthly selection never
+shows year-to-date recorded receipts or bills as its headline. A missing or
+mismatched bank-period result is unavailable, never replaced by book totals.
+The latest imported date remains visible, so November book entries cannot imply
+that November bank activity was received.
+
+The former "payroll awaiting bill matching" amount only found months with zero
+ADP bills; it omitted partially matched months. Cash flow no longer displays
+that heuristic as an amount awaiting reconciliation. Actual imported payroll
+funding remains in bank withdrawals exactly once. Supporting bill matching and
+office/field allocation remain separate evidence work.
+
+The secondary recorded payment subtotal excludes internal wage placeholders by
+vendor as well as method. Explicit zero or contradictory paid amounts are not
+replaced with full bill amounts; payment issues are counted for the selected
+period. A missing `paid_amount` on a paid-status record retains the existing
+book-only fallback, not proof of bank clearance. Invalid book data cannot replace
+otherwise valid bank cash; its comparison is unavailable instead.
+
 Cash comes only from imported Eastern transactions. Payroll funding, card
 repayments, checks and other withdrawals partition the debit total in integer
 cents. Card-source purchases, bill costs and payroll allocations are never added

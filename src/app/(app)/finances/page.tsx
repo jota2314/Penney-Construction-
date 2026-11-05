@@ -67,7 +67,7 @@ const TABS = [
   { key: "collections", label: "Collections", aliases: [], subtitle: "Who owes us, oldest first. Open an invoice or send a reminder." },
   { key: "projects", label: "Projects", aliases: ["final-audits"], subtitle: "Job health, forecasts and final P&Ls." },
   { key: "bills", label: "Bills", aliases: [], subtitle: "Open balances, approval status and unresolved receipts." },
-  { key: "cash", label: "Cash flow", aliases: [], subtitle: "Recorded cash activity, imported bank statements and coverage dates." },
+  { key: "cash", label: "Cash flow", aliases: [], subtitle: "Bank money in and out for the selected period, with statement coverage and separate app records." },
   { key: "expenses", label: "Expenses", aliases: [], subtitle: "Bills, purchases and credits by bill date, with recorded payments and open balances." },
   { key: "income", label: "Income", aliases: [], subtitle: "Recorded receipts and their project allocations." },
   { key: "overhead", label: "Overhead", aliases: [], subtitle: "Operating costs kept separate from job profit." },
