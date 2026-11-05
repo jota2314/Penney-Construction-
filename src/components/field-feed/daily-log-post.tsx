@@ -176,7 +176,7 @@ export function DailyLogPost({
             {avatarInit}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>
+            <div className="break-words text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>
               {authorLabel}
             </div>
             <div className="flex items-center gap-1 text-[11px] min-w-0" style={{ color: v("quiet") }}>

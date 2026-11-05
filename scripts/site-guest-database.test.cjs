@@ -42,7 +42,7 @@ const get = async (id) => (await db.query("select * from daily_logs where id=$1"
       schedule_phase_id uuid, master_phase_id uuid, estimate_line_item_id uuid,
       kind text not null default 'shift', status text not null default 'in_progress',
       started_at timestamptz not null default now(), ended_at timestamptz,
-      created_at timestamptz not null default now(), photo_storage_paths text[] not null default '{}',
+      created_at timestamptz not null default now(), text text, photo_storage_paths text[] not null default '{}',
       line_item_source text, line_item_needs_review boolean not null default false, line_item_note text,
       report_required boolean not null default false, report_submitted_at timestamptz,
       daily_report_id uuid, report_progress jsonb, auto_clocked_out boolean not null default false,
@@ -57,11 +57,23 @@ const get = async (id) => (await db.query("select * from daily_logs where id=$1"
   await db.exec(fs.readFileSync("supabase/migrations/20261105022833_site_guest_photo_posts.sql", "utf8"));
 
   await role("service_role");
-  const guest = await insert({ site_guest_name: "Electrician" });
+  const legacyGuest = await insert();
+  await db.exec("reset role");
+  await db.exec(fs.readFileSync("supabase/migrations/20261105165352_site_guest_worker_details.sql", "utf8"));
+  await role("service_role");
+  const legacy = await get(legacyGuest);
+  assert.equal(legacy.site_guest_name, null);
+  assert.equal(legacy.site_guest_trade, null);
+  assert.equal(legacy.site_guest_company, null, "migration preserves earlier anonymous photo posts");
+  const guest = await insert({ site_guest_name: "Alex", site_guest_trade: "Electrician", site_guest_company: "Example Electric", text: "Installed kitchen wiring." });
   const saved = await get(guest);
   assert.equal(saved.is_site_guest, true);
   assert.equal(saved.author_id, null);
   assert.equal(saved.subcontractor_id, null);
+  assert.equal(saved.site_guest_name, "Alex");
+  assert.equal(saved.site_guest_trade, "Electrician");
+  assert.equal(saved.site_guest_company, "Example Electric");
+  assert.equal(saved.text, "Installed kitchen wiring.");
   assert.equal(saved.line_item_needs_review, false, "guest photos create no crew allocation warning");
 
   for (const patch of [
@@ -73,6 +85,10 @@ const get = async (id) => (await db.query("select * from daily_logs where id=$1"
     { report_required: true }, { report_submitted_at: time }, { daily_report_id: uuid() },
     { report_progress: {} }, { auto_clocked_out: true }, { site_guest_name: " " },
     { site_guest_name: "x".repeat(121) },
+    { site_guest_trade: " " }, { site_guest_trade: "x".repeat(81) },
+    { site_guest_company: " " }, { site_guest_company: "x".repeat(101) },
+    { is_site_guest: false, author_id: author, site_guest_trade: "Electrician" },
+    { is_site_guest: false, subcontractor_id: sub, site_guest_company: "Example Electric" },
   ]) await assert.rejects(insert(patch), /check constraint/, JSON.stringify(patch));
 
   const subPost = await insert({ is_site_guest: false, subcontractor_id: sub });
@@ -93,13 +109,13 @@ const get = async (id) => (await db.query("select * from daily_logs where id=$1"
   await assert.rejects(insert(), /row-level security/);
 
   await role("service_role");
-  for (let i = 1; i < 60; i++) await insert();
+  for (let i = 2; i < 60; i++) await insert();
   await assert.rejects(insert(), /site_guest_hourly_limit/);
   await assert.rejects(insert({ id: guest }), /duplicate key/, "idempotent retry reaches the existing PK even at the cap");
   await insert({ project_id: otherJob });
   await insert({ is_site_guest: false, subcontractor_id: sub });
   await db.query("update daily_logs set created_at=now()-interval '2 hours' where id=$1", [guest]);
   await insert();
-  console.log("Passed: guest identity constraints, no labor/time attribution, RLS isolation, project hourly cap and retry behavior.");
+  console.log("Passed: guest worker details persist, legacy posts survive migration, bounded guest-only fields, no labor/time attribution, unchanged RLS, project hourly cap and retry behavior.");
   await db.close();
 })().catch(async (error) => { console.error(error); await db.close(); process.exitCode = 1; });

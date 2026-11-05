@@ -47,7 +47,7 @@ export async function getCrewJobPhotos(projectId: string): Promise<CrewJobPhoto[
   const supabase = await createClient();
   const { data } = await supabase
     .from("daily_logs")
-    .select("started_at, photo_storage_paths, is_site_guest, site_guest_name, author:profiles!author_id(full_name)")
+    .select("started_at, photo_storage_paths, is_site_guest, site_guest_name, site_guest_trade, site_guest_company, author:profiles!author_id(full_name)")
     .eq("project_id", projectId)
     .not("photo_storage_paths", "eq", "{}")
     .order("started_at", { ascending: false })
@@ -60,7 +60,7 @@ export async function getCrewJobPhotos(projectId: string): Promise<CrewJobPhoto[
       if (path) out.push({
         path,
         taken_at: row.started_at,
-        author_name: siteGuestAuthorName(row.is_site_guest, row.site_guest_name) ?? author?.full_name ?? null,
+        author_name: siteGuestAuthorName(row.is_site_guest, row.site_guest_name, row.site_guest_trade, row.site_guest_company) ?? author?.full_name ?? null,
       });
     }
   }

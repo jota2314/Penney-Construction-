@@ -36,7 +36,7 @@ const image = new Blob(["test image bytes"], { type: "image/jpeg" });
 
 function form(overrides = {}, photos = [image]) {
   const data = new FormData();
-  const values = { code: CODE, submissionId: ID, name: "", note: "", ...overrides };
+  const values = { code: CODE, submissionId: ID, name: "Alex", trade: "Electrician", company: "", note: "Installed the kitchen wiring.", ...overrides };
   for (const [key, value] of Object.entries(values)) if (value !== undefined) data.set(key, value);
   for (const photo of photos) data.append("photos", photo);
   return data;
@@ -110,18 +110,36 @@ async function expectStatus(work, status) {
 
 async function main() {
   // Only the server-resolved code determines job and attribution.
-  const parsed = parseGuestPhotoForm(form({ code: "abcdefgh", name: "  Electrician  ", note: "  Rough wiring  ", projectId: OTHER, author_id: OTHER, storage_path: "other.jpg" }));
-  assert.deepEqual(Object.keys(parsed).sort(), ["code", "name", "note", "photos", "submissionId"]);
-  assert.equal(parsed.code, CODE); assert.equal(parsed.name, "Electrician"); assert.equal(parsed.note, "Rough wiring");
-  assert.equal(parseGuestPhotoForm(form()).name, "", "name is optional");
+  const parsed = parseGuestPhotoForm(form({ code: "abcdefgh", name: "  Alex  ", trade: "  Electrician  ", company: "  Example Electric  ", note: "  Rough wiring  ", projectId: OTHER, author_id: OTHER, storage_path: "other.jpg" }));
+  assert.deepEqual(Object.keys(parsed).sort(), ["code", "company", "name", "note", "photos", "submissionId", "trade"]);
+  assert.equal(parsed.code, CODE); assert.equal(parsed.name, "Alex"); assert.equal(parsed.trade, "Electrician");
+  assert.equal(parsed.company, "Example Electric"); assert.equal(parsed.note, "Rough wiring");
+  assert.equal(parseGuestPhotoForm(form()).company, "", "company is optional");
   for (const [patch, photos, status] of [
     [{ code: "bad" }, [image], 404], [{ code: "ABCDEFG0" }, [image], 404],
     [{ submissionId: "bad" }, [image], 400], [{ website: "spam" }, [image], 400],
     [{ name: "a".repeat(101) }, [image], 400], [{ note: "a".repeat(2001) }, [image], 400],
+    [{ trade: "a".repeat(81) }, [image], 400], [{ company: "a".repeat(101) }, [image], 400],
     [{}, [], 400], [{}, Array(7).fill(image), 400], [{}, [new Blob([], { type: "image/jpeg" })], 413],
     [{}, [new Blob([Buffer.alloc(GUEST_PHOTO_BYTES + 1)], { type: "image/jpeg" })], 413],
     [{}, [new Blob(["<svg/>"], { type: "image/svg+xml" })], 400], [{}, ["not a file"], 413],
   ]) assert.throws(() => parseGuestPhotoForm(form(patch, photos)), error => error.status === status);
+
+  for (const field of ["name", "trade", "note"]) {
+    const h = harness();
+    await expectStatus(() => saveGuestPhotos(h.admin, parseGuestPhotoForm(form({ [field]: " \n " })), fastNormalize), 400);
+    assert.equal(h.state.uploads.length, 0, `${field} is required before images are transferred`);
+    assert.equal(h.state.inserts.length, 0, `${field} is required for new posts`);
+  }
+  {
+    // A photo-only post saved before the form update still acknowledges a lost
+    // response after deployment without inventing details or duplicating files.
+    const h = harness({ project: { ...project, status: "completed" }, row: { id: ID, project_id: PROJECT, is_site_guest: true } });
+    const legacy = parseGuestPhotoForm(form({ name: "", trade: undefined, company: undefined, note: "" }));
+    const retry = await saveGuestPhotos(h.admin, legacy, fastNormalize);
+    assert.equal(retry.duplicate, true);
+    assert.equal(h.state.uploads.length, 0); assert.equal(h.state.inserts.length, 0);
+  }
 
   // MIME and names are not trusted: decode actual pixels and remove EXIF.
   const png = await sharp({ create: { width: 2200, height: 1100, channels: 3, background: "orange" } }).png().withMetadata().toBuffer();
@@ -148,13 +166,19 @@ async function main() {
     assert.equal(result.projectId, PROJECT); assert.equal(result.duplicate, false);
     const row = h.state.inserts[0];
     assert.equal(row.author_id, null); assert.equal(row.subcontractor_id, null); assert.equal(row.is_site_guest, true);
-    assert.equal(row.site_guest_name, "Electrician"); assert.equal(row.kind, "post"); assert.equal(row.status, "completed");
+    assert.equal(row.site_guest_name, "Alex"); assert.equal(row.site_guest_trade, "Electrician");
+    assert.equal(row.site_guest_company, "Example Electric"); assert.equal(row.text, "Rough wiring");
+    assert.equal(row.kind, "post"); assert.equal(row.status, "completed");
     assert.equal(row.started_at, row.ended_at); assert.equal(row.report_required, false); assert.equal(row.line_item_needs_review, false);
     assert.equal(row.project_id, PROJECT); assert.equal(row.id, ID); assert.deepEqual(row.photo_storage_paths, h.state.uploads);
     assert.ok(h.state.uploads.every(path => path.startsWith(`${ID}/`) && path.endsWith(".jpg")));
     h.state.project = { ...project, status: "completed" };
     const retry = await saveGuestPhotos(h.admin, parsed, fastNormalize);
     assert.equal(retry.duplicate, true); assert.equal(h.state.uploads.length, 1); assert.equal(h.state.inserts.length, 1);
+  }
+  {
+    const h = harness(); await saveGuestPhotos(h.admin, input(), fastNormalize);
+    assert.equal(h.state.inserts[0].site_guest_company, null, "an omitted company is stored as null");
   }
   for (const row of [{ id: ID, project_id: OTHER, is_site_guest: true }, { id: ID, project_id: PROJECT, is_site_guest: false }]) {
     const h = harness({ row }); await expectStatus(() => saveGuestPhotos(h.admin, input(), fastNormalize), 409);
@@ -198,6 +222,8 @@ async function main() {
   assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
   assert.deepEqual(await response.json(), { ok: true, logId: ID, duplicate: false });
   assert.equal(savedInputs.length, 1); assert.equal(savedInputs[0].projectId, undefined); assert.equal(savedInputs[0].author_id, undefined);
+  assert.equal(savedInputs[0].name, "Alex"); assert.equal(savedInputs[0].trade, "Electrician");
+  assert.equal(savedInputs[0].note, "Installed the kitchen wiring.");
   for (const headers of [{ origin: "https://other.example" }, { "sec-fetch-site": "cross-site" }]) {
     response = await route.POST(request(form(), headers)); assert.equal(response.status, 403);
   }
@@ -236,6 +262,6 @@ async function main() {
     ["GET", "/api/site-photos", {}], ["GET", `/sub/j/${CODE}/private`, {}], ["GET", `/projects/${PROJECT}`, {}],
   ]) await assert.rejects(middleware.updateSession(middlewareRequest(method, path, headers)), /AUTH_GATE_REACHED/);
   assert.equal(authGate, 7);
-  console.log("Passed: no-login guest photo parsing, real image normalization, project scope, idempotency, upload cleanup, uncertain commits, rate/body caps, HTTP origin checks and narrow guest middleware exemption.");
+  console.log("Passed: no-login worker name/trade/company/work-description persistence, required-field validation, legacy retry acknowledgement, real image normalization, project scope, idempotency, cleanup, caps and middleware isolation.");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
