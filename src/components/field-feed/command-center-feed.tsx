@@ -10,26 +10,32 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useVisibleRefresh } from "@/lib/hooks/use-visible-refresh";
 import Link from "next/link";
 import type { TodayPhase, FeedDailyLog, FeedPunchGroup, WeekSchedulePhase } from "@/lib/actions/daily-logs";
-import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
 import { snoozeTodo, updateTodoStatus } from "@/lib/actions/command-center";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { TodaysWorkCard } from "./todays-work-card";
-import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
 import { GlobalSearch } from "@/components/command-center/global-search";
-import { JobClockInSheet } from "./job-clock-in-sheet";
-import { CompanyPostComposer } from "./company-post-composer";
-import { CompanyPostCard } from "./company-post-card";
 import { ReceiptTile, DepositTile } from "./money-tiles";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import type { CompanyFeedPost } from "@/lib/actions/company-feed";
 import { WebsiteInquirySummary } from "@/components/inquiries/inquiry-summary";
 import type { InquirySummary } from "@/lib/inquiries/model";
+import type { CommandCenterUpdate, CommandCenterUpdatesPage } from "@/lib/feed/command-center-updates";
+import { rangeCutoff, updateKey, type UpdatesRange } from "./command-center-timeline-state";
+import { useCommandCenterTimeline } from "./use-command-center-timeline";
+import { TimelinePagination } from "./timeline-pagination";
+import { VisibleUpdateCard } from "./visible-update-card";
+import { useCommandCenterJobsites } from "./use-command-center-jobsites";
+import { updateMasonryPlacements, type MasonryPlacement } from "./masonry-placements";
+
+const JobClockInSheet = dynamic(() => import("./job-clock-in-sheet").then((module) => module.JobClockInSheet));
+const CompanyPostComposer = dynamic(() => import("./company-post-composer").then((module) => module.CompanyPostComposer));
 
 // ---------------------------------------------------------------------------
 // Types
@@ -598,8 +604,6 @@ function TodayStrip({ events }: { events: { time: string; what: string; tag: Pri
   );
 }
 
-type UpdatesRange = "day" | "week";
-
 function SectionDivider({
   label,
   range,
@@ -626,17 +630,18 @@ function SectionDivider({
             className="flex shrink-0 items-center gap-1 p-0.5 rounded-lg mb-0.5"
             style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
           >
-            {(["day", "week"] as const).map((r) => (
+            {(["all", "day", "week"] as const).map((r) => (
               <button
                 key={r}
                 onClick={() => onRangeChange(r)}
+                aria-pressed={range === r}
                 className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
                 style={{
                   background: range === r ? v("accent") : "transparent",
                   color: range === r ? "#1a0f00" : v("muted"),
                 }}
               >
-                {r === "day" ? "Day" : "Week"}
+                {r === "all" ? "All" : r === "day" ? "Day" : "Week"}
               </button>
             ))}
           </div>
@@ -1087,25 +1092,6 @@ function DailyLogComposer({ placeholder }: { placeholder: string }) {
 // Feed
 // ---------------------------------------------------------------------------
 
-function EndOfFeed({ role }: { role: RoleId }) {
-  const isField = role === "lead" || role === "crew";
-  return (
-    <div className="rounded-2xl p-6 mt-2 flex flex-col items-center text-center" style={{ background: v("bg-2"), border: `1px solid ${v("line-soft")}` }}>
-      <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3" style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent") }}>
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-          <path d="M4 10l4 4 8-9" />
-        </svg>
-      </div>
-      <div className="text-[16px] font-semibold mb-1" style={{ color: v("ink") }}>
-        {isField ? "That's the lot." : "You're all caught up."}
-      </div>
-      <div className="text-[13px] max-w-[280px]" style={{ color: v("muted") }}>
-        {isField ? "Build something good today." : "Pull-to-refresh for new updates."}
-      </div>
-    </div>
-  );
-}
-
 type RenderItem = FeedItem | { type: "actionStack"; cards: ActionCardData[] };
 
 function groupActionStacks(items: FeedItem[]): RenderItem[] {
@@ -1305,11 +1291,11 @@ function estimateHeight(item: RenderItem): number {
   switch (item.type) {
     case "logPost": {
       if (item.log.status === "in_progress") return 80; // live clock-in pill
-      const media = item.log.photo_signed_urls.length > 0 ? 470 : 0;
+      const media = item.log.photo_signed_urls.length > 0 || (item.log.photo_storage_paths?.length ?? 0) > 0 ? 470 : 0;
       return 210 + media + item.log.comments.length * 56;
     }
     case "companyPost": {
-      const media = item.post.photoUrls.length > 0 ? 470 : 0;
+      const media = item.post.photoUrls.length > 0 || (item.post.photoStoragePaths?.length ?? 0) > 0 ? 470 : 0;
       return 210 + media + item.post.comments.length * 56;
     }
     case "punchGroupPost":
@@ -1323,14 +1309,17 @@ function estimateHeight(item: RenderItem): number {
   }
 }
 
-function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean; focusPostId?: string | null }) {
-  const [updatesRange, setUpdatesRange] = useState<UpdatesRange>("week");
+function Feed({ items, jobsites, desktop, focusPostId, updatesRange, setUpdatesRange, onDeleted }: { items: FeedItem[]; jobsites: Jobsite[]; desktop?: boolean; focusPostId?: string | null; updatesRange: UpdatesRange; setUpdatesRange: (range: UpdatesRange) => void; onDeleted: (item: CommandCenterUpdate) => void }) {
+  // Once mounted, a card keeps its column through refreshes, photo signing,
+  // comments and pagination. Moving it between parents would reset its local
+  // edits/deletion state and shift the reader to a different scroll position.
+  const [columnState, setColumnState] = useState<{
+    source: RenderItem[] | null;
+    placements: ReadonlyMap<string | number, MasonryPlacement>;
+  }>(() => ({ source: null, placements: new Map() }));
 
   const { visibleItems, hasVisibleUpdates, hasAnyUpdates } = useMemo(() => {
-    const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    // Day = since local midnight; Week = today plus the previous 6 days.
-    const cutoff = updatesRange === "day" ? dayStart : dayStart - 6 * 86400000;
+    const cutoff = rangeCutoff(updatesRange);
     const any = items.some((item) => updatePostTs(item) !== null);
     const kept = items.filter((item) => {
       const ts = updatePostTs(item);
@@ -1360,9 +1349,9 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
       case "liveMap":     return <LiveMapCard activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} showSpend={item.showSpend} compact={compact} />;
       case "receiptCapture": return <ReceiptTile weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
       case "depositCapture": return <DepositTile weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
-      case "logPost":         return <DailyLogPost log={item.log} focus={focusPostId === item.log.id} linkProject />;
-      case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
-      case "companyPost":     return <CompanyPostCard post={item.post} focus={focusPostId === item.post.id} />;
+      case "logPost":
+      case "punchGroupPost":
+      case "companyPost": return <VisibleUpdateCard item={item} focus={focusPostId === feedItemPostId(item)} onDeleted={() => onDeleted(item)} />;
       case "section":
         if (item.label === "Company updates" || item.label === "From the field") {
           return (
@@ -1377,7 +1366,7 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
                     {updatesRange === "day" ? "Nothing posted today yet" : "Nothing posted this week"}
                   </div>
                   {updatesRange === "day" && (
-                    <div className="text-[11px] opacity-70 mt-1">Switch to Week to see recent updates</div>
+                    <div className="text-[11px] opacity-70 mt-1">Switch to All to see older updates</div>
                   )}
                 </div>
               )}
@@ -1397,6 +1386,7 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
   };
 
   const itemKey = (item: RenderItem, idx: number): string | number => {
+    if (item.type === "section") return `section-${item.label}`;
     if (item.type === "post" || item.type === "metric") return item.id;
     if (item.type === "logPost") return `log-${item.log.id}`;
     if (item.type === "punchGroupPost") return `punchg-${item.group.session_id}`;
@@ -1404,6 +1394,16 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
     if (item.type === "actionStack") return `stack-${item.cards.map((c) => c.id).join("-")}`;
     return idx;
   };
+
+  // Guarded prop-derived state adjustment records new assignments before the
+  // children commit. No ref or existing state is mutated during rendering.
+  let placements = columnState.placements;
+  if (columnState.source !== grouped) {
+    placements = updateMasonryPlacements(placements, grouped.map((item, index) =>
+      MASONRY_TYPES.has(item.type) ? { key: itemKey(item, index), height: estimateHeight(item) } : null,
+    ));
+    setColumnState({ source: grouped, placements });
+  }
 
   if (desktop) {
     const span = (item: RenderItem): string => {
@@ -1435,28 +1435,34 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
     // keeps its normal grid span so the 7/5 header split is untouched.
     type Block =
       | { kind: "single"; item: RenderItem; idx: number }
-      | { kind: "masonry"; entries: { item: RenderItem; idx: number }[] };
+      | { kind: "masonry"; key: string; entries: { item: RenderItem; idx: number }[] };
 
     const blocks: Block[] = [];
+    let section = "overview";
+    const sectionRuns = new Map<string, number>();
     grouped.forEach((item, idx) => {
+      if (item.type === "section") section = item.label;
       if (MASONRY_TYPES.has(item.type)) {
         const last = blocks[blocks.length - 1];
         if (last?.kind === "masonry") last.entries.push({ item, idx });
-        else blocks.push({ kind: "masonry", entries: [{ item, idx }] });
+        else {
+          const run = sectionRuns.get(section) ?? 0;
+          sectionRuns.set(section, run + 1);
+          blocks.push({ kind: "masonry", key: `${section}-${run}`, entries: [{ item, idx }] });
+        }
       } else {
         blocks.push({ kind: "single", item, idx });
       }
     });
 
-    // Shortest-column-first packing keeps the two columns level without
-    // reordering within a column (newest still reads top-down).
+    // Only assign newly encountered cards. Existing cards retain their
+    // parent/column, even when a refreshed head adds posts above them.
     const packColumns = (entries: { item: RenderItem; idx: number }[]) => {
       const cols: { item: RenderItem; idx: number }[][] = [[], []];
-      const heights = [0, 0];
       for (const entry of entries) {
-        const target = heights[1] < heights[0] ? 1 : 0;
+        const key = itemKey(entry.item, entry.idx);
+        const target = placements.get(key)?.column ?? 0;
         cols[target].push(entry);
-        heights[target] += estimateHeight(entry.item);
       }
       return cols;
     };
@@ -1464,13 +1470,13 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
     return (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-12 gap-5 items-start">
-          {blocks.map((block, bIdx) =>
+          {blocks.map((block) =>
             block.kind === "single" ? (
               <div key={itemKey(block.item, block.idx)} className={span(block.item)}>
                 {renderItem(block.item)}
               </div>
             ) : (
-              <div key={`masonry-${bIdx}`} className="col-span-12 grid grid-cols-2 gap-5 items-start">
+              <div key={`masonry-${block.key}`} className="col-span-12 grid grid-cols-2 gap-5 items-start">
                 {packColumns(block.entries).map((col, cIdx) => (
                   <div key={cIdx} className="flex flex-col gap-5">
                     {col.map(({ item, idx }) => (
@@ -1482,7 +1488,6 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
             ),
           )}
         </div>
-        <EndOfFeed role={role} />
       </div>
     );
   }
@@ -1526,7 +1531,6 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
 
         return <div key={itemKey(item, idx)}>{renderItem(item)}</div>;
       })}
-      <EndOfFeed role={role} />
     </div>
   );
 }
@@ -1838,19 +1842,26 @@ export function CommandCenterFeed({
   roleId,
   firstName,
   feed,
-  jobsites,
+  initialUpdates,
+  focusedUpdate,
   focusPostId,
 }: {
   roleId: RoleId;
   firstName?: string | null;
   feed: FeedItem[];
-  jobsites: Jobsite[];
+  initialUpdates: CommandCenterUpdatesPage | null;
+  focusedUpdate?: CommandCenterUpdate | null;
   /** Post/log id to scroll to and open comments for (from a mention link). */
   focusPostId?: string | null;
 }) {
   const router = useRouter();
   useVisibleRefresh(router.refresh);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [isRailVisible, setIsRailVisible] = useState(false);
+  const [updatesRange, setUpdatesRange] = useState<UpdatesRange>("all");
+  const timeline = useCommandCenterTimeline(initialUpdates, updatesRange);
+  const jobsiteState = useCommandCenterJobsites(isRailVisible && roleId !== "crew", feed);
+  const jobsites = jobsiteState.jobsites;
   // Company posts published this session, rendered at the top of the feed
   // immediately (with local photo previews) while router.refresh() fetches
   // the server copy.
@@ -1858,10 +1869,12 @@ export function CommandCenterFeed({
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktop(mq.matches);
+    const railMq = window.matchMedia("(min-width: 1280px)");
+    const update = () => { setIsDesktop(mq.matches); setIsRailVisible(railMq.matches); };
     update();
     mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    railMq.addEventListener("change", update);
+    return () => { mq.removeEventListener("change", update); railMq.removeEventListener("change", update); };
   }, []);
 
   // Once the refreshed feed contains the real post, the local copy stops
@@ -1870,7 +1883,7 @@ export function CommandCenterFeed({
   // already-revoked URL is a no-op, so re-runs are harmless.
   useEffect(() => {
     for (const post of pendingPosts) {
-      const reconciled = feed.some(
+      const reconciled = timeline.items.some(
         (item) => item.type === "companyPost" && item.post.id === post.id,
       );
       if (!reconciled) continue;
@@ -1878,7 +1891,7 @@ export function CommandCenterFeed({
         if (url.startsWith("blob:")) URL.revokeObjectURL(url);
       }
     }
-  }, [feed, pendingPosts]);
+  }, [timeline.items, pendingPosts]);
 
   const handlePosted = (post: CompanyFeedPost) => {
     setPendingPosts((current) => [post, ...current.filter((p) => p.id !== post.id)]);
@@ -1889,14 +1902,23 @@ export function CommandCenterFeed({
   const role: Role = firstName ? { ...baseRole, name: firstName } : baseRole;
 
   // Keep planning on the Job Board and project schedules, including cached feed payloads.
-  const baseFeedItems: FeedItem[] = feed.filter(i => i.type !== "weekSchedule" && i.type !== "schedule");
+  const baseFeedItems: FeedItem[] = feed.filter(i => i.type !== "weekSchedule" && i.type !== "schedule" && updatePostTs(i) === null);
+  const focusedOutsidePage = focusedUpdate && !timeline.deletedKeys.has(updateKey(focusedUpdate)) && !timeline.items.some((item) => feedItemPostId(item) === feedItemPostId(focusedUpdate));
+  // A direct notification link can show one older update without fetching all
+  // pages between it and today or changing the pagination cursor.
+  if (focusedOutsidePage) {
+    const sectionIndex = baseFeedItems.findIndex((item) => item.type === "section" && item.label === "Company updates");
+    baseFeedItems.splice(sectionIndex < 0 ? baseFeedItems.length : sectionIndex, 0, { type: "section", label: "Linked update" }, focusedUpdate);
+  }
+  if (!baseFeedItems.some((item) => item.type === "section" && item.label === "Company updates")) baseFeedItems.push({ type: "section", label: "Company updates" });
+  baseFeedItems.push(...timeline.items);
 
   // Splice this session's not-yet-reconciled posts in at the top of the
   // updates section (before the first update post, else right after the
   // "Company updates" divider).
   const freshPending = pendingPosts.filter(
     (post) =>
-      !baseFeedItems.some((item) => item.type === "companyPost" && item.post.id === post.id),
+      !timeline.deletedKeys.has(`company-${post.id}`) && !baseFeedItems.some((item) => item.type === "companyPost" && item.post.id === post.id),
   );
   let feedItems = baseFeedItems;
   if (freshPending.length > 0) {
@@ -1906,7 +1928,7 @@ export function CommandCenterFeed({
       (item) => item.type === "section" && item.label === "Company updates",
     );
     const insertAt =
-      firstUpdateIdx >= 0 ? firstUpdateIdx : sectionIdx >= 0 ? sectionIdx + 1 : baseFeedItems.length;
+      sectionIdx >= 0 ? sectionIdx + 1 : firstUpdateIdx >= 0 ? firstUpdateIdx : baseFeedItems.length;
     feedItems = [
       ...baseFeedItems.slice(0, insertAt),
       ...pendingItems,
@@ -1934,10 +1956,11 @@ export function CommandCenterFeed({
             </div>
             <GlobalSearch />
             <FieldComposer role={role} onPosted={handlePosted} />
-            <Feed items={feedItems} role={roleId} jobsites={jobsites} desktop focusPostId={focusPostId} />
+            <Feed items={feedItems} jobsites={jobsites} desktop focusPostId={focusPostId} updatesRange={updatesRange} setUpdatesRange={setUpdatesRange} onDeleted={timeline.remove} />
+            <TimelinePagination {...timeline} filtered={updatesRange !== "all"} />
           </div>
         </main>
-        <RightRail role={roleId} jobsites={jobsites} />
+        {jobsiteState.loading && jobsites.length === 0 ? <aside className="hidden w-[280px] shrink-0 border-l border-stone-800 p-5 xl:block" aria-busy="true"><div className="h-5 w-32 animate-pulse rounded bg-stone-800" /><p className="mt-3 text-sm text-stone-500">Loading jobsites…</p></aside> : jobsiteState.error && jobsites.length === 0 ? <aside className="hidden w-[280px] shrink-0 border-l border-stone-800 p-5 xl:block"><p className="text-sm text-stone-400">Couldn’t load jobsites.</p><button type="button" onClick={() => void jobsiteState.retry()} className="mt-3 rounded-lg border border-amber-700 px-3 py-2 text-sm text-amber-400">Retry</button></aside> : <RightRail role={roleId} jobsites={jobsites} />}
       </div>
     );
   }
@@ -1956,7 +1979,8 @@ export function CommandCenterFeed({
           </div>
         </div>
         <FieldComposer role={role} onPosted={handlePosted} />
-        <Feed items={feedItems} role={roleId} jobsites={jobsites} focusPostId={focusPostId} />
+        <Feed items={feedItems} jobsites={jobsites} focusPostId={focusPostId} updatesRange={updatesRange} setUpdatesRange={setUpdatesRange} onDeleted={timeline.remove} />
+        <TimelinePagination {...timeline} filtered={updatesRange !== "all"} />
       </div>
     </div>
   );

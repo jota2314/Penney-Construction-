@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { isUpdateId } from "@/lib/feed/update-cursor";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { siteGuestAuthorName } from "@/lib/site-qr/guest-author";
@@ -83,6 +84,9 @@ export type FeedDailyLog = DailyLogRow & {
 export type ListDailyLogsOptions = {
   /** Mint signed photo URLs up front. Default true. */
   signPhotos?: boolean;
+  /** Hydrate only these already-selected feed keys. */
+  ids?: string[];
+  throwOnError?: boolean;
 };
 
 /** A photo's signed URLs: the full-size original and the 800px feed tile. */
@@ -104,6 +108,9 @@ export async function signDailyLogPhotos(
   if (unique.length === 0) return {};
 
   const supabase = await createClient();
+  // Cache hits do not contact Storage, so authenticate before reading them.
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) throw new Error("Sign in to view daily-log photos.");
   const [{ data: signed }, thumbs] = await Promise.all([
     cachedSignedUrls(supabase, PHOTO_BUCKET, unique, SIGNED_URL_TTL),
     signThumbUrls(supabase, PHOTO_BUCKET, unique, SIGNED_URL_TTL),
@@ -719,6 +726,8 @@ export type FeedPunchGroup = {
     /** Resized (width=800) variants of photo_signed_urls, same order. */
     photo_thumb_urls: string[];
     completion_photo_url: string | null;
+    photo_storage_paths?: string[];
+    completion_photo_path?: string | null;
   }>;
 };
 
@@ -825,6 +834,145 @@ export async function deleteDailyLog(
   return { ok: true };
 }
 
+async function loadPunchGroups(
+  limit: number,
+  projectId?: string,
+  groupIds?: string[],
+  signPhotos = true,
+): Promise<FeedPunchGroup[]> {
+  const supabase = await createClient();
+  const query = () => {
+    let q = supabase.from("todos")
+      .select("id, description, priority, status, project_id, project_name, assignee, created_by, created_at, due_date, completion_photo_path, creation_photo_paths, punch_session_id")
+      .eq("category", "punch_list")
+      .order("created_at", { ascending: false }).order("id", { ascending: false });
+    if (projectId) q = q.eq("project_id", projectId);
+    if (groupIds) {
+      const sessions = groupIds.filter(id => !id.startsWith("solo-"));
+      const solos = groupIds.filter(id => id.startsWith("solo-")).map(id => id.slice(5));
+      const filters = [
+        sessions.length ? `punch_session_id.in.(${sessions.join(",")})` : "",
+        solos.length ? `and(id.in.(${solos.join(",")}),punch_session_id.is.null)` : "",
+      ].filter(Boolean);
+      q = q.or(filters.join(","));
+    }
+    return q;
+  };
+  const { data, error } = await (groupIds ? query().range(0, 999) : query().limit(limit * 4));
+  if (error && groupIds) throw new Error("Punch lists could not load. Please try again.");
+  const rows = data ?? [];
+  // Fetch every member of the selected groups, even when one checklist spans
+  // PostgREST's 1000-row cap. No unrelated group is hydrated.
+  if (groupIds && rows.length === 1000) {
+    for (let offset = 1000; ; offset += 1000) {
+      const page = await query().range(offset, offset + 999);
+      if (page.error) throw new Error("Punch lists could not load. Please try again.");
+      rows.push(...(page.data ?? []));
+      if ((page.data?.length ?? 0) < 1000) break;
+    }
+  }
+  if (!rows.length) return [];
+
+  const authorIds = Array.from(new Set(rows.map((r) => r.created_by).filter(Boolean) as string[]));
+  const authorMap = new Map<string, { full_name: string | null; email: string | null }>();
+  if (authorIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", authorIds);
+    (profiles ?? []).forEach((p) => authorMap.set(p.id, { full_name: p.full_name, email: p.email }));
+  }
+
+  // Sign every photo across every row in ONE batch up front. This used
+  // to run per-row inside the loop — up to `limit * 4` sequential Storage
+  // API round-trips on the Command Center home page.
+  const allCreationPaths: string[] = [];
+  const allCompletionPaths: string[] = [];
+  for (const r of rows) {
+    for (const p of (r.creation_photo_paths ?? []) as string[]) allCreationPaths.push(p);
+    if (r.completion_photo_path) allCompletionPaths.push(r.completion_photo_path);
+  }
+  const allPaths = [...allCreationPaths, ...allCompletionPaths];
+  const signedByPath = new Map<string, string>();
+  let thumbsByPath = new Map<string, string>();
+  if (signPhotos && allPaths.length > 0) {
+    const [{ data: signed }, thumbs] = await Promise.all([
+      cachedSignedUrls(supabase, "project-files", allPaths, SIGNED_URL_TTL),
+      signThumbUrls(supabase, "project-files", allCreationPaths, SIGNED_URL_TTL),
+    ]);
+    (signed ?? []).forEach((s) => {
+      if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
+    });
+    thumbsByPath = thumbs;
+  }
+
+  // Group by punch_session_id (or by row id when missing).
+  const groups = new Map<string, FeedPunchGroup>();
+  for (const r of rows) {
+    const sid = (r.punch_session_id as string | null) || `solo-${r.id}`;
+    const m = /^\[(.+?)\]\s*(.*)$/.exec(r.description ?? "");
+    const location = m?.[1] ?? null;
+    const description = m?.[2] ?? (r.description ?? "");
+    const creationPaths = (r.creation_photo_paths ?? []) as string[];
+    const creationUrls = creationPaths
+      .map((p) => signedByPath.get(p))
+      .filter((u): u is string => !!u);
+    const creationThumbs = creationPaths
+      .map((p) => thumbsByPath.get(p) ?? signedByPath.get(p))
+      .filter((u): u is string => !!u);
+    const completionUrl = r.completion_photo_path
+      ? signedByPath.get(r.completion_photo_path) ?? null
+      : null;
+
+    const author = r.created_by ? authorMap.get(r.created_by) ?? null : null;
+    const itemEntry = {
+      id: r.id,
+      description,
+      location,
+      priority: r.priority ?? "medium",
+      status: r.status ?? "open",
+      assignee: r.assignee,
+      photo_signed_urls: creationUrls,
+      photo_thumb_urls: creationThumbs,
+      completion_photo_url: completionUrl,
+      photo_storage_paths: creationPaths,
+      completion_photo_path: r.completion_photo_path ?? null,
+    };
+
+    const existing = groups.get(sid);
+    if (existing) {
+      existing.items.push(itemEntry);
+      // Keep the earliest created_at as the group timestamp.
+      if (new Date(r.created_at).getTime() < new Date(existing.created_at).getTime()) {
+        existing.created_at = r.created_at;
+      }
+    } else {
+      groups.set(sid, {
+        kind: "punch-group",
+        session_id: sid,
+        project_id: r.project_id,
+        project_name: r.project_name ?? "Project",
+        author_id: r.created_by,
+        author_name: author?.full_name ?? null,
+        author_email: author?.email ?? null,
+        created_at: r.created_at ?? "1970-01-01T00:00:00.000000Z",
+        items: [itemEntry],
+      });
+    }
+  }
+  return Array.from(groups.values());
+
+}
+
+/** Complete, unsigned checklists for a single selected feed page. */
+export async function listPunchGroupsByKeys(groupIds: string[]): Promise<FeedPunchGroup[]> {
+  if (groupIds.length === 0) return [];
+  if (groupIds.length > 20 || groupIds.some(id => !isUpdateId(id.startsWith("solo-") ? id.slice(5) : id))) {
+    throw new Error("Invalid punch-list keys.");
+  }
+  return loadPunchGroups(20, undefined, groupIds, false);
+}
+
 /**
  * Unified field-feed: daily logs + punch-list groups, sorted by
  * most-recent activity. Punch-list rows that share a punch_session_id
@@ -832,110 +980,9 @@ export async function deleteDailyLog(
  * without a session_id (legacy/ad-hoc) become 1-item groups.
  */
 export async function listRecentFieldActivity(limit = 24, projectId?: string): Promise<FeedActivity[]> {
-  const supabase = await createClient();
-
   const [logs, punchGroups] = await Promise.all([
     listRecentDailyLogs(limit, projectId),
-    (async (): Promise<FeedPunchGroup[]> => {
-      let q = supabase
-        .from("todos")
-        .select(
-          "id, description, priority, status, project_id, project_name, assignee, created_by, created_at, due_date, completion_photo_path, creation_photo_paths, punch_session_id"
-        )
-        .eq("category", "punch_list")
-        .order("created_at", { ascending: false })
-        .limit(limit * 4);
-      if (projectId) q = q.eq("project_id", projectId);
-      const { data: rows } = await q;
-      if (!rows || rows.length === 0) return [];
-
-      const authorIds = Array.from(new Set(rows.map((r) => r.created_by).filter(Boolean) as string[]));
-      const authorMap = new Map<string, { full_name: string | null; email: string | null }>();
-      if (authorIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .in("id", authorIds);
-        (profiles ?? []).forEach((p) => authorMap.set(p.id, { full_name: p.full_name, email: p.email }));
-      }
-
-      // Sign every photo across every row in ONE batch up front. This used
-      // to run per-row inside the loop — up to `limit * 4` sequential Storage
-      // API round-trips on the Command Center home page.
-      const allCreationPaths: string[] = [];
-      const allCompletionPaths: string[] = [];
-      for (const r of rows) {
-        for (const p of (r.creation_photo_paths ?? []) as string[]) allCreationPaths.push(p);
-        if (r.completion_photo_path) allCompletionPaths.push(r.completion_photo_path);
-      }
-      const allPaths = [...allCreationPaths, ...allCompletionPaths];
-      const signedByPath = new Map<string, string>();
-      let thumbsByPath = new Map<string, string>();
-      if (allPaths.length > 0) {
-        const [{ data: signed }, thumbs] = await Promise.all([
-          cachedSignedUrls(supabase, "project-files", allPaths, SIGNED_URL_TTL),
-          signThumbUrls(supabase, "project-files", allCreationPaths, SIGNED_URL_TTL),
-        ]);
-        (signed ?? []).forEach((s) => {
-          if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
-        });
-        thumbsByPath = thumbs;
-      }
-
-      // Group by punch_session_id (or by row id when missing).
-      const groups = new Map<string, FeedPunchGroup>();
-      for (const r of rows) {
-        const sid = (r.punch_session_id as string | null) || `solo-${r.id}`;
-        const m = /^\[(.+?)\]\s*(.*)$/.exec(r.description ?? "");
-        const location = m?.[1] ?? null;
-        const description = m?.[2] ?? (r.description ?? "");
-        const creationPaths = (r.creation_photo_paths ?? []) as string[];
-        const creationUrls = creationPaths
-          .map((p) => signedByPath.get(p))
-          .filter((u): u is string => !!u);
-        const creationThumbs = creationPaths
-          .map((p) => thumbsByPath.get(p) ?? signedByPath.get(p))
-          .filter((u): u is string => !!u);
-        const completionUrl = r.completion_photo_path
-          ? signedByPath.get(r.completion_photo_path) ?? null
-          : null;
-
-        const author = r.created_by ? authorMap.get(r.created_by) ?? null : null;
-        const itemEntry = {
-          id: r.id,
-          description,
-          location,
-          priority: r.priority ?? "medium",
-          status: r.status ?? "open",
-          assignee: r.assignee,
-          photo_signed_urls: creationUrls,
-          photo_thumb_urls: creationThumbs,
-          completion_photo_url: completionUrl,
-        };
-
-        const existing = groups.get(sid);
-        if (existing) {
-          existing.items.push(itemEntry);
-          // Keep the earliest created_at as the group timestamp.
-          if (new Date(r.created_at).getTime() < new Date(existing.created_at).getTime()) {
-            existing.created_at = r.created_at;
-          }
-        } else {
-          groups.set(sid, {
-            kind: "punch-group",
-            session_id: sid,
-            project_id: r.project_id,
-            project_name: r.project_name ?? "Project",
-            author_id: r.created_by,
-            author_name: author?.full_name ?? null,
-            author_email: author?.email ?? null,
-            created_at: r.created_at,
-            items: [itemEntry],
-          });
-        }
-      }
-      return Array.from(groups.values());
-    })(),
+    loadPunchGroups(limit, projectId),
   ]);
 
   const merged: FeedActivity[] = [
@@ -996,11 +1043,17 @@ export async function listRecentDailyLogs(
     )
     .order("started_at", { ascending: false })
     // Over-fetch: bare clock-outs (no note, no photos) are dropped below.
-    .limit(limit * 3);
+    .limit(opts.ids ? opts.ids.length : limit * 3);
 
+  if (opts.ids) {
+    if (!opts.ids.length) return [];
+    if (opts.ids.length > 20 || opts.ids.some(id => !isUpdateId(id))) throw new Error("Invalid daily log keys.");
+    query = query.in("id", opts.ids);
+  }
   if (projectId) query = query.eq("project_id", projectId);
 
-  const { data: allRows } = await query;
+  const { data: allRows, error } = await query;
+  if (error && opts.throwOnError) throw new Error("Daily logs could not load. Please try again.");
 
   // A plain clock-out (no note, no photos) is a time record, not a feed post —
   // keep it out of the social feed. Live "clocked in" cards still show.
@@ -1015,16 +1068,14 @@ export async function listRecentDailyLogs(
 
   if (rows.length === 0) return [];
 
-  const { data: linkedShifts, error: linkError } = await supabase.from("daily_logs")
+  const [{ data: linkedShifts, error: linkError }, allComments] = await Promise.all([
+    supabase.from("daily_logs")
     .select("id,author_id,project_id,daily_report_id,estimate_line_item_id,line_item_needs_review,started_at,ended_at,line_item:estimate_line_items!estimate_line_item_id(description),phase:schedule_phases!schedule_phase_id(estimate_line_item_id,line_item:estimate_line_items!estimate_line_item_id(description))")
-    .in("daily_report_id", rows.map(r => r.id));
+    .in("daily_report_id", rows.map(r => r.id)),
+    listFeedCommentsForSources("daily_log", rows.map(r => r.id)).catch(() => [] as FeedComment[]),
+  ]);
   if (linkError) throw new Error("Daily log task links could not load. Please refresh.");
-
   const commentsByLog = new Map<string, FeedComment[]>();
-  const allComments = await listFeedCommentsForSources(
-    "daily_log",
-    rows.map((r) => r.id),
-  ).catch(() => [] as FeedComment[]);
   for (const comment of allComments) {
     const list = commentsByLog.get(comment.sourceId) ?? [];
     list.push(comment);

@@ -14,6 +14,8 @@ import { signThumbUrls } from "@/lib/image/transform-signed-url";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isUpdateId } from "@/lib/feed/update-cursor";
+import type { SignedPhoto } from "@/lib/actions/daily-logs";
 import {
   listFeedCommentsForSources,
   type FeedComment,
@@ -59,6 +61,7 @@ export type CompanyFeedPost = {
   authorEmail: string | null;
   tags: CompanyFeedTag[];
   photoUrls: string[];
+  photoStoragePaths?: string[];
   /** Resized (width=800) variants of photoUrls, same order — use for feed
    * tiles; keep photoUrls for the full-screen viewer. */
   photoThumbUrls: string[];
@@ -248,17 +251,23 @@ export async function deleteCompanyFeedPost(
 
 export async function listRecentCompanyFeedPosts(
   limit = 20,
+  opts: { ids?: string[]; signPhotos?: boolean; throwOnError?: boolean } = {},
 ): Promise<CompanyFeedPost[]> {
   const supabase = await createClient();
   const safeLimit = Math.min(Math.max(Math.round(limit), 1), 50);
-  const { data: rows, error } = await supabase
+  if (opts.ids && !opts.ids.length) return [];
+  if (opts.ids && (opts.ids.length > 20 || opts.ids.some(id => !isUpdateId(id)))) throw new Error("Invalid company post keys.");
+  let query = supabase
     .from("company_feed_posts")
     .select(
       "id, body, project_id, author_id, tagged_entities, photo_storage_paths, created_at, author:profiles!author_id(full_name, email), project:projects!project_id(name)",
     )
     .order("created_at", { ascending: false })
-    .limit(safeLimit);
+    .limit(opts.ids?.length ?? safeLimit);
+  if (opts.ids) query = query.in("id", opts.ids);
+  const { data: rows, error } = await query;
 
+  if (error && opts.throwOnError) throw new Error("Company posts could not load. Please try again.");
   if (error || !rows) return [];
 
   const commentsByPost = new Map<string, FeedComment[]>();
@@ -275,7 +284,7 @@ export async function listRecentCompanyFeedPosts(
   const allPaths = rows.flatMap((row) => row.photo_storage_paths ?? []);
   const signedUrlByPath = new Map<string, string>();
   let thumbUrlByPath = new Map<string, string>();
-  if (allPaths.length > 0) {
+  if (opts.signPhotos !== false && allPaths.length > 0) {
     // 7-day expiry so revisits within the week hit the browser cache
     // instead of re-downloading every photo.
     const FEED_TTL = 60 * 60 * 24 * 7;
@@ -318,6 +327,7 @@ export async function listRecentCompanyFeedPosts(
       authorEmail: author?.email ?? null,
       tags,
       photoUrls,
+      photoStoragePaths: photoPaths,
       // Fall back to the full-size URL for any path whose thumbnail failed to
       // sign, so a photo never disappears just because the resize did.
       photoThumbUrls: photoPaths
@@ -327,4 +337,27 @@ export async function listRecentCompanyFeedPosts(
       comments: commentsByPost.get(row.id) ?? [],
     };
   });
+}
+
+/** Sign only visible company/punch photos; the existing Storage RLS still applies. */
+export async function signCompanyFeedPhotos(paths: string[]): Promise<Record<string, SignedPhoto>> {
+  if (!Array.isArray(paths) || paths.length > 100 || paths.some(path => typeof path !== "string" || !path || path.length > 1000)) {
+    throw new Error("Invalid photo paths.");
+  }
+  const unique = [...new Set(paths)];
+  if (!unique.length) return {};
+  const supabase = await createClient();
+  // The shared URL cache can serve a hit without visiting Storage. Verify the
+  // caller before looking in it, including on a warm server instance.
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) throw new Error("Sign in to view project photos.");
+  const ttl = 60 * 60 * 24 * 7;
+  const [{ data: signed }, thumbs] = await Promise.all([
+    cachedSignedUrls(supabase, "project-files", unique, ttl),
+    signThumbUrls(supabase, "project-files", unique, ttl),
+  ]);
+  return Object.fromEntries((signed ?? []).flatMap(entry =>
+    entry.path && entry.signedUrl
+      ? [[entry.path, { full: entry.signedUrl, thumb: thumbs.get(entry.path) ?? entry.signedUrl }]]
+      : []));
 }
