@@ -641,7 +641,7 @@ export function SiteJoin({ code }: { code: string }) {
           <Card>
             <p className="mb-2 text-[16px] font-bold">Penney team</p>
             <p className="mb-4 text-[14px] text-[var(--muted)]">Sign in to add a daily log and open this job&apos;s drawings.</p>
-            <GoogleSignInButton returnTo={`/sub/j/${encodeURIComponent(code)}`} />
+            <GoogleSignInButton returnTo={`/sub/j/${encodeURIComponent(code)}?tools=1`} />
           </Card>
         )}
 

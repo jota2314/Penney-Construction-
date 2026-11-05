@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
+import { siteGuestAuthorName } from "@/lib/site-qr/guest-author";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import { revalidateSchedule } from "@/lib/schedule/revalidate";
@@ -979,7 +980,7 @@ export async function listRecentDailyLogs(
     .from("daily_logs")
     .select(
       `
-      id, schedule_phase_id, project_id, author_id, subcontractor_id, text, photo_storage_paths, status, started_at, ended_at, daily_report_id, estimate_line_item_id, line_item_needs_review,
+      id, schedule_phase_id, project_id, author_id, subcontractor_id, is_site_guest, site_guest_name, text, photo_storage_paths, status, started_at, ended_at, daily_report_id, estimate_line_item_id, line_item_needs_review,
       line_item:estimate_line_items!estimate_line_item_id(description),
       author:profiles!author_id(full_name, email),
       sub:subcontractors!subcontractor_id(company_name, contact_name),
@@ -1052,7 +1053,8 @@ export async function listRecentDailyLogs(
     const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
     const directProject = Array.isArray(r.project) ? r.project[0] : r.project;
     const phaseProject = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
-    const workItems = logWorkLinks(r, linkedShifts ?? []);
+    // An anonymous photo upload is not crew labor waiting for allocation.
+    const workItems = r.is_site_guest ? [] : logWorkLinks(r, linkedShifts ?? []);
     const photo_storage_paths: string[] = r.photo_storage_paths ?? [];
     const photo_signed_urls = photo_storage_paths
       .map((p) => signedMap.get(p))
@@ -1063,13 +1065,14 @@ export async function listRecentDailyLogs(
       project_id: r.project_id ?? phase?.project_id ?? "",
       // Sub posts carry no profile — reuse the sub's id so avatar colors stay
       // stable and callers keep a non-null id.
-      author_id: r.author_id ?? r.subcontractor_id ?? "",
+      author_id: r.author_id ?? r.subcontractor_id ?? (r.is_site_guest ? r.id : ""),
       text: r.text,
       photo_storage_paths,
       status: r.status,
       started_at: r.started_at,
       ended_at: r.ended_at,
       author_name:
+        siteGuestAuthorName(r.is_site_guest, r.site_guest_name) ??
         author?.full_name ??
         (sub ? `${sub.contact_name ? `${sub.contact_name} — ` : ""}${sub.company_name}` : null),
       author_email: author?.email ?? null,
