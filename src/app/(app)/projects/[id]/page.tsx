@@ -12,6 +12,8 @@ import {
 } from "@/lib/auth/rate-visibility";
 import { getScopedProjectIds } from "@/lib/auth/scoped-projects";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { canManageSiteSigns, ensureProjectSiteCode, isSiteOpen, siteUrl } from "@/lib/sub-portal/site-code";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { getTeamMembers } from "@/lib/actions/projects";
 import {
@@ -246,6 +248,22 @@ export default async function ProjectDetailPage({
   ]);
 
   if (!project) notFound();
+
+  // A real, stable QR on every project page. Reuse an existing code without
+  // another request; only office roles may mint a missing code, after the
+  // authenticated project read and project scoping above have succeeded.
+  let siteQr: { url: string | null; open: boolean } | undefined;
+  if (canManageSiteSigns(user.profile?.role)) {
+    let code = project.site_code as string | null;
+    if (!code) {
+      try {
+        code = await ensureProjectSiteCode(createAdminClient(), project.id);
+      } catch (error) {
+        console.error("[project-qr] Couldn't load site code", project.id, error);
+      }
+    }
+    siteQr = { url: code ? siteUrl(code) : null, open: isSiteOpen(project) };
+  }
 
   // Contract signing + lock state (migration 00107 columns on `projects`).
   // Countersigning binds the company to a price, so the role check happens
@@ -585,6 +603,7 @@ export default async function ProjectDetailPage({
           subDirectory={subDirectory ?? []}
           contract={contractState}
           takeoff={takeoffSummary}
+          siteQr={siteQr}
         />
       </div>
     </>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { HeaderAction, PortalHeader, PortalNotice, PortalTheme, type PortalNoticeValue } from "@/components/portal-kit";
 import { telHref } from "@/lib/portal-kit/format";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 
 const PHONE_KEY = "sub_portal_phone";
 const OFFICE_PHONE = "978-621-4387";
@@ -634,6 +635,14 @@ export function SiteJoin({ code }: { code: string }) {
               {info.project.town ? ` · ${info.project.town}` : ""}
             </p>
           </div>
+        )}
+
+        {info && !info.team && !autoArrive && (
+          <Card>
+            <p className="mb-2 text-[16px] font-bold">Penney team</p>
+            <p className="mb-4 text-[14px] text-[var(--muted)]">Sign in to add a daily log and open this job&apos;s drawings.</p>
+            <GoogleSignInButton returnTo={`/sub/j/${encodeURIComponent(code)}`} />
+          </Card>
         )}
 
         {content}

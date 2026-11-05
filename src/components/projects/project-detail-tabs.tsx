@@ -36,8 +36,8 @@ import {
   User,
   Pencil,
   Trash2,
-  QrCode,
 } from "lucide-react";
+import { ProjectQrCard } from "@/components/site-qr/project-qr-card";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import { ProjectManagerPicker } from "./project-manager-picker";
 import { ProjectDetail } from "./project-detail";
@@ -179,6 +179,8 @@ interface ProjectDetailTabsProps {
   contract?: ContractState;
   /** Takeoff coverage counts for the Overview documents row. */
   takeoff?: TakeoffSummary;
+  /** Only supplied to users allowed to manage site signs. */
+  siteQr?: { url: string | null; open: boolean };
 }
 
 // ── Main Component ───────────────────────────────────────────
@@ -225,6 +227,7 @@ export function ProjectDetailTabs({
   subDirectory = [],
   contract,
   takeoff,
+  siteQr,
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
   // Tabs push history entries so the browser/phone back gesture returns to
@@ -309,15 +312,6 @@ export function ProjectDetailTabs({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <ProjectStatusBadge status={project.status} projectId={project.id} editable />
-            {/* Job-site QR sign: subs scan it to check in and post photos, or sign up. */}
-            <Link
-              href={`/job-qr/${project.id}`}
-              aria-label="Job QR for subs"
-              title="Job QR for subs"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <QrCode className="h-4 w-4" />
-            </Link>
             <button
               type="button"
               onClick={() => setEditOpen(true)}
@@ -423,6 +417,10 @@ export function ProjectDetailTabs({
           />
         </div>
       </section>
+
+      {siteQr && (
+        <ProjectQrCard projectId={project.id} projectName={project.name} url={siteQr.url} open={siteQr.open} />
+      )}
 
       <div className="grid grid-cols-5 rounded-2xl border bg-card p-1 shadow-sm md:hidden">
         {primaryTabs.map((item) => {

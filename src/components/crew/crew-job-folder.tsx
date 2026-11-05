@@ -27,6 +27,7 @@ import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { PCC_TOKENS } from "@/components/field-feed/tokens";
 import { useSignedLogPhotos } from "@/components/field-feed/use-signed-log-photos";
 import { ImageViewer } from "@/components/ui/image-viewer";
+import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
 
 export type FolderJob = {
   id: string;
@@ -98,9 +99,12 @@ function hue(id: string): number {
 export function CrewJobFolder({
   jobs,
   initialJobId,
+  siteMode = false,
 }: {
   jobs: FolderJob[];
   initialJobId: string | null;
+  /** The QR opens one project, with log and drawing actions ready to use. */
+  siteMode?: boolean;
 }) {
   const initial = useMemo(
     () => jobs.find((j) => j.id === initialJobId) ?? null,
@@ -112,6 +116,8 @@ export function CrewJobFolder({
 
   // One location fix so the job he's standing at floats to the top.
   useEffect(() => {
+    // A QR already identifies the job; no location prompt is needed.
+    if (siteMode) return;
     let cancelled = false;
     getCurrentPosition().then((c) => {
       if (!cancelled && c) setHere(c);
@@ -119,7 +125,7 @@ export function CrewJobFolder({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [siteMode]);
 
   const withDistance = useMemo(
     () =>
@@ -306,7 +312,7 @@ export function CrewJobFolder({
   }
 
 
-  return <JobDetail key={job.id} job={job} onBack={() => setJob(null)} />;
+  return <JobDetail key={job.id} job={job} onBack={() => setJob(null)} siteMode={siteMode} />;
 }
 
 type Tab = "info" | "drawings" | "photos" | "logs";
@@ -324,13 +330,34 @@ function shortDate(iso: string): string {
  * every photo the crew has taken there, and every daily log. Remounted per job
  * (keyed by id) so one job's files can never flash on another.
  */
-function JobDetail({ job, onBack }: { job: FolderJob; onBack: () => void }) {
+function JobDetail({ job, onBack, siteMode }: { job: FolderJob; onBack: () => void; siteMode: boolean }) {
   const [tab, setTab] = useState<Tab>("info");
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [logRefresh, setLogRefresh] = useState(0);
   const [docs, setDocs] = useState<CrewDoc[] | null>(null);
   const [photos, setPhotos] = useState<CrewJobPhoto[] | null>(null);
   const [logs, setLogs] = useState<FeedDailyLog[] | null>(null);
   const [logLimit, setLogLimit] = useState(LOG_PAGE);
   const [loadingMoreLogs, startMoreLogs] = useTransition();
+
+  useEffect(() => {
+    if (!siteMode) return;
+    // Photo uploads finish after the text is posted. Refresh this folder's
+    // client-held rows as well as the server page once the batch settles.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        setLogLimit(LOG_PAGE);
+        setLogRefresh((value) => value + 1);
+      }, 400);
+    };
+    window.addEventListener("daily-log-photo-saved", refresh);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("daily-log-photo-saved", refresh);
+    };
+  }, [siteMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,7 +373,7 @@ function JobDetail({ job, onBack }: { job: FolderJob; onBack: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [job.id]);
+  }, [job.id, logRefresh]);
 
   const showOlderLogs = () => {
     const next = logLimit + LOG_PAGE;
@@ -373,13 +400,13 @@ function JobDetail({ job, onBack }: { job: FolderJob; onBack: () => void }) {
 
   return (
     <div>
-      <button
+      {!siteMode && <button
         onClick={onBack}
         className="flex items-center gap-1 text-[13px] text-muted-foreground mb-3 active:opacity-70"
       >
         <ChevronLeft className="h-4 w-4" />
         All jobs
-      </button>
+      </button>}
 
       <div className="flex items-start gap-3">
         <div
@@ -402,6 +429,17 @@ function JobDetail({ job, onBack }: { job: FolderJob; onBack: () => void }) {
           </div>
         </div>
       </div>
+
+      {siteMode && (
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button type="button" onClick={() => setComposeOpen(true)} className="flex min-h-14 items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-3 text-sm font-semibold text-white hover:bg-amber-700">
+            <ClipboardList className="h-5 w-5" /> Add daily log
+          </button>
+          <button type="button" onClick={() => setTab("drawings")} className="flex min-h-14 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-3 text-sm font-semibold">
+            <FileText className="h-5 w-5" /> View drawings
+          </button>
+        </div>
+      )}
 
       <div className="sticky top-0 z-10 -mx-4 mt-4 bg-background px-4 pb-3 pt-1">
         <div className="grid grid-cols-4 gap-1 rounded-xl border border-border bg-card p-1">
@@ -436,6 +474,17 @@ function JobDetail({ job, onBack }: { job: FolderJob; onBack: () => void }) {
           onShowOlder={showOlderLogs}
         />
       )}
+      {siteMode && <DailyLogComposer
+        open={composeOpen}
+        onOpenChange={setComposeOpen}
+        projectId={job.id}
+        projectName={job.name}
+        onPosted={() => {
+          setTab("logs");
+          setLogLimit(LOG_PAGE);
+          setLogRefresh((value) => value + 1);
+        }}
+      />}
     </div>
   );
 }

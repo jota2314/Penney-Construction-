@@ -4,13 +4,13 @@ import { Button } from "@/components/ui/button";
 import { signInWithGoogle } from "@/lib/auth/actions";
 import { useState } from "react";
 
-export function GoogleSignInButton() {
+export function GoogleSignInButton({ returnTo }: { returnTo?: string }) {
   const [loading, setLoading] = useState(false);
 
   async function handleSignIn() {
     setLoading(true);
     try {
-      await signInWithGoogle();
+      await signInWithGoogle(returnTo);
     } catch {
       setLoading(false);
     }
