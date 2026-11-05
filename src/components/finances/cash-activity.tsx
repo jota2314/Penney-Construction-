@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { formatMoney } from "@/lib/money";
 import type { summarizeCashFlow } from "@/lib/finance/overview-cash";
+import { selectCashMonth } from "@/lib/finance/cash-month-selection";
+import type { BankPeriod } from "@/lib/finance/bank-period";
+import { BankPeriodPanel } from "@/components/finances/bank-period-panel";
 
 type CashFlow = ReturnType<typeof summarizeCashFlow>;
 type Records = CashFlow["later"]["records"];
@@ -71,13 +74,11 @@ function RecordedActivity({ records, title, period, payroll }: { records: Record
   </section>;
 }
 
-export function CashActivity({ cash, today, month }: { cash: CashFlow; today: string; month?: string }) {
+export function CashActivity({ cash, today, month, bankPeriod }: { cash: CashFlow; today: string; month?: string; bankPeriod?: BankPeriod }) {
   const year = today.slice(0, 4);
   const bank = cash.bank;
   const available = cash.months.filter(row => row.bank.count > 0 || hasRecords(row.records));
-  const selected = available.find(row => row.key === month)
-    ?? [...available].reverse().find(row => row.bank.count > 0)
-    ?? available.at(-1);
+  const { selected, issue: selectionIssue } = selectCashMonth(cash.months, month);
   const showLater = hasRecords(cash.later.records);
   const maxBank = Math.max(...cash.months.map(row => Math.max(row.bank.received, row.bank.spent)), 1);
 
@@ -102,7 +103,7 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
     {cash.later.records.unresolvedPaymentAmounts > 0 && <p role="status" className="rounded-xl border border-amber-500/30 p-4 text-xs">
       {cash.later.records.unresolvedPaymentAmounts} partially paid bill entries have no valid payment amount. They need review and are excluded from the recorded payment totals.
     </p>}
-    <details className="rounded-xl border p-4 sm:p-5" open={Boolean(month)} data-testid="bank-reconciliation">
+    <details className="rounded-xl border p-4 sm:p-5" open={month !== undefined} data-testid="bank-reconciliation">
       <summary className="cursor-pointer text-sm font-medium">Bank reconciliation{bank.through ? " · through " + dateLabel(bank.through) : " · no imports"}</summary>
       <div className="mt-4 flex flex-col gap-4">
     <p className="text-xs text-muted-foreground">These bank totals cover the imported dates only. They are not current year-to-date business totals or your current bank balance.</p>
@@ -120,7 +121,7 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
     {!showLater && (!bank.through || bank.through < today) && <p className="rounded-xl border border-amber-500/30 p-4 text-sm text-muted-foreground">
       No later receipts or paid bills are recorded. Bank activity after {bank.through ? dateLabel(bank.through) : "the start of the year"} remains unverified.
     </p>}
-    {available.length > 0 && <section className="min-w-0 rounded-xl border bg-card p-4 sm:p-5">
+    {(available.length > 0 || month !== undefined) && <section className="min-w-0 rounded-xl border bg-card p-4 sm:p-5">
       <h2 className="text-sm font-semibold">Monthly bank activity</h2>
       <p className="mt-1 text-xs text-muted-foreground">Green: bank credits · Amber: bank debits. Months with only bill and receipt records have no bank bars.</p>
       <div className="mt-5 flex h-40 items-end gap-1 sm:gap-3" aria-label="Monthly imported bank credits and debits">
@@ -134,9 +135,14 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
           <span className="text-[10px] text-muted-foreground">{monthLabel(row.key).slice(0, 3)}</span>
         </Link>)}
       </div>
-      {selected && <div className="mt-5 border-t pt-4">
+      {selectionIssue && <p role="status" className="mt-5 rounded-lg border border-amber-500/30 p-3 text-sm">
+        {selectionIssue === "invalid"
+          ? "That month is invalid. Choose a month below."
+          : `The requested month (${month}) is not loaded in this ${year} view. Choose a month below.`}
+      </p>}
+      {selected && <div className="mt-5 border-t pt-4" data-testid="selected-cash-month" data-month={selected.key}>
         <h3 className="text-sm font-semibold">{monthLabel(selected.key)} {year}</h3>
-        {selected.bank.count > 0 ? <>
+        {bankPeriod ? <div className="mt-3"><BankPeriodPanel bank={bankPeriod} periodLabel={`${monthLabel(selected.key)} ${year}`} /></div> : selected.bank.count > 0 ? <>
           <p className="mt-1 text-xs text-muted-foreground">{selected.bank.count} imported bank entries · latest transaction {dateLabel(selected.bank.through!)}</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <MoneyCard label="Bank credits" amount={selected.bank.received} detail="Money into the account" tone="text-emerald-500" />
@@ -147,13 +153,13 @@ export function CashActivity({ cash, today, month }: { cash: CashFlow; today: st
             {[["Payroll — wages, taxes and fees", selected.bank.payroll], ["Card repayments", selected.bank.cardPayoff], ["Checks", selected.bank.checks], ["Other bank debits", selected.bank.other]].map(([label, amount]) =>
               <div key={String(label)} className="flex justify-between gap-3"><dt>{label}</dt><dd className="shrink-0 tabular-nums">{formatMoney(Number(amount))}</dd></div>)}
           </dl>
-          <details className="mt-4 text-xs text-muted-foreground">
-            <summary className="cursor-pointer">Separate bill and receipt records for {monthLabel(selected.key)}</summary>
-            <p className="mt-2">{formatMoney(selected.records.received)} in recorded receipts; {formatMoney(selected.records.paidBills)} in recorded bill payments, including {formatMoney(selected.records.cardPurchases)} of card purchases/credits and {formatMoney(selected.records.unclassifiedPayments)} awaiting payment-method confirmation. These are not added to bank movements.</p>
-          </details>
         </> : <p className="mt-2 text-sm text-muted-foreground">
           {formatMoney(selected.records.received)} in receipts and {formatMoney(selected.records.paidBills)} in bill payments are recorded for this month. No bank activity has been imported for it, so a bank cash-flow total is unavailable.
         </p>}
+        <details className="mt-4 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Separate bill and receipt records for {monthLabel(selected.key)}</summary>
+          <p className="mt-2">{formatMoney(selected.records.received)} in recorded receipts; {formatMoney(selected.records.paidBills)} in recorded bill payments, including {formatMoney(selected.records.cardPurchases)} of card purchases/credits and {formatMoney(selected.records.unclassifiedPayments)} awaiting payment-method confirmation. These are not added to bank movements.</p>
+        </details>
       </div>}
     </section>}
       </div>

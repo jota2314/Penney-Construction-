@@ -6,7 +6,7 @@ noncustomer receipts and reversals; they are not labeled customer revenue or
 bank-cleared cash. Each source can fail independently without becoming zero.
 
 Expenses use bill dates. All card purchases, unpaid bills and partial bills are
-included. Imported bank card repayments are shown only in Cash flow, avoiding a
+included. Imported bank card repayments are shown only in separate bank activity panels, avoiding a
 second cost for the same purchases. Internal wage placeholders and explicit
 duplicate records are excluded. Recorded ADP bills and flagged capital purchases
 remain visible; this purchase view is not a complete operating P&L.
