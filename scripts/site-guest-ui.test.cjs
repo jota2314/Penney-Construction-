@@ -112,6 +112,10 @@ async function formTests() {
     await settle(); tree = render();
   };
   assert.match(words(tree), /No account or PIN needed/);
+  const documentsLink = nodes(tree).find((node) => node.type === "a" && node.props.href === "/sub/j/ABCDEFGH/documents");
+  assert.ok(documentsLink, "QR visitors can open job documents without team sign-in");
+  assert.match(words(documentsLink), /Drawings, specs & scope of work/);
+  assert.ok(nodes(tree).indexOf(documentsLink) < nodes(tree).findIndex((node) => node.type === "input" && node.props.type === "file"), "documents remain available before photo selection");
   assert.equal(nodes(tree).some((node) => node.type === "GoogleSignInButton"), false);
   assert.equal(nodes(tree).some((node) => node.type === "details"), false, "work details are never hidden in a disclosure");
   for (const [name, limit] of [["name", 100], ["trade", 80], ["note", 2000]]) {
