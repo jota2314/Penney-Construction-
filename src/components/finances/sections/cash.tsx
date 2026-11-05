@@ -12,6 +12,8 @@ import { CollectionPlanDialog } from "@/components/ceo/collection-plan-dialog";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
 import { CashActivity } from "@/components/finances/cash-activity";
+import { selectCashMonth } from "@/lib/finance/cash-month-selection";
+import { summarizeBankPeriod, type BankPeriodRecord } from "@/lib/finance/bank-period";
 
 export default async function CashPage({ searchParams }: {
   searchParams?: Promise<{ m?: string }>;
@@ -27,7 +29,7 @@ export default async function CashPage({ searchParams }: {
   // A failed page fails the section, never turning a partial inventory into a total.
   const [bank, receipts, bills, workspace, collectionInvoices] = await Promise.all([
     financialRows((from, to) => db.from("bank_transactions")
-      .select("id, source, txn_date, amount, direction, description, category_key, check_number")
+      .select("id, source, txn_date, amount, direction, description, category_key, check_number, statement_file, statement_month, match_status, match_note, external_ref, bank_transaction_matches(id, invoice_id, payment_id, amount_applied, confidence)")
       .like("source", "eastern%").gte("txn_date", start).lte("txn_date", today)
       .order("id").range(from, to)),
     financialRows((from, to) => db.from("payments_received")
@@ -40,7 +42,19 @@ export default async function CashPage({ searchParams }: {
       .order("id").range(from, to)),
     getFinanceWorkspace(), getCollectionInvoices(),
   ]);
+  if (bank.some(row => (row.bank_transaction_matches?.length ?? 0) >= 1000)) {
+    throw new Error("Complete saved bank link inventory unavailable.");
+  }
+  // Apply the same strict bank checks before producing the year and chart
+  // aggregates. A questionable import must not look valid elsewhere on this page.
+  const yearBank = summarizeBankPeriod(bank as BankPeriodRecord[], { start, end: today });
+  if (yearBank.status === "invalid") throw new Error("Bank records need verification before totaling cash activity.");
   const cash = summarizeCashFlow(receipts, bills, bank, today);
+  const { selected } = selectCashMonth(cash.months, params.m);
+  const selectedBank = selected ? summarizeBankPeriod(bank as BankPeriodRecord[], {
+    start: `${selected.key}-01`,
+    end: new Date(Date.UTC(Number(selected.key.slice(0, 4)), Number(selected.key.slice(5, 7)), 0)).toISOString().slice(0, 10),
+  }) : undefined;
   const owedToUs = workspace.collections.filter(isActionableCollection)
     .reduce((sum, row) => sum + row.balance, 0) / 100;
   const vendorTotals = new Map<string, number>();
@@ -50,7 +64,7 @@ export default async function CashPage({ searchParams }: {
   const vendors = [...vendorTotals].sort((a, b) => b[1] - a[1]).slice(0, 8);
 
   return <div className="flex min-w-0 flex-col gap-5">
-    <CashActivity cash={cash} today={today} month={params.m} />
+    <CashActivity cash={cash} today={today} month={params.m} bankPeriod={selectedBank} />
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="@container min-w-0 rounded-xl border bg-card p-4 sm:p-5">
         <h2 className="text-sm font-semibold">Owed to us</h2>

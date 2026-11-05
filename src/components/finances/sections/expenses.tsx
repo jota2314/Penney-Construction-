@@ -8,6 +8,8 @@ import { countCapturesForReview } from "@/lib/actions/field-capture";
 import { SPEND_CATEGORIES, type SpendCategory } from "@/lib/finance/spend-category";
 import { buildExpenseView, expenseCents, expenseSummary, type ExpenseRecord, type ExpenseGroup } from "@/lib/finance/expense-model";
 import { formatMoney } from "@/lib/money";
+import { loadBankPeriod } from "@/lib/finance/load-bank-period";
+import { BankPeriodPanel, BankPeriodUnavailable } from "@/components/finances/bank-period-panel";
 
 const fmt = (cents: number | null) => cents === null ? "Needs review" : formatMoney(cents / 100);
 const shortMoney = (cents: number) => {
@@ -93,13 +95,14 @@ export default async function Expenses({ searchParams }: {
   // Bill date defines this view. Card purchases stay here; bank repayments and
   // payroll bank debits are never appended to bill rows. Include undated records
   // only to make missing coverage visible, not to assign them to this period.
-  const [records, needsReview] = await Promise.all([
+  const [records, needsReview, bankPeriod] = await Promise.all([
     financialRows((from, to) => supabase.from("invoices")
       .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, source, review_status, is_capex, projects(name, project_number, is_overhead), estimate_line_items(description)")
       .is("duplicate_of_id", null)
       .or(`and(invoice_date.gte.${start},invoice_date.lte.${end}),invoice_date.is.null`)
       .order("invoice_date", { ascending: false, nullsFirst: false }).order("id").range(from, to)),
     countCapturesForReview().catch(() => null),
+    loadBankPeriod({ start, end }).catch(() => null),
   ]);
   const view = buildExpenseView(records as ExpenseRecord[], { start, end, category: catFilter?.key, unallocatedOnly });
   const summary = view.summary;
@@ -110,6 +113,8 @@ export default async function Expenses({ searchParams }: {
   const allocQs = unallocatedOnly ? "&unallocated=1" : "";
   const periodHref = (targetRange: TimeRange, targetOffset: number) => `/finances?section=expenses&range=${targetRange}&offset=${targetOffset}${catQs}${allocQs}`;
   const clearHref = `/finances?section=expenses&range=${range}&offset=${offset}`;
+  const cashHref = range === "month" && start.slice(0, 4) === String(nowET.getFullYear())
+    ? `/finances?section=cash&m=${start.slice(0, 7)}` : undefined;
   const mode = range === "week" ? "day" : range === "month" ? "week" : "month";
   const buckets: Bucket[] = [];
   const startDate = parseDate(start), endDate = parseDate(end);
@@ -146,12 +151,16 @@ export default async function Expenses({ searchParams }: {
           <Link href={periodHref(range, offset + 1)} aria-label="Next period" className="rounded-md p-1.5 hover:bg-background"><ChevronRight className="h-4 w-4" /></Link>
         </div>
       </div>
-      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Bills and receipts dated {shortDate(startDate)}–{shortDate(endDate)}, including card purchases and unpaid costs. Credits reduce the recorded cost. Payment amounts describe these bills, regardless of when paid. <Link href="/finances?section=cash" className="font-medium underline underline-offset-2">See cash flow for money movements.</Link></p>
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Bills and receipts dated {shortDate(startDate)}–{shortDate(endDate)}, including card purchases and unpaid costs. Credits reduce the recorded cost. Payment amounts describe these bills, regardless of when paid. <a href="#bank-period" className="font-medium underline underline-offset-2">Compare bank money movements for this period.</a></p>
       {(catFilter || unallocatedOnly) && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-muted-foreground">All totals filtered by:</span>
+        <span className="text-muted-foreground">Bill totals filtered by:</span>
         {catFilter && <Link href={`${clearHref}${allocQs}`} className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${catFilter.chip}`}>{catFilter.label}<X className="h-3 w-3" /></Link>}
         {unallocatedOnly && <Link href={`${clearHref}${catQs}`} className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-400">Missing job / budget line<X className="h-3 w-3" /></Link>}
       </div>}
+    </div>
+
+    <div id="bank-period" className="scroll-mt-28">
+      {bankPeriod ? <BankPeriodPanel bank={bankPeriod} periodLabel={period.label} cashHref={cashHref} /> : <BankPeriodUnavailable />}
     </div>
 
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
