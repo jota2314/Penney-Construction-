@@ -8,17 +8,11 @@ import type {
   ActionCardData,
   FeedItem,
   FeedLiveShift,
-  Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
-import { listRecentFieldActivity } from "@/lib/actions/daily-logs";
+import { getCommandCenterUpdatesPage } from "@/lib/actions/command-center-updates";
+import type { CommandCenterUpdatesPage } from "@/lib/feed/command-center-updates";
 import { getPendingDecisions } from "@/lib/actions/decisions";
-import { listRecentCompanyFeedPosts } from "@/lib/actions/company-feed";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { crewToday } from "@/lib/crew/schedule-dates";
-import { deriveCurrentScheduleActivity, deriveScheduleHealth, recentWorkDates, type ScheduleWorkLog } from "@/lib/schedule/health";
-import { isMasterPhase } from "@/lib/schedule/progress";
-import { withEffectiveScheduleDates } from "@/lib/schedule/cascade";
 
 const TZ = "America/New_York";
 
@@ -41,29 +35,6 @@ function fmtTime(iso: string): string {
   }).replace(/^0/, "");
 }
 
-function fmtRelativeDay(iso: string): string {
-  const d = new Date(iso);
-  const today = startOfDay(nowET());
-  const target = startOfDay(new Date(d.toLocaleString("en-US", { timeZone: TZ })));
-  const diffDays = Math.round((target.getTime() - today.getTime()) / 86400000);
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Tomorrow";
-  if (diffDays === -1) return "Yesterday";
-  if (diffDays > 1 && diffDays < 7) {
-    return d.toLocaleDateString("en-US", { weekday: "short", timeZone: TZ });
-  }
-  if (diffDays < 0) return `${-diffDays}d overdue`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: TZ });
-}
-
-function fmtScheduleWhen(startIso: string): string {
-  const day = fmtRelativeDay(startIso);
-  // Phases are date-only — skip the time component
-  return day;
-}
-
-const PROJECT_COLORS = ["amber", "blue", "violet", "rose", "emerald", "cyan", "fuchsia"] as const;
-
 type TodoRow = {
   id: string;
   project_id: string | null;
@@ -78,58 +49,17 @@ type TodoRow = {
   ai_summary: string | null;
 };
 
-type ProjectRow = {
-  id: string;
-  project_number: string;
-  name: string;
-  status: string;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  contract_value: number | null;
-  estimated_value: number | null;
-};
-
-type PhaseRow = {
-  id: string;
-  project_id: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  status: "not_started" | "in_progress" | "completed" | "on_hold";
-  phase_scope: string | null;
-  event_type: string | null;
-  is_confirmed: boolean | null;
-  is_manually_scheduled: boolean | null;
-  actual_completed_at: string | null;
-  sort_order: number | null;
-  planned_start_date: string | null;
-  planned_end_date: string | null;
-  estimate_line_item_id: string | null;
-};
-type WorkLogRow = ScheduleWorkLog & { project_id: string | null };
-
-// Open clock-in (daily_logs status='in_progress'). project_id is direct on
-// new project-first logs; older clock-ins only know their schedule phase.
-type LiveLogRow = {
-  project_id: string | null;
-  author_id: string | null;
-  phase: { project_id: string | null } | { project_id: string | null }[] | null;
-};
-
 export async function getCommandCenterFeedData(
   role: RoleId,
   // Effective viewer id (the impersonated profile's id when "Viewing as"
   // someone, otherwise the signed-in user). The "Your Day" strip is a personal
   // surface and must be scoped to THIS id — see the scoped query below.
   viewerId: string,
-): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
+): Promise<{ feed: FeedItem[]; initialUpdates: CommandCenterUpdatesPage | null }> {
   const supabase = await createClient();
 
   const now = nowET();
   const today = startOfDay(now);
-  const in14d = new Date(today);
-  in14d.setDate(in14d.getDate() + 14);
 
   const safe = <T>(b: PromiseLike<{ data: T | null; error: unknown }>) =>
     Promise.resolve(b).catch(() => ({ data: null as T | null, error: true }));
@@ -150,14 +80,25 @@ export async function getCommandCenterFeedData(
   const weekAgoISO = monday.toISOString().slice(0, 10);
 
   const [
+    initialUpdates,
+    pendingDecisions,
+    openShifts,
+    todayClosedShifts,
+    feedVis,
     myDatedTodosRes,
-    projectsRes,
-    liveLogsRes,
     depositsWeekRes,
     receiptsWeekRes,
     receiptFlaggedCount,
     depositFlaggedCount,
   ] = await Promise.all([
+    // Independent requests start together. No project schedules or photo signing
+    // hold up the first 20 posts; the desktop rail loads separately on demand.
+    // Null keeps a failed initial page retryable instead of ending history.
+    getCommandCenterUpdatesPage(null).catch(() => null),
+    getPendingDecisions().catch(() => []),
+    fetchTimeEntriesCompat(supabase, { open: true }).catch(() => []),
+    fetchTimeEntriesCompat(supabase, { open: false, since: today.toISOString() }).catch(() => []),
+    getRateVisibility(),
     // "Your Day" is a PERSONAL surface — only the viewer's own dated todos.
     // Scoped by created_by so impersonation ("Viewing as …") shows THEIR items,
     // not the impersonator's. (RLS can't do this: it sees the real auth.uid(),
@@ -170,27 +111,6 @@ export async function getCommandCenterFeedData(
         .eq("created_by", viewerId)
         .not("due_date", "is", null)
         .order("due_date", { ascending: true }),
-    ),
-    // Every active jobsite — the rail is the source of truth for "what's on
-    // the board", so no tight cap (was 8, which silently dropped jobs).
-    fetchAllRows<ProjectRow>((from, to) => supabase
-        .from("projects")
-        .select("id, project_number, name, status, address, city, state, contract_value, estimated_value")
-        .neq("status", "cancelled")
-        .eq("is_overhead", false)
-        .order("updated_at", { ascending: false })
-        .order("id")
-        .range(from, to)
-        .throwOnError()).then((data) => ({ data })),
-    // Who's on the clock right now — drives the "Live" badge + crew initials
-    // on jobsite cards. 24h window so a forgotten open shift doesn't show a
-    // site as live for days.
-    safe<LiveLogRow[]>(
-      supabase
-        .from("daily_logs")
-        .select("project_id, author_id, phase:schedule_phases!schedule_phase_id(project_id)")
-        .eq("status", "in_progress")
-        .gte("started_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
     ),
     // Money IN over the last week — the Deposits tile's headline number.
     safe<{ amount: number | null }[]>(
@@ -226,33 +146,6 @@ export async function getCommandCenterFeedData(
     ),
   ]);
 
-  const projectRows = projectsRes.data ?? [];
-  const projectIds = projectRows.map((p) => p.id);
-  // Whole master plans are needed to distinguish "no plan" from past or future work.
-  const [savedPhases, workLogs] = projectIds.length ? await Promise.all([
-    fetchAllRows<PhaseRow>((from, to) => supabase.from("schedule_phases")
-      .select("id, project_id, name, start_date, end_date, status, phase_scope, event_type, is_confirmed, is_manually_scheduled, actual_completed_at, sort_order, planned_start_date, planned_end_date, estimate_line_item_id")
-      .in("project_id", projectIds).order("id").range(from, to).throwOnError()),
-    fetchAllRows<WorkLogRow>((from, to) => supabase.from("daily_logs")
-      .select("project_id, started_at, ended_at, status")
-      .in("project_id", projectIds)
-      .gte("started_at", new Date(Date.now() - 31 * 86400_000).toISOString())
-      .order("id").range(from, to).throwOnError()),
-  ]) : [[], []];
-  const todayDateStr = crewToday();
-  const phases = projectRows.flatMap((project) => {
-    const rows = savedPhases.filter((phase) => phase.project_id === project.id);
-    const effective = new Map(withEffectiveScheduleDates(rows.filter(isMasterPhase)).map((phase) => [phase.id, phase]));
-    return rows.map((phase) => effective.get(phase.id) ?? phase);
-  });
-  const scheduleHealth = new Map(projectRows.map((project) => [project.id, deriveScheduleHealth({
-    status: project.status,
-    phases: phases.filter((phase) => phase.project_id === project.id),
-    today: todayDateStr,
-    recentWorkDates: recentWorkDates(workLogs.filter((log) => log.project_id === project.id), todayDateStr),
-  })]));
-  const activeProjects = projectRows.filter((project) => ["in_progress", "contracted"].includes(project.status) || scheduleHealth.get(project.id)!.issues.length > 0);
-
   const depositsWeekTotal = (depositsWeekRes.data ?? []).reduce(
     (sum, row) => sum + Number(row.amount ?? 0),
     0,
@@ -261,16 +154,6 @@ export async function getCommandCenterFeedData(
     .filter(row => row.payment_method !== "capital_one" && row.payment_method !== "internal")
     .reduce((sum, row) => sum + Number(row.paid_amount || row.amount || 0), 0);
 
-  // Reports, company updates and live attendance. Planning lives on the Job Board and projects.
-  const [recentLogs, companyPosts, pendingDecisions, openShifts, todayClosedShifts] = await Promise.all([
-    listRecentFieldActivity(20).catch(() => []),
-    listRecentCompanyFeedPosts(20).catch(() => []),
-    getPendingDecisions().catch(() => []),
-    // Live map: who's on the clock now + today's finished shifts (for the
-    // spending-by-the-second banner).
-    fetchTimeEntriesCompat(supabase, { open: true }).catch(() => []),
-    fetchTimeEntriesCompat(supabase, { open: false, since: today.toISOString() }).catch(() => []),
-  ]);
   const hideFinances = role === "crew" || role === "lead";
 
   // ── Today strip ("Your Day") ───────────────────────────────────
@@ -336,7 +219,6 @@ export async function getCommandCenterFeedData(
 
   // Per-shift rates are masked for viewers outside the office-rate set
   // (aggregate completedTodayCents above stays true).
-  const feedVis = await getRateVisibility();
   const activeShifts: FeedLiveShift[] = maskTimeEntryRates(
     feedVis,
     openShifts,
@@ -349,98 +231,6 @@ export async function getCommandCenterFeedData(
     rateCentsPerHour: Math.round((entry.employees?.hourly_rate ?? 0) * 100),
     projectName: entry.projects?.name ?? null,
   }));
-
-  // ── Jobsites ───────────────────────────────────────────────────
-  const phasesByProject = new Map<string, PhaseRow[]>();
-  for (const p of phases) {
-    const arr = phasesByProject.get(p.project_id) ?? [];
-    arr.push(p);
-    phasesByProject.set(p.project_id, arr);
-  }
-
-  // Resolve open clock-ins → crew initials per project.
-  const liveLogs = liveLogsRes.data ?? [];
-  const liveAuthorIds = Array.from(
-    new Set(liveLogs.map((l) => l.author_id).filter((a): a is string => Boolean(a))),
-  );
-  const initialsByProfile = new Map<string, string>();
-  if (liveAuthorIds.length > 0) {
-    const { data: emps } = await supabase
-      .from("employees")
-      .select("profile_id, first_name, last_name")
-      .in("profile_id", liveAuthorIds);
-    for (const e of emps ?? []) {
-      if (e.profile_id) {
-        const initials = `${e.first_name?.[0] ?? ""}${e.last_name?.[0] ?? ""}`.toUpperCase();
-        if (initials) initialsByProfile.set(e.profile_id, initials);
-      }
-    }
-    const missing = liveAuthorIds.filter((id) => !initialsByProfile.has(id));
-    if (missing.length > 0) {
-      const { data: profs } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", missing);
-      for (const pr of profs ?? []) {
-        const parts = (pr.full_name ?? "").trim().split(/\s+/);
-        const initials = `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-        if (initials) initialsByProfile.set(pr.id, initials);
-      }
-    }
-  }
-  const liveCrewByProject = new Map<string, string[]>();
-  for (const l of liveLogs) {
-    const phase = Array.isArray(l.phase) ? l.phase[0] : l.phase;
-    const pid = l.project_id ?? phase?.project_id;
-    if (!pid || !l.author_id) continue;
-    const initials = initialsByProfile.get(l.author_id);
-    if (!initials) continue;
-    const arr = liveCrewByProject.get(pid) ?? [];
-    if (!arr.includes(initials)) arr.push(initials);
-    liveCrewByProject.set(pid, arr);
-  }
-
-  // Sites with crew on the clock first, then in-progress jobs, then pre-con.
-  // Stable sort keeps most-recently-updated first within each group.
-  const jobsiteRank = (p: ProjectRow) =>
-    liveCrewByProject.has(p.id) ? 0 : p.status === "in_progress" ? 1 : 2;
-  const orderedProjects = [...activeProjects].sort((a, b) => jobsiteRank(a) - jobsiteRank(b));
-
-  const jobsites: Jobsite[] = orderedProjects.map((p, i) => {
-    const ps = phasesByProject.get(p.id) ?? [];
-    const { current, next } = deriveCurrentScheduleActivity(ps, todayDateStr);
-    const phaseLabel = current?.name ?? (next && next.start_date <= in14d.toISOString().slice(0, 10) ? `Next: ${next.name}` : p.status === "in_progress" ? "No current master work" : p.status.replace(/_/g, " "));
-    const status = current?.status === "in_progress" ? "in progress" : current?.name?.toLowerCase() ?? p.status.replace(/_/g, " ");
-    const addressParts = [p.address, p.city].filter(Boolean).join(", ");
-
-    return {
-      id: p.id,
-      project: p.name,
-      address: addressParts || "—",
-      crew: liveCrewByProject.get(p.id) ?? [],
-      lead: null,
-      status,
-      phase: phaseLabel,
-      scheduleIssues: scheduleHealth.get(p.id)?.issues.map((issue) => issue.text) ?? [],
-      weather: "—",
-      color: PROJECT_COLORS[i % PROJECT_COLORS.length],
-      stage: (p.status === "in_progress" ? "active" : p.status === "contracted" ? "precon" : "review") as "active" | "precon" | "review",
-    };
-  });
-
-  // ── Schedule (next 14d) ────────────────────────────────────────
-  const projectNameById = new Map(activeProjects.map((p) => [p.id, p.name]));
-  const scheduleItems = phases
-    .filter((p) => p.start_date >= todayDateStr || p.status === "in_progress")
-    .slice(0, 6)
-    .map((p) => ({
-      when: fmtScheduleWhen(`${p.start_date}T08:00:00`),
-      what: `${projectNameById.get(p.project_id) ?? "Project"} · ${p.name}`,
-    }));
-
-  const scheduleItem: FeedItem | null = scheduleItems.length
-    ? { type: "schedule", items: scheduleItems }
-    : null;
 
   // ── Assemble feed ──────────────────────────────────────────────
   const feed: FeedItem[] = [];
@@ -478,30 +268,5 @@ export async function getCommandCenterFeedData(
     feed.push(...decisionCards);
   }
 
-  // Company posts + field activity in ONE feed, newest first — no separate
-  // "Company updates" / "From the field" buckets.
-  const updates: { ts: number; item: FeedItem }[] = [
-    ...companyPosts.map((post) => ({
-      ts: new Date(post.createdAt).getTime(),
-      item: { type: "companyPost", post } as FeedItem,
-    })),
-    ...recentLogs.map((activity) => ({
-      ts: new Date(
-        activity.kind === "daily-log" ? activity.started_at : activity.created_at,
-      ).getTime(),
-      item: (activity.kind === "punch-group"
-        ? { type: "punchGroupPost", group: activity }
-        : { type: "logPost", log: activity }) as FeedItem,
-    })),
-  ].sort((a, b) => b.ts - a.ts);
-
-  if (updates.length > 0) {
-    feed.push({ type: "section", label: "Company updates" });
-    feed.push(...updates.map((u) => u.item));
-  }
-
-  // Old "Coming up" stub list replaced by the week/day ScheduleStrip above.
-  void scheduleItem;
-
-  return { feed, jobsites };
+  return { feed, initialUpdates };
 }

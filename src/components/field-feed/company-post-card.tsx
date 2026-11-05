@@ -48,10 +48,12 @@ function TagIcon({ type }: { type: CompanyFeedTag["type"] }) {
 export function CompanyPostCard({
   post,
   focus = false,
+  onDeleted,
 }: {
   post: CompanyFeedPost;
   /** Deep-linked from a mention — scroll into view, highlight, open comments. */
   focus?: boolean;
+  onDeleted?: () => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
@@ -118,7 +120,7 @@ export function CompanyPostCard({
           <FeedDeleteButton
             label="post"
             onDelete={() => deleteCompanyFeedPost(post.id)}
-            onDeleted={() => setDeleted(true)}
+            onDeleted={() => { setDeleted(true); onDeleted?.(); }}
           />
         </header>
 
@@ -128,6 +130,9 @@ export function CompanyPostCard({
           </p>
         )}
 
+        {post.photoUrls.length === 0 && (post.photoStoragePaths?.length ?? 0) > 0 && (
+          <div className={`flex items-center justify-center bg-black/30 text-xs text-stone-500 ${post.photoStoragePaths!.length === 1 ? "aspect-[4/3]" : post.photoStoragePaths!.length === 2 ? "aspect-[2/1]" : "aspect-square"}`} aria-label="Photos loading">Loading photos…</div>
+        )}
         {post.photoUrls.length > 0 && (
           <div className={`grid gap-0.5 bg-black ${
             post.photoUrls.length === 1 ? "grid-cols-1" : "grid-cols-2"

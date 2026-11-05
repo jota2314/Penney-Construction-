@@ -15,6 +15,7 @@ import {
   deletePunchGroup,
 } from "@/lib/actions/punch-list";
 import { FeedDeleteButton } from "./feed-delete-button";
+import { mergePunchMedia } from "./punch-media-state";
 
 interface Employee {
   id: string;
@@ -50,7 +51,7 @@ function initials(name: string | null, email: string | null): string {
 
 type LocalItem = FeedPunchGroup["items"][number];
 
-export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
+export function PunchListGroupPost({ group, onDeleted }: { group: FeedPunchGroup; onDeleted?: () => void }) {
   const router = useRouter();
   const [items, setItems] = useState<LocalItem[]>(group.items);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -68,6 +69,19 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const assignSearchRef = useRef<HTMLInputElement>(null);
+  const previousMediaSource = useRef(group.items);
+
+  // Lazy media arrives after the card mounts. Merge just those fields so an
+  // in-flight assignment, completion toggle or text edit stays intact.
+  useEffect(() => {
+    const incoming = new Map(group.items.map((item) => [item.id, item]));
+    const previous = new Map(previousMediaSource.current.map((item) => [item.id, item]));
+    previousMediaSource.current = group.items;
+    setItems((current) => current.map((item) => {
+      const source = incoming.get(item.id);
+      return source ? mergePunchMedia(item, source, previous.get(item.id)) : item;
+    }));
+  }, [group.items]);
 
   useEffect(() => {
     if (!assignPickerFor || employees) return;
@@ -282,7 +296,7 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
         <FeedDeleteButton
           label="punch list"
           onDelete={() => deletePunchGroup(group.session_id)}
-          onDeleted={() => setDeleted(true)}
+          onDeleted={() => { setDeleted(true); onDeleted?.(); }}
         />
         <div className="relative shrink-0">
           <button
@@ -403,6 +417,9 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
         </div>
       </div>
 
+      {sessionPhotos.length === 0 && group.items.some((item) => (item.photo_storage_paths?.length ?? 0) > 0) && (
+        <div className="mx-3 mt-2 flex h-40 items-center justify-center rounded-lg bg-black/30 text-xs text-stone-500" aria-label="Photos loading">Loading photos…</div>
+      )}
       {sessionPhotos.length > 0 && (
         <div
           className="px-3 pt-2 flex gap-2 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

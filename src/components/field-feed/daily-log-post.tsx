@@ -56,6 +56,7 @@ export function DailyLogPost({
   log,
   focus = false,
   linkProject = false,
+  onDeleted,
 }: {
   log: FeedDailyLog;
   /** Deep-linked from a mention — scroll into view, highlight, open comments. */
@@ -63,6 +64,7 @@ export function DailyLogPost({
   /** Turn the project name into a link to the project page. Off on the project
    * page itself (it would link to where you already are) and on /crew. */
   linkProject?: boolean;
+  onDeleted?: () => void;
 }) {
   const [reactions, setReactions] = useState<Record<string, number>>({});
   const [reacted, setReacted] = useState<Record<string, boolean>>({});
@@ -204,10 +206,13 @@ export function DailyLogPost({
           <FeedDeleteButton
             label="daily log"
             onDelete={() => deleteDailyLog(log.id)}
-            onDeleted={() => setDeleted(true)}
+            onDeleted={() => { setDeleted(true); onDeleted?.(); }}
           />
         </header>
 
+        {photos.length === 0 && (log.photo_storage_paths?.length ?? 0) > 0 && (
+          <div className="flex aspect-square items-center justify-center bg-black/30 text-xs text-stone-500" aria-label="Photos loading">Loading photos…</div>
+        )}
         {photos.length > 0 && (
           <div
             className="relative overflow-hidden bg-black"
