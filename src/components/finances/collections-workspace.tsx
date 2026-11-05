@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ExternalLink, FileText } from "lucide-react";
-import { total, type CollectionRow } from "@/lib/finance/workspace-model";
+import { isActionableCollection, total, type CollectionRow } from "@/lib/finance/workspace-model";
 import type { CollectionPace } from "@/lib/finance/collection-pace";
 import { SendInvoiceButton } from "@/components/invoices/send-invoice-button";
 
@@ -64,7 +64,7 @@ function InvoiceTitle({ row }: { row: CollectionRow }) {
 
 export function CollectionsWorkspace({ rows, pace }: { rows: CollectionRow[]; pace: CollectionPace }) {
   const open = rows
-    .filter((r) => !r.issue && !r.loggedPayment)
+    .filter(isActionableCollection)
     .sort((a, b) => b.daysWaiting - a.daysWaiting || a.projectName.localeCompare(b.projectName));
   const logged = rows.filter((r) => !r.issue && r.loggedPayment);
   const flagged = rows.filter((r) => r.issue);
@@ -97,7 +97,11 @@ export function CollectionsWorkspace({ rows, pace }: { rows: CollectionRow[]; pa
           </p>
         </div>
         {open.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-muted-foreground">Nothing open. Every sent invoice is paid.</p>
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            {logged.length || flagged.length
+              ? "No invoices ready for collection. Review the unapplied receipts and reconciliation items below."
+              : "No recorded open invoices."}
+          </p>
         ) : (
           <ul className="divide-y">
             {open.map((r) => (

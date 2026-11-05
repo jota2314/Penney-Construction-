@@ -74,6 +74,14 @@ export type CollectionRow = {
   loggedPayment: { amount: number; date: string; reference: string | null } | null;
   issue: string | null;
 };
+/** Keep unresolved invoices and matching, unapplied receipts out of collection
+ * totals everywhere. A matching receipt still needs review; this does not mark
+ * the invoice paid or change its recorded balance. */
+export function isActionableCollection(
+  row: Pick<CollectionRow, "issue" | "loggedPayment">,
+): boolean {
+  return !row.issue && !row.loggedPayment;
+}
 export const cents = (value: unknown): number | null =>
   value == null || value === "" || !Number.isFinite(Number(value))
     ? null
@@ -113,7 +121,6 @@ export function healthFor(job: ProjectHealth): {
     return job.finalNeedsReview
       ? { label: "Final · new activity", tone: "warn" }
       : { label: "Financially closed", tone: "good" };
-  if (job.warnings.length) return { label: "Needs verification", tone: "warn" };
   const forecast = forecastFor(job);
   if (
     job.contract !== null &&
@@ -126,6 +133,9 @@ export function healthFor(job: ProjectHealth): {
     return { label: "Loss risk", tone: "bad" };
   if (job.budget !== null && job.cost > job.budget)
     return { label: "Over budget", tone: "bad" };
+  // Source warnings remain visible on the job, but must not hide an overrun
+  // already apparent in its recorded amounts.
+  if (job.warnings.length) return { label: "Needs verification", tone: "warn" };
   if (job.overdue > 0) return { label: "Collection overdue", tone: "warn" };
   if (!forecast || forecast.stale)
     return { label: "Forecast needed", tone: "neutral" };

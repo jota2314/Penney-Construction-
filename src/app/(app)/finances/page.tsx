@@ -6,7 +6,6 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { getFinanceWorkspace } from "@/lib/finance/workspace-data";
-import { total, healthFor } from "@/lib/finance/workspace-model";
 import { ProjectHealthWorkspace } from "@/components/finances/project-health-workspace";
 import { CollectionsWorkspace } from "@/components/finances/collections-workspace";
 import { OpenBillsCard } from "@/components/ceo/open-bills-card";
@@ -16,7 +15,8 @@ import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import { WorkspacePanel } from "@/components/finances/workspace-panel";
 import { getCollectionPace } from "@/lib/finance/collection-pace";
-import { CollectionPaceHistory, CollectionPaceSummary } from "@/components/finances/collection-pace";
+import { CollectionPaceHistory } from "@/components/finances/collection-pace";
+import FinanceOverview from "@/components/finances/sections/overview";
 import Cash from "@/components/finances/sections/cash";
 import Activity from "@/components/finances/sections/activity";
 import Expenses from "@/components/finances/sections/expenses";
@@ -41,12 +41,6 @@ type Params = {
   collection?: string;
   auditProject?: string;
 };
-const money = (n: number) =>
-  (n / 100).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
 async function SafeSection({ load }: { load: () => Promise<ReactNode> }) {
   try {
     return await load();
@@ -69,12 +63,12 @@ async function SafeSection({ load }: { load: () => Promise<ReactNode> }) {
 // /week, /money, /overhead, /finances/daily-log) already redirect here with
 // ?section=, so their filter and period links land on the right tab.
 const TABS = [
-  { key: "overview", label: "Overview", aliases: [], subtitle: "The headline numbers. Open a card for the detail." },
+  { key: "overview", label: "Overview", aliases: [], subtitle: "What came in, recorded costs, open balances and the next items to review." },
   { key: "collections", label: "Collections", aliases: [], subtitle: "Who owes us, oldest first. Open an invoice or send a reminder." },
   { key: "projects", label: "Projects", aliases: ["final-audits"], subtitle: "Job health, forecasts and final P&Ls." },
   { key: "bills", label: "Bills", aliases: [], subtitle: "Open balances, approval status and unresolved receipts." },
   { key: "cash", label: "Cash flow", aliases: [], subtitle: "Recorded cash activity, imported bank statements and coverage dates." },
-  { key: "expenses", label: "Expenses", aliases: [], subtitle: "Spending by period, category and job." },
+  { key: "expenses", label: "Expenses", aliases: [], subtitle: "Bills, purchases and credits by bill date, with recorded payments and open balances." },
   { key: "income", label: "Income", aliases: [], subtitle: "Recorded receipts and their project allocations." },
   { key: "overhead", label: "Overhead", aliases: [], subtitle: "Operating costs kept separate from job profit." },
   { key: "weekly", label: "Weekly Close", aliases: [], subtitle: "Resolve exceptions, review crew time and check the week's money movements." },
@@ -93,43 +87,6 @@ function Loading({ label }: { label: string }) {
     <p role="status" className="animate-pulse rounded-xl bg-muted/30 p-6 text-sm">
       Loading {label.toLowerCase()}…
     </p>
-  );
-}
-
-async function OverviewTab() {
-  const [data, pace] = await Promise.all([getFinanceWorkspace(), getCollectionPace()]);
-  // Same basis as the Collections tab: an invoice with a matching check logged
-  // is not counted as owed.
-  const eligible = data.collections.filter((r) => !r.issue && !r.loggedPayment);
-  const attention = data.jobs.filter((j) =>
-    ["bad", "warn"].includes(healthFor(j).tone),
-  ).length;
-  const cards: [string, string, string, string][] = [
-    ["Open collections", money(total(eligible, (r) => r.balance)), "Issued invoices · recorded balance", "?section=collections"],
-    [
-      "Overdue collections",
-      money(total(eligible.filter((r) => r.daysLate > 0), (r) => r.balance)),
-      `${data.collections.filter((r) => r.issue).length} invoices need reconciliation`,
-      "?section=collections",
-    ],
-    ["Reviewed open bills", money(Math.round(data.bills.total * 100)), `${data.bills.review.length} bill groups still need review`, "?section=bills"],
-    ["Projects needing attention", String(attention), "Cost, evidence and collection flags", "?section=projects"],
-  ];
-  return (
-    <>
-      <Link href="?section=collections" className="block rounded-xl transition-opacity hover:opacity-90">
-        <CollectionPaceSummary pace={pace} />
-      </Link>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {cards.map(([label, value, detail, href]) => (
-          <Link key={label} href={href} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40">
-            <p className="text-xs font-medium text-muted-foreground">{label}</p>
-            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">{value}</p>
-            <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
-          </Link>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -183,7 +140,7 @@ async function BillsTab() {
 function renderTab(key: TabKey, shared: Promise<Params>) {
   switch (key) {
     case "overview":
-      return <SafeSection load={OverviewTab} />;
+      return <SafeSection load={FinanceOverview} />;
     case "collections":
       return <SafeSection load={CollectionsTab} />;
     case "projects":

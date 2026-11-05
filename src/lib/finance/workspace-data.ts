@@ -16,6 +16,7 @@ import {
   total,
   latestRecords,
   collectionBalance,
+  isActionableCollection,
   type ProjectHealth,
   type FinanceRecord,
   type CollectionRow,
@@ -271,8 +272,10 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
         warnings.push("Live crew hours are provisional");
       if (collections.some((i) => i.projectId === p.id && i.issue))
         warnings.push("Client receipts need reconciliation");
+      if (collections.some((i) => i.projectId === p.id && i.loggedPayment))
+        warnings.push("Recorded client receipt needs invoice matching");
       const ownCollections = collections.filter(
-        (i) => i.projectId === p.id && !i.issue,
+        (i) => i.projectId === p.id && isActionableCollection(i),
       );
       return {
         id: p.id,

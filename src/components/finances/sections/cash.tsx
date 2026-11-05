@@ -7,6 +7,7 @@ import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { formatMoney } from "@/lib/money";
 import { summarizeCashFlow } from "@/lib/finance/overview-cash";
 import { getFinanceWorkspace } from "@/lib/finance/workspace-data";
+import { isActionableCollection } from "@/lib/finance/workspace-model";
 import { CollectionPlanDialog } from "@/components/ceo/collection-plan-dialog";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
@@ -40,7 +41,7 @@ export default async function CashPage({ searchParams }: {
     getFinanceWorkspace(), getCollectionInvoices(),
   ]);
   const cash = summarizeCashFlow(receipts, bills, bank, today);
-  const owedToUs = workspace.collections.filter(row => !row.issue)
+  const owedToUs = workspace.collections.filter(isActionableCollection)
     .reduce((sum, row) => sum + row.balance, 0) / 100;
   const vendorTotals = new Map<string, number>();
   for (const bill of workspace.bills.bills) {
@@ -54,7 +55,7 @@ export default async function CashPage({ searchParams }: {
       <section className="@container min-w-0 rounded-xl border bg-card p-4 sm:p-5">
         <h2 className="text-sm font-semibold">Owed to us</h2>
         <div className="mt-1 text-[clamp(1rem,10cqi,1.875rem)] font-bold tabular-nums text-sky-400 [overflow-wrap:anywhere]">{formatMoney(owedToUs)}</div>
-        <p className="mt-1 text-xs text-muted-foreground">Issued invoices · recorded open balances</p>
+        <p className="mt-1 text-xs text-muted-foreground">Issued invoices · excludes reconciliation issues and matching receipts awaiting application</p>
         <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}
           triggerClassName="mt-3 text-sm font-medium text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           View collection plan &amp; invoices →

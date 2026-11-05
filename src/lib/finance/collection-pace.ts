@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 
 /**
@@ -61,7 +61,12 @@ const rangeLabel = (a: string, b: string) => {
     ? `${MON[x.getMonth()]} ${x.getDate()}–${y.getDate()}`
     : `${MON[x.getMonth()]} ${x.getDate()} – ${MON[y.getMonth()]} ${y.getDate()}`;
 };
-const cents = (v: unknown) => Math.round(Number(v ?? 0) * 100) || 0;
+const cents = (v: unknown) => {
+  if (v == null || v === "" || !Number.isFinite(Number(v))) {
+    throw new Error("A recorded receipt amount needs verification.");
+  }
+  return Math.round(Number(v) * 100);
+};
 
 export async function getCollectionPace(db?: Awaited<ReturnType<typeof createClient>>): Promise<CollectionPace> {
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
@@ -74,7 +79,7 @@ export async function getCollectionPace(db?: Awaited<ReturnType<typeof createCli
   const from = iso(mondayOf(historyStart) < historyStart ? mondayOf(historyStart) : historyStart);
 
   const supabase = db ?? (await createClient());
-  const rows = await fetchAllRows((f, t) =>
+  const rows = await financialRows((f, t) =>
     supabase
       .from("payments_received")
       .select("id, amount, received_date, payment_type, projects(name, project_number)")

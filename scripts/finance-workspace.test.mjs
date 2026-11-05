@@ -23,6 +23,7 @@ function moduleURL(path) {
 }
 const {
   collectionBalance,
+  isActionableCollection,
   closedPeriod,
   latestRecords,
   forecastFor,
@@ -63,6 +64,23 @@ test("unsent drafts, cancelled and voided invoices never become receivables", ()
     collectionBalance({ ...invoice, sent_to_client_at: null }, []),
     null,
   );
+});
+test("collection totals consistently exclude unapplied matching receipts and reconciliation issues", () => {
+  const rows = [
+    { id: "open", projectId: "p", balance: 80000, daysLate: 10, issue: null, loggedPayment: null },
+    { id: "not-due", projectId: "p", balance: 20000, daysLate: 0, issue: null, loggedPayment: null },
+    { id: "receipt", projectId: "p", balance: 60000, daysLate: 15, issue: null, loggedPayment: { amount: 60000, date: "2026-11-01", reference: "Check 42" } },
+    { id: "disputed", projectId: "p", balance: 30000, daysLate: 20, issue: "Linked receipts and invoice paid amount differ", loggedPayment: null },
+    { id: "other-job", projectId: "q", balance: 10000, daysLate: 0, issue: null, loggedPayment: null },
+  ];
+  const original = structuredClone(rows);
+  const actionable = rows.filter(isActionableCollection);
+  assert.deepEqual(actionable.map(row => row.id), ["open", "not-due", "other-job"]);
+  assert.equal(actionable.reduce((sum, row) => sum + row.balance, 0), 110000);
+  const jobRows = rows.filter(row => row.projectId === "p" && isActionableCollection(row));
+  assert.equal(jobRows.reduce((sum, row) => sum + row.balance, 0), 100000);
+  assert.equal(jobRows.filter(row => row.daysLate > 0).reduce((sum, row) => sum + row.balance, 0), 80000);
+  assert.deepEqual(rows, original, "Display eligibility must not apply receipts or alter invoices");
 });
 const record = (id, kind, created, closed) => ({
   id,
@@ -140,6 +158,12 @@ test("health differentiates unverified evidence, overrun, overdue and changed fi
     }).label,
     "Final · new activity",
   );
+});
+test("recorded loss and budget overruns remain prominent when source review is also needed", () => {
+  assert.deepEqual(healthFor({ ...job, cost: 110000, warnings: ["Missing rates"] }), { label: "Loss risk", tone: "bad" });
+  assert.deepEqual(healthFor({ ...job, cost: 80000, warnings: ["Bills need review"] }), { label: "Over budget", tone: "bad" });
+  assert.deepEqual(healthFor({ ...job, contract: null, budget: null, warnings: ["Contract amount needs verification"] }), { label: "Needs verification", tone: "warn" });
+  assert.deepEqual(healthFor({ ...job, cost: 110000, warnings: ["Changed source"], audit: record("f", "final", "2026-10-09", "2026-10-09"), finalNeedsReview: true }), { label: "Final · new activity", tone: "warn" });
 });
 const sources = [
   "projects",
