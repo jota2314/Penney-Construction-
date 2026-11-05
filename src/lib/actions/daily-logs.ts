@@ -1027,7 +1027,7 @@ export async function listRecentDailyLogs(
     .from("daily_logs")
     .select(
       `
-      id, schedule_phase_id, project_id, author_id, subcontractor_id, is_site_guest, site_guest_name, text, photo_storage_paths, status, started_at, ended_at, daily_report_id, estimate_line_item_id, line_item_needs_review,
+      id, schedule_phase_id, project_id, author_id, subcontractor_id, is_site_guest, site_guest_name, site_guest_trade, site_guest_company, text, photo_storage_paths, status, started_at, ended_at, daily_report_id, estimate_line_item_id, line_item_needs_review,
       line_item:estimate_line_items!estimate_line_item_id(description),
       author:profiles!author_id(full_name, email),
       sub:subcontractors!subcontractor_id(company_name, contact_name),
@@ -1123,7 +1123,7 @@ export async function listRecentDailyLogs(
       started_at: r.started_at,
       ended_at: r.ended_at,
       author_name:
-        siteGuestAuthorName(r.is_site_guest, r.site_guest_name) ??
+        siteGuestAuthorName(r.is_site_guest, r.site_guest_name, r.site_guest_trade, r.site_guest_company) ??
         author?.full_name ??
         (sub ? `${sub.contact_name ? `${sub.contact_name} — ` : ""}${sub.company_name}` : null),
       author_email: author?.email ?? null,

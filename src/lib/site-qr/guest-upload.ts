@@ -19,6 +19,8 @@ export type GuestPhotoInput = {
   code: string;
   submissionId: string;
   name: string;
+  trade: string;
+  company: string;
   note: string;
   photos: Blob[];
 };
@@ -30,11 +32,16 @@ export function parseGuestPhotoForm(form: FormData): GuestPhotoInput {
   const code = string("code").toUpperCase();
   const submissionId = string("submissionId");
   const name = string("name");
+  const trade = string("trade");
+  const company = string("company");
   const note = string("note");
   const entries = form.getAll("photos");
   if (!SITE_CODE.test(code)) throw new GuestUploadError("This job code isn't active.", 404);
   if (!UUID.test(submissionId)) throw new GuestUploadError("Please select the photos again.");
-  if (name.length > 100 || note.length > 2000) throw new GuestUploadError("Please shorten the name or note.");
+  if (name.length > 100) throw new GuestUploadError("Keep your name to 100 characters or fewer.");
+  if (trade.length > 80) throw new GuestUploadError("Keep your trade to 80 characters or fewer.");
+  if (company.length > 100) throw new GuestUploadError("Keep your company to 100 characters or fewer.");
+  if (note.length > 2000) throw new GuestUploadError("Keep the work description to 2,000 characters or fewer.");
   if (entries.length < 1 || entries.length > GUEST_PHOTO_LIMIT) throw new GuestUploadError("Choose 1 to 6 photos.");
   const photos: Blob[] = [];
   for (const file of entries) {
@@ -46,7 +53,7 @@ export function parseGuestPhotoForm(form: FormData): GuestPhotoInput {
     }
     photos.push(file);
   }
-  return { code, submissionId, name, note, photos };
+  return { code, submissionId, name, trade, company, note, photos };
 }
 
 /** Decode real pixels, discard metadata, and store only a normalized JPEG. */
@@ -93,6 +100,12 @@ export async function saveGuestPhotos(
   if (saved) return isThisPost(saved, project.id);
   if (!isSiteOpen(project)) throw new GuestUploadError("This job isn't accepting photos right now. Please contact the Penney office.", 409);
 
+  // Check new-post details after the code-scoped retry lookup. An old page may
+  // retry a successfully saved photo-only post after this update is deployed.
+  if (!input.name) throw new GuestUploadError("Enter your name before posting. If this page has no name field, refresh it first.");
+  if (!input.trade) throw new GuestUploadError("Enter your trade before posting. If this page has no trade field, refresh it first.");
+  if (!input.note) throw new GuestUploadError("Describe the work you did before posting.");
+
   // Reject before transferring images. A database trigger also enforces this
   // under a project lock, so concurrent requests cannot bypass the hourly cap.
   const { count, error: countError } = await admin.from("daily_logs")
@@ -127,6 +140,7 @@ export async function saveGuestPhotos(
     const { error } = await admin.from("daily_logs").insert({
       id: input.submissionId, project_id: project.id,
       author_id: null, subcontractor_id: null, is_site_guest: true, site_guest_name: input.name || null,
+      site_guest_trade: input.trade, site_guest_company: input.company || null,
       kind: "post", status: "completed", started_at: at, ended_at: at,
       text: input.note || null, photo_storage_paths: paths,
       report_required: false, line_item_needs_review: false,
