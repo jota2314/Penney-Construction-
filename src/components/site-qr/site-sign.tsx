@@ -7,9 +7,8 @@ import { portalFont } from "@/components/portal/portal-font";
  * the entry door) and the half-page binder-cover label. Shared by
  * /job-qr/{id} and the bulk print page /job-qr/all. Server-safe: no hooks.
  *
- * Plan §3.1 copy. The sign is about the daily log, not the clock: scan when
- * you arrive, add photos, post. The PT and ES lines need a native speaker's
- * read before the first big print run.
+ * One code for Penney crew and subcontractors: daily logs, photos and the
+ * job's drawings, through their existing sign-in and project access.
  */
 
 const INK = "#252D2B";
@@ -18,11 +17,11 @@ const LINE = "#E4E0D8";
 const ACCENT_DARK = "#9E4E28";
 
 export const SITE_SIGN_COPY = {
-  headline: "SUBCONTRACTORS: scan when you arrive",
-  steps: ["Scan", "Add photos", "Post"],
-  pt: "Subempreiteiros: escaneie ao chegar e poste as fotos antes de sair.",
-  es: "Subcontratistas: escaneen al llegar y suban sus fotos antes de irse.",
-  firstTime: "First time? Sign up with your cell and a 4-digit PIN.",
+  headline: "Your job. Scan to open.",
+  steps: ["Daily logs", "Photos", "Drawings"],
+  pt: "Escaneie para acessar os registros diários, fotos e plantas da obra.",
+  es: "Escanea para ver los registros diarios, fotos y planos de la obra.",
+  firstTime: "Penney crew: sign in with your Penney account.",
   watch: "Watch how · 1 min",
 } as const;
 
@@ -64,7 +63,7 @@ function jobLine(job: SiteSignJob): string {
   return `${job.project_number}${job.address ? ` · ${job.address}` : ""}`;
 }
 
-/** "1 Scan · 2 Add photos · 3 Post" with the numbers in rings. */
+/** The three things available from the job's QR. */
 function Steps({ size, align = "center" }: { size: "lg" | "sm"; align?: "center" | "start" }) {
   const ring = size === "lg" ? 40 : 28;
   return (
@@ -132,7 +131,7 @@ export function SiteSign({
       </p>
 
       <div className="mt-4 rounded-[18px] p-2.5" style={{ border: `3px solid ${INK}` }}>
-        <QrCode value={url} title={`Check in at ${job.name}`} className="h-[3.7in] w-[3.7in]" />
+        <QrCode value={url} title={`Open ${job.name}`} className="h-[3.7in] w-[3.7in]" />
       </div>
 
       <div className="mt-5">
@@ -149,7 +148,7 @@ export function SiteSign({
         <div className="min-w-0 flex-1">
           <p className="text-[16px] font-extrabold">Penney office {officePhone}</p>
           <p className="mt-0.5 text-[13px]" style={{ color: MUTED }}>
-            Penney crew: use the Penney app.
+            Subcontractors: use your cell and PIN, or sign up here.
           </p>
           <p className="mt-1 break-all font-mono text-[12px] tracking-wide" style={{ color: MUTED }}>
             {url.replace("https://", "")}
@@ -168,7 +167,7 @@ export function SiteSign({
 
 /**
  * The binder-cover label: half a letter sheet, dashed edge as the cut line.
- * Same QR as the door sign, so a scan of either checks him in.
+ * Same QR as the door sign, so a scan of either opens this job.
  */
 export function BinderLabel({ job, url, officePhone }: { job: SiteSignJob; url: string; officePhone: string }) {
   return (
@@ -177,7 +176,7 @@ export function BinderLabel({ job, url, officePhone }: { job: SiteSignJob; url: 
       style={{ color: INK, border: `2px dashed ${MUTED}`, minHeight: "4.2in" }}
     >
       <div className="shrink-0 rounded-[14px] p-2" style={{ border: `3px solid ${INK}` }}>
-        <QrCode value={url} title={`Check in at ${job.name}`} className="h-[2.7in] w-[2.7in]" />
+        <QrCode value={url} title={`Open ${job.name}`} className="h-[2.7in] w-[2.7in]" />
       </div>
       <div className="min-w-0 flex-1">
         {/* eslint-disable-next-line @next/next/no-img-element -- print sheet: plain img prints reliably */}
@@ -196,6 +195,7 @@ export function BinderLabel({ job, url, officePhone }: { job: SiteSignJob; url: 
           <Steps size="sm" align="start" />
         </div>
         <p className="mt-3 text-[13px] font-semibold">{SITE_SIGN_COPY.firstTime}</p>
+        <p className="mt-1 text-[13px]">Subs: cell and PIN, or sign up here.</p>
         <p className="mt-1 text-[13px] font-extrabold">Penney office {officePhone}</p>
       </div>
     </section>

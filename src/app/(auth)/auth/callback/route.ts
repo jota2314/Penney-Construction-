@@ -1,10 +1,20 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { AUTH_RETURN_COOKIE_PATH, AUTH_RETURN_PATH_COOKIE, safeReturnPath } from "@/lib/auth/return-path";
+
+function clearReturnCookie(response: NextResponse): NextResponse {
+  response.cookies.set(AUTH_RETURN_PATH_COOKIE, "", {
+    httpOnly: true, secure: true, sameSite: "lax", path: AUTH_RETURN_COOKIE_PATH, maxAge: 0,
+  });
+  return response;
+}
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const nextParam = searchParams.get("next");
+  const jar = await cookies();
+  const nextParam = safeReturnPath(searchParams.get("next")) ?? safeReturnPath(jar.get(AUTH_RETURN_PATH_COOKIE)?.value);
 
   if (code) {
     const supabase = await createClient();
@@ -131,10 +141,10 @@ export async function GET(request: Request) {
         }
       }
 
-      return response;
+      return clearReturnCookie(response);
     }
   }
 
   // Auth error — redirect to login with error
-  return NextResponse.redirect(`${origin}/login?error=auth_callback_error`);
+  return clearReturnCookie(NextResponse.redirect(`${origin}/login?error=auth_callback_error`));
 }

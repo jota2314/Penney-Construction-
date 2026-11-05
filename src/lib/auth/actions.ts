@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { LEGACY_SUB_PORTAL_COOKIE, SUB_PORTAL_COOKIE } from "@/lib/sub-portal/auth";
+import { AUTH_RETURN_COOKIE_PATH, AUTH_RETURN_PATH_COOKIE, safeReturnPath } from "@/lib/auth/return-path";
 
 async function getOrigin() {
   const headersList = await headers();
@@ -25,9 +26,20 @@ const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.go
  * Normal sign in — just pick your account, no re-granting permissions.
  * Uses consent prompt to ensure we always get a refresh token.
  */
-export async function signInWithGoogle() {
+export async function signInWithGoogle(returnTo?: string) {
   const supabase = await createClient();
   const origin = await getOrigin();
+  const next = safeReturnPath(returnTo);
+  const jar = await cookies();
+  // Keep the registered OAuth callback fixed; carry the scanned project in
+  // a short-lived server-only cookie. Normal sign-in clears an older scan.
+  jar.set(AUTH_RETURN_PATH_COOKIE, next ?? "", {
+    httpOnly: true,
+    secure: origin.startsWith("https://"),
+    sameSite: "lax",
+    path: AUTH_RETURN_COOKIE_PATH,
+    maxAge: next ? 600 : 0,
+  });
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
