@@ -178,6 +178,7 @@ async function getProjectDetails(input: Record<string, unknown>, supabase: Supab
       .order("start_date", { ascending: true }),
     supabase.from("invoices")
       .select("id, vendor_name, trade, amount, paid_amount, payment_status, invoice_date, description")
+      .is("non_job_reason", null)
       .eq("project_id", projectId)
       .order("invoice_date", { ascending: false }).limit(20),
   ]);
@@ -545,6 +546,7 @@ async function listInvoices(input: Record<string, unknown>, supabase: SupabaseCl
   let query = supabase
     .from("invoices")
     .select("id, project_id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, amount, paid_amount, payment_status, description")
+    .is("non_job_reason", null)
     .order("invoice_date", { ascending: false }).limit(limit);
 
   if (input.project_id) query = query.eq("project_id", String(input.project_id));
@@ -1779,6 +1781,7 @@ async function getBudgetLines(input: Record<string, unknown>, supabase: Supabase
   const { data: invoices } = await supabase
     .from("invoices")
     .select("estimate_line_item_id, amount")
+    .is("non_job_reason", null)
     .eq("project_id", projectId)
     .not("estimate_line_item_id", "is", null);
 

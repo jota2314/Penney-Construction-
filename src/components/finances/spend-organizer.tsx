@@ -26,6 +26,7 @@ import {
 import { BudgetLineSearchSelect } from "@/components/finances/budget-line-search-select";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { parseMoney } from "@/lib/money";
+import { NonJobHistory, ResolveNonJobEditor } from "@/components/finances/non-job-spend";
 
 /**
  * The triage workbench for every cost that still needs a home: flagged
@@ -428,6 +429,7 @@ function OrganizerRow({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [splitting, setSplitting] = useState(false);
+  const [resolvingNonJob, setResolvingNonJob] = useState(false);
   const [zoom, setZoom] = useState(false);
 
   useEffect(() => {
@@ -678,7 +680,7 @@ function OrganizerRow({
           </div>
         </div>
 
-        {expanded && (
+        {expanded && !resolvingNonJob && (
           <div className="grid gap-2 sm:grid-cols-2 so-rise">
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">
@@ -706,10 +708,11 @@ function OrganizerRow({
                 {row.description}
               </div>
             )}
+            {!allocation && <div className="sm:col-span-2"><NonJobHistory invoiceId={row.id} /></div>}
           </div>
         )}
 
-        {splitting && (
+        {splitting && !resolvingNonJob && (
           <SplitEditor
             row={row}
             jobs={jobs}
@@ -721,7 +724,15 @@ function OrganizerRow({
           />
         )}
 
-        <div className="flex items-center gap-2 flex-wrap">
+        {resolvingNonJob && row.updated_at ? <ResolveNonJobEditor
+          key={`${row.id}-${row.updated_at}`}
+          invoiceId={row.id}
+          vendor={row.vendor_name}
+          amount={row.amount}
+          expectedUpdatedAt={row.updated_at}
+          onCancel={() => setResolvingNonJob(false)}
+          onResolved={() => { setResolvingNonJob(false); router.refresh(); }}
+        /> : <div className="flex items-center gap-2 flex-wrap">
           <JobSearchSelect
             jobs={jobs}
             value={projectId}
@@ -767,6 +778,14 @@ function OrganizerRow({
             }`}
           >
             Split
+          </button>}
+          {!allocation && !row.split_group_id && !row.non_job_block_reason && row.updated_at && <button
+            type="button"
+            onClick={() => { setSplitting(false); setResolvingNonJob(true); setError(null); }}
+            disabled={pending || reading}
+            className="min-h-8 rounded-lg border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-sky-500/40 hover:text-foreground disabled:opacity-50"
+          >
+            Resolve as non-job transaction
           </button>}
           {allocation ? null : row.is_bank_row ? (
             <span
@@ -834,7 +853,7 @@ function OrganizerRow({
               Open job
             </Link>
           )}
-        </div>
+        </div>}
 
         {error && <div className="text-xs text-red-400">{error}</div>}
       </div>
@@ -1114,7 +1133,7 @@ export function SpendOrganizer({
         </div>
         <div className="text-sm font-semibold">Nothing to sort out</div>
         <div className="text-xs text-muted-foreground mt-1">
-          Every cost has a job and a clean read. Nice.
+          No receipts or transactions are waiting for review.
         </div>
       </div>
     );

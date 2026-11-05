@@ -13,6 +13,7 @@ export type CashBill = {
   payment_status: string | null;
   payment_method: string | null;
   duplicate_of_id?: string | null;
+  non_job_reason?: string | null;
 };
 export type CashBankRow = {
   id?: string;
@@ -171,7 +172,8 @@ export function summarizeRecordedActivity(receipts: CashReceipt[], bills: CashBi
   }
   for (const row of uniqueRows(bills, "bill")) {
     const method = row.payment_method?.trim().toLowerCase() ?? "";
-    if (row.duplicate_of_id || isInternalBill(row)) continue;
+    // Owner draws and card transfers are retained bank movements, not paid vendor bills.
+    if (row.duplicate_of_id || isInternalBill(row) || row.non_job_reason != null) continue;
     if (row.payment_status !== "paid" && row.payment_status !== "partial") continue;
     const paymentDay = isDay(row.paid_date) ? row.paid_date : null;
     const invoiceDay = isDay(row.invoice_date) ? row.invoice_date : null;
@@ -244,7 +246,7 @@ export function summarizeCashFlow(receipts: CashReceipt[], bills: CashBill[], ba
   const start = `${year}-01-01`;
   const bank = emptyBank();
   const payrollBills = uniqueRows(bills, "bill").filter(row => /^ADP\b/i.test(row.vendor_name?.trim() ?? "")
-    && !row.duplicate_of_id && !isInternalBill(row)
+    && !row.duplicate_of_id && !isInternalBill(row) && row.non_job_reason == null
     && (row.payment_status === "paid" || row.payment_status === "partial"));
   const billDay = (row: CashBill) => isDay(row.paid_date) ? row.paid_date : isDay(row.invoice_date) ? row.invoice_date : null;
   const undatedPayrollBills = payrollBills.filter(row => !billDay(row)).length;

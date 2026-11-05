@@ -3,6 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
+const Module = require('node:module');
+const resolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (request, parent, ...rest) {
+  return resolveFilename.call(this, request.startsWith('@/') ? path.resolve(__dirname, '../src', request.slice(2)) : request, parent, ...rest);
+};
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, filename);
@@ -18,6 +23,8 @@ let rows = buildDailyLog([
   { ...base, id: 'retired', duplicate_of_id: 'a' },
   { ...base, id: 'internal', payment_method: 'internal' },
   { ...base, id: 'qb', source: 'qb_import' },
+  { ...base, id: 'owner-draw', invoice_number: 'draw', project_id: null, amount: 1500, non_job_reason: 'owner_draw' },
+  { ...base, id: 'card-transfer', invoice_number: 'transfer', project_id: null, amount: 39509.14, non_job_reason: 'card_payment_transfer' },
 ], [payment, { ...payment, id: 'qb-payment', source: 'qb_import' }]);
 assert.equal(rows.length, 3);
 assert.equal(rows.find(r => r.id === 'expense:a').allocations, 2);

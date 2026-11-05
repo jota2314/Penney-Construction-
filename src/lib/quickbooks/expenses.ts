@@ -212,6 +212,7 @@ type InvoiceRow = {
   trade: string | null;
   source: string | null;
   duplicate_of_id: string | null;
+  non_job_reason: string | null;
   split_group_id: string | null;
   payment_status: string | null;
   payment_method: string | null;
@@ -227,7 +228,7 @@ type InvoiceRow = {
 };
 
 const INVOICE_COLUMNS =
-  "id, project_id, vendor_name, vendor_type, amount, invoice_number, invoice_date, due_date, description, trade, source, duplicate_of_id, split_group_id, payment_status, payment_method, quickbooks_id, quickbooks_purchase_id, quickbooks_bill_id, quickbooks_push_error, created_by, created_at, paid_by_profile_id, estimate_line_items(description, trade), projects(id, is_overhead, quickbooks_customer_id)";
+  "id, project_id, vendor_name, vendor_type, amount, invoice_number, invoice_date, due_date, description, trade, source, duplicate_of_id, non_job_reason, split_group_id, payment_status, payment_method, quickbooks_id, quickbooks_purchase_id, quickbooks_bill_id, quickbooks_push_error, created_by, created_at, paid_by_profile_id, estimate_line_items(description, trade), projects(id, is_overhead, quickbooks_customer_id)";
 
 const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
 
@@ -238,6 +239,7 @@ const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? nul
  * a duplicate of another bill.
  */
 const neverPush = (r: InvoiceRow) =>
+  Boolean(r.non_job_reason) ||
   isBankLedgerSource(r.source) ||
   r.source === "quickbooks" ||
   r.payment_method === "internal" ||
@@ -251,9 +253,56 @@ async function loadPushable(
   const { data, error } = await supabase.from("invoices").select(INVOICE_COLUMNS).in("id", invoiceIds);
   if (error || !data || data.length === 0) return { rows: null, error: error?.message || "Invoices not found" };
   const all = data as unknown as InvoiceRow[];
-  const stale = all.filter((r) => neverPush(r) && r.quickbooks_push_error).map((r) => r.id);
+  const stale = all.filter((r) => !r.non_job_reason && neverPush(r) && r.quickbooks_push_error).map((r) => r.id);
   if (stale.length > 0) await supabase.from("invoices").update({ quickbooks_push_error: null }).in("id", stale);
   return { rows: all.filter((r) => !neverPush(r)) };
+}
+
+/** Hold the invoice against non-job resolution for the whole remote operation.
+ * A process crash deliberately leaves a durable claim for reconciliation;
+ * automatic retries must not guess whether QuickBooks accepted that request.
+ */
+async function withInvoiceQuickBooksPushClaim<T extends { error: string | null }>(
+  invoiceIds: string[],
+  push: (claimedIds: string[], markRemoteOutcomeUncertain: () => void) => Promise<T>,
+): Promise<T | { error: string | null }> {
+  const supabase = createAdminClient();
+  let claimToken: string | null = null;
+  let releaseError: string | null = null;
+  let remoteOutcomeUncertain = false;
+  let result: T | { error: string | null } = { error: "QuickBooks send did not finish" };
+  try {
+    if (invoiceIds.length === 0) return { error: "No invoices to push" };
+    const { rows, error } = await loadPushable(supabase, invoiceIds);
+    if (!rows) return { error: error ?? "Invoices not found" };
+    if (!rows.length) return { error: null };
+    const claimedIds = rows.map(row => row.id);
+    const claim = await supabase.rpc("claim_invoice_quickbooks_push", { p_invoice_ids: claimedIds });
+    if (claim.error || !claim.data) return { error: claim.error?.message ?? "Could not reserve this QuickBooks send" };
+    claimToken = claim.data as string;
+    // Reload only this claimed batch inside push. A row excluded above may
+    // have been reopened meanwhile and must not join an unclaimed send.
+    result = await push(claimedIds, () => { remoteOutcomeUncertain = true; });
+  } catch (error) {
+    result = { error: error instanceof Error ? error.message : "QuickBooks send failed" };
+  } finally {
+    if (claimToken && (!remoteOutcomeUncertain || !result.error)) {
+      try {
+        const released = await supabase.rpc("release_invoice_quickbooks_push", { p_claim_token: claimToken });
+        if (released.error) releaseError = released.error.message;
+      } catch (error) {
+        releaseError = error instanceof Error ? error.message : "Could not release QuickBooks send";
+      }
+      if (releaseError) console.error("[QuickBooks push claim] reconciliation required", { claimToken, error: releaseError });
+    } else if (claimToken) {
+      console.error("[QuickBooks push claim] uncertain remote outcome; claim retained", { claimToken, invoiceIds, error: result.error });
+    }
+  }
+  if (releaseError) return { error: "QuickBooks send needs reconciliation before retrying or changing this transaction" };
+  if (claimToken && remoteOutcomeUncertain && result.error) {
+    return { error: `${result.error}. QuickBooks send needs reconciliation before retrying or changing this transaction` };
+  }
+  return result;
 }
 
 /**
@@ -417,7 +466,7 @@ async function claimsOn(
   if (candidates.length === 0) return { blocked, imported };
   const column = kind === "purchase" ? "quickbooks_purchase_id" : "quickbooks_bill_id";
   const prefix = kind === "purchase" ? "qb_purchase_" : "qb_bill_";
-  const columns = "id, source, quickbooks_id, quickbooks_purchase_id, quickbooks_bill_id";
+  const columns = "id, source, non_job_reason, quickbooks_id, quickbooks_purchase_id, quickbooks_bill_id";
   const [byColumn, byKey] = await Promise.all([
     supabase.from("invoices").select(columns).in(column, candidates),
     supabase.from("invoices").select(columns).in("quickbooks_id", candidates.map((id) => prefix + id)),
@@ -427,7 +476,7 @@ async function claimsOn(
   for (const r of byColumn.data ?? []) blocked.add(String(r[column]));
   for (const r of byKey.data ?? []) {
     const id = String(r.quickbooks_id).slice(prefix.length);
-    if (r.source === "quickbooks") imported.set(id, [...(imported.get(id) ?? []), r.id]);
+    if (r.source === "quickbooks" && !r.non_job_reason) imported.set(id, [...(imported.get(id) ?? []), r.id]);
     else blocked.add(id);
   }
   return { blocked, imported };
@@ -442,6 +491,13 @@ async function claimsOn(
  */
 export async function pushVendorExpenseToQuickBooks(
   invoiceIds: string[],
+): Promise<{ error: string | null; qbPurchaseId?: string }> {
+  return withInvoiceQuickBooksPushClaim(invoiceIds, pushVendorExpenseToQuickBooksClaimed);
+}
+
+async function pushVendorExpenseToQuickBooksClaimed(
+  invoiceIds: string[],
+  markRemoteOutcomeUncertain: () => void,
 ): Promise<{ error: string | null; qbPurchaseId?: string }> {
   const supabase = createAdminClient();
 
@@ -569,6 +625,7 @@ export async function pushVendorExpenseToQuickBooks(
       }
       // Part paid inside QuickBooks already → pay only what is still open.
       const due = bill ? Math.min(total, Number(bill.Balance)) : total;
+      markRemoteOutcomeUncertain();
       const payment = await qbPost<QBPurchaseCreated>(realmId, accessToken, "BillPayment", {
         VendorRef: { value: vendorId },
         PayType: paymentType === "CreditCard" ? "CreditCard" : "Check",
@@ -579,7 +636,8 @@ export async function pushVendorExpenseToQuickBooks(
         Line: [{ Amount: due, LinkedTxn: [{ TxnId: billId, TxnType: "Bill" }] }],
         PrivateNote: `Penney app bill payment ${rows[0].id}`,
       }, environment);
-      await supabase
+      if (!payment?.Id || typeof payment.Id !== "string") throw new Error("QuickBooks BillPayment response had no transaction ID");
+      const paymentLink = await supabase
         .from("invoices")
         .update({
           quickbooks_purchase_id: payment.Id,
@@ -587,11 +645,13 @@ export async function pushVendorExpenseToQuickBooks(
           quickbooks_push_error: null,
         })
         .in("id", ids);
+      if (paymentLink.error) throw new Error(`In QuickBooks as BillPayment #${payment.Id}, but the app couldn't record the link: ${paymentLink.error.message}`);
       return { error: null, qbPurchaseId: payment.Id };
     }
 
     const now = new Date().toISOString();
     const stamp = async (purchaseId: string) => {
+      if (!purchaseId || typeof purchaseId !== "string") throw new Error("QuickBooks Purchase response had no transaction ID");
       const linked = await supabase
         .from("invoices")
         .update({ quickbooks_purchase_id: purchaseId, quickbooks_pushed_at: now, quickbooks_push_error: null })
@@ -634,12 +694,14 @@ export async function pushVendorExpenseToQuickBooks(
       const { blocked, imported } = await claimsOn(supabase, "purchase", sameCharge.map((p) => p.Id));
       const existing = sameCharge.find((p) => !blocked.has(p.Id));
       if (existing) {
+        markRemoteOutcomeUncertain();
         await retireImported(supabase, imported.get(existing.Id) ?? [], rows[0].id);
         await stamp(existing.Id);
         return { error: null, qbPurchaseId: existing.Id };
       }
     }
 
+    markRemoteOutcomeUncertain();
     const created = await qbPost<QBPurchaseCreated>(realmId, accessToken, "Purchase", {
       PaymentType: paymentType,
       ...(isCredit ? { Credit: true } : {}),
@@ -671,6 +733,13 @@ export async function pushVendorExpenseToQuickBooks(
  */
 export async function pushVendorBillToQuickBooks(
   invoiceIds: string[],
+): Promise<{ error: string | null; qbBillId?: string }> {
+  return withInvoiceQuickBooksPushClaim(invoiceIds, pushVendorBillToQuickBooksClaimed);
+}
+
+async function pushVendorBillToQuickBooksClaimed(
+  invoiceIds: string[],
+  markRemoteOutcomeUncertain: () => void,
 ): Promise<{ error: string | null; qbBillId?: string }> {
   const supabase = createAdminClient();
 
@@ -735,6 +804,7 @@ export async function pushVendorBillToQuickBooks(
     const entity = isCredit ? "VendorCredit" : "Bill";
     const now = new Date().toISOString();
     const stamp = async (billId: string) => {
+      if (!billId || typeof billId !== "string") throw new Error(`QuickBooks ${entity} response had no transaction ID`);
       const linked = await supabase
         .from("invoices")
         .update({ quickbooks_bill_id: billId, quickbooks_pushed_at: now, quickbooks_push_error: null })
@@ -785,12 +855,14 @@ export async function pushVendorBillToQuickBooks(
       const { blocked, imported } = await claimsOn(supabase, "bill", sameBill.map((b) => b.Id));
       const existing = sameBill.find((b) => !blocked.has(b.Id));
       if (existing) {
+        markRemoteOutcomeUncertain();
         await retireImported(supabase, imported.get(existing.Id) ?? [], rows[0].id);
         await stamp(existing.Id);
         return { error: null, qbBillId: existing.Id };
       }
     }
 
+    markRemoteOutcomeUncertain();
     const created = await qbPost<QBPurchaseCreated>(
       realmId,
       accessToken,
@@ -881,6 +953,7 @@ export async function retryFailedQuickBooksPushes(
     .is("quickbooks_purchase_id", null)
     .is("quickbooks_bill_id", null)
     .is("duplicate_of_id", null)
+    .is("non_job_reason", null)
     .not("project_id", "is", null)
     .or("review_status.is.null,review_status.neq.needs_review")
     .gte("created_at", since)

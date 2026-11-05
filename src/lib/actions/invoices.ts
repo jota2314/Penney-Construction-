@@ -314,6 +314,7 @@ export async function approveInvoiceForPay(invoiceId: string) {
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")
     .select("id, vendor_name, invoice_number, amount, due_date, approved_for_pay_at, pay_approval_status, pay_approved_at, project_id, projects(name, project_number)")
+    .is("non_job_reason", null)
     .eq("id", invoiceId)
     .single();
   if (invoiceError || !invoice) return { error: invoiceError?.message || "Invoice not found" };
@@ -330,7 +331,7 @@ export async function approveInvoiceForPay(invoiceId: string) {
   // bill Ryan approved here still showed "To approve" on /invoices and
   // /spent, and Nicole re-asked for approvals that were already given (WRD
   // $7,500 Parziale, MGL Danti $1,000).
-  const { error: updateError } = await supabase
+  const { data: approved, error: updateError } = await supabase
     .from("invoices")
     .update({
       approved_for_pay_at: approvedAt,
@@ -340,8 +341,12 @@ export async function approveInvoiceForPay(invoiceId: string) {
       pay_approved_at: approvedAt,
       updated_at: approvedAt,
     })
-    .eq("id", invoiceId);
+    .eq("id", invoiceId)
+    .is("non_job_reason", null)
+    .select("id")
+    .maybeSingle();
   if (updateError) return { error: updateError.message };
+  if (!approved) return { error: "This transaction changed or is not a vendor bill. Refresh before approving." };
 
   const { data: actor } = await supabase
     .from("profiles")
@@ -392,6 +397,7 @@ export async function getProjectInvoices(projectId: string) {
   const { data, error } = await supabase
     .from("invoices")
     .select("*")
+    .is("non_job_reason", null)
     .eq("project_id", projectId)
     .order("invoice_date", { ascending: false });
 
@@ -403,7 +409,7 @@ export async function getProjectFinancialSummary(projectId: string) {
   const supabase = await createClient();
 
   const [{ data: invoices }, { data: quotes }, { data: project }] = await Promise.all([
-    supabase.from("invoices").select("amount, paid_amount, payment_status").eq("project_id", projectId),
+    supabase.from("invoices").select("amount, paid_amount, payment_status").is("non_job_reason", null).eq("project_id", projectId),
     supabase.from("quote_requests").select("amount").eq("project_id", projectId),
     supabase.from("projects").select("estimated_value, contract_value").eq("id", projectId).single(),
   ]);

@@ -77,7 +77,7 @@ export async function getLineCloseouts(
     .from("invoices")
     .select(
       "id, estimate_line_item_id, vendor_name, invoice_number, invoice_date, amount, payment_status",
-    )
+    ).is("non_job_reason", null)
     .eq("project_id", projectId)
     .in("estimate_line_item_id", lineIds);
 

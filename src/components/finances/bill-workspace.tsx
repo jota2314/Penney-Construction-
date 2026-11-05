@@ -12,6 +12,7 @@ import { spendCategoryFor } from "@/lib/finance/spend-category";
 import { isPayApproved } from "@/lib/finance/pay-approval";
 import { LineItemPicker, type PickerLine } from "@/app/(app)/spent/[id]/line-item-picker";
 import { ProjectPicker, type PickerProject } from "@/app/(app)/spent/[id]/project-picker";
+import { NonJobHistory } from "@/components/finances/non-job-spend";
 
 
 
@@ -34,7 +35,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
       pay_approval_status, pay_approved_at, approved_for_pay_at,
       attachment_storage_path, extracted_text, notes,
       project_id, estimate_line_item_id, quote_request_id, change_order_id,
-      quickbooks_id, source, split_group_id,
+      quickbooks_id, source, split_group_id, non_job_reason, non_job_resolved_at, non_job_note,
       pay_approver:profiles!invoices_pay_approved_by_fkey(full_name),
       tab_approver:profiles!invoices_approved_for_pay_by_fkey(full_name),
       projects(name, project_number, is_overhead),
@@ -45,6 +46,9 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
     .maybeSingle();
 
   if (!inv) return embedded ? <p>This bill is unavailable or you no longer have access.</p> : notFound();
+
+  const nonJob = Boolean(inv.non_job_reason);
+  const nonJobLabel = inv.non_job_reason === "owner_draw" ? "Owner Draw" : "Credit Card Payment/Transfer";
 
   const proj = Array.isArray(inv.projects) ? inv.projects[0] : inv.projects;
   const lineItem = Array.isArray(inv.estimate_line_items) ? inv.estimate_line_items[0] : inv.estimate_line_items;
@@ -77,7 +81,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
   // line that no contract and no budget ever counted. Every other picker
   // (bill drop, crew receipt, review queue, split) already used this rule.
   let pickerLines: PickerLine[] = [];
-  if (inv.project_id) {
+  if (inv.project_id && !nonJob) {
     const [{ data: currentId }, { data: projectRow }] = await Promise.all([
       supabase.rpc("current_estimate_id", { p_project_id: inv.project_id }),
       supabase.from("projects").select("contract_estimate_id").eq("id", inv.project_id).maybeSingle(),
@@ -176,7 +180,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
 
   // Every project, newest first, so a misfiled bill can be moved to the
   // right job from this page.
-  const { data: allProjects } = await supabase
+  const { data: allProjects } = nonJob ? { data: [] } : await supabase
     .from("projects")
     .select("id, name, project_number, status, is_overhead")
     .order("project_number", { ascending: false });
@@ -208,12 +212,28 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
 
   return (
     <>
-      {!embedded && <Header title={inv.vendor_name || "Transaction"} backHref="/spent" />}
+      {!embedded && <Header title={inv.vendor_name || "Transaction"} backHref={nonJob ? "/spent/review" : "/spent"} />}
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8 max-w-4xl mx-auto w-full">
+        {nonJob && <section className="space-y-2 rounded-lg border border-sky-500/30 bg-sky-500/[0.04] p-4">
+          <h2 className="text-sm font-semibold">Resolved non-job transaction · {nonJobLabel}</h2>
+          <p className="text-xs leading-relaxed text-muted-foreground">This transaction is excluded from job costs and operating costs. Its original amount, payment records and attachments are retained. Return it to review before changing its classification or assigning it to a job.</p>
+          {inv.non_job_resolved_at && <p className="text-xs text-muted-foreground">Resolved {new Date(inv.non_job_resolved_at).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" })}</p>}
+          {inv.non_job_note && <p className="text-xs whitespace-pre-wrap break-words">{inv.non_job_note}</p>}
+          <div className="flex flex-wrap gap-4">
+            <NonJobHistory invoiceId={inv.id} />
+            <Link href={`/spent/review#non-job-${inv.id}`} className="text-xs underline underline-offset-2">View resolution or return to review</Link>
+          </div>
+        </section>}
+        {!nonJob && inv.non_job_note && <section className="space-y-2 rounded-lg border bg-card p-4">
+          <h2 className="text-sm font-semibold">Previous non-job review</h2>
+          <p className="text-xs text-muted-foreground">This transaction was returned to review. Its previous non-job classification and the reason for reopening remain in its history.</p>
+          <p className="text-xs whitespace-pre-wrap break-words"><span className="font-medium">Return-to-review note:</span> {inv.non_job_note}</p>
+          <NonJobHistory invoiceId={inv.id} />
+        </section>}
         {/* Hero */}
         <section>
           <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {inv.payment_status === "paid" ? (
+            {nonJob ? <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-500">Non-job</span> : inv.payment_status === "paid" ? (
               <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500">
                 Paid
               </span>
@@ -222,19 +242,19 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
                 {inv.payment_status || "—"}
               </span>
             )}
-            {isUnpaid && payApproved && (
+            {!nonJob && isUnpaid && payApproved && (
               <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-500">
                 Approved for pay{payApprover?.full_name ? ` · ${payApprover.full_name.split(" ")[0]}` : ""}
               </span>
             )}
-            {isUnpaid && !payApproved && inv.pay_approval_status === "pending" && (
+            {!nonJob && isUnpaid && !payApproved && inv.pay_approval_status === "pending" && (
               <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-red-500/15 text-red-500">
                 Needs pay approval
               </span>
             )}
-            <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${category.chip}`}>
+            {!nonJob && <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${category.chip}`}>
               {category.label}
-            </span>
+            </span>}
             {inv.trade && (
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
                 {inv.trade}
@@ -254,9 +274,10 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
             {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "no date"}
             {inv.due_date ? ` · due ${new Date(inv.due_date).toLocaleDateString()}` : ""}
           </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
+          {!nonJob && <div className="text-[11px] text-muted-foreground mt-0.5">
             Books to <span className="font-medium text-foreground/80">{category.qbAccount}</span> in QuickBooks
-          </div>
+          </div>}
+          {nonJob && <p className="mt-2 text-xs text-muted-foreground">Recorded payment status: {inv.payment_status || "Not recorded"} · Recorded paid amount: {fmt(Number(inv.paid_amount || 0))}{inv.paid_date ? ` · Paid date: ${inv.paid_date}` : ""}</p>}
 
           <div className="mt-4 flex items-baseline gap-3 flex-wrap">
             <div>
@@ -274,7 +295,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
                 <div className="text-[18px] font-semibold tabular-nums text-emerald-500">{fmt(Number(inv.paid_amount || 0))}</div>
               </div>
             )}
-            {isUnpaid && !paymentBlocked && (
+            {!nonJob && isUnpaid && !paymentBlocked && (
               <div className="ml-auto flex items-center gap-2">
                 {canApprove && !payApproved && <ApprovePayButton invoiceId={inv.id} groupIds={groupIds} />}
                 {(!embedded || payApproved) && <MarkPaidButton invoiceId={inv.id} groupIds={groupIds} />}
@@ -284,7 +305,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
         </section>
 
         {/* Links */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {!nonJob && <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Project</div>
             <ProjectPicker
@@ -306,7 +327,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
               lines={pickerLines}
             />
           </div>
-        </section>
+        </section>}
 
         {/* One bill, several budget lines — the other pieces of this split */}
         {isSplit && (

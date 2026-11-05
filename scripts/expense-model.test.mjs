@@ -22,6 +22,20 @@ const bill = (overrides = {}) => ({
   duplicate_of_id: null, source: 'manual', review_status: 'ok', ...overrides,
 });
 
+test('explicit owner draws and card transfers never enter expenses, unassigned costs or review totals', () => {
+  const view = buildExpenseView([
+    bill({ id: 'ordinary', amount: 85 }),
+    bill({ id: 'draw', amount: 1500, non_job_reason: 'owner_draw', project_id: null, estimate_line_item_id: null }),
+    bill({ id: 'transfer', amount: 39509.14, non_job_reason: 'card_payment_transfer', project_id: null, estimate_line_item_id: null }),
+    bill({ id: 'unclassified', amount: 55, project_id: null, estimate_line_item_id: null }),
+  ], period);
+  assert.equal(view.summary.netCents, 14000);
+  assert.equal(view.summary.recordCount, 2);
+  assert.equal(view.summary.unassignedCents, 5500);
+  assert.equal(view.summary.missingAllocationCount, 1);
+  assert.deepEqual(view.allocations.map(a => a.record.id), ['ordinary', 'unclassified']);
+});
+
 test('bill-date view counts paid, partial and unpaid costs; partial payments contribute to paid and open totals', () => {
   const view = buildExpenseView([
     bill({ id: 'paid' }), bill({ id: 'partial', amount: 78.25, paid_amount: 64.86, payment_status: 'partial' }),

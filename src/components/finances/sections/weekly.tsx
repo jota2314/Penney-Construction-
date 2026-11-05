@@ -57,7 +57,7 @@ export default async function WeekPage({
       fetchAllRows((from, to) =>
         supabase
           .from("invoices")
-          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, split_group_id, estimate_line_item_id, project_id, subcontractor_id, payment_status, pay_approval_status, pay_approved_by, pay_approved_at, approved_for_pay_by, approved_for_pay_at, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description, cost)")
+          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, split_group_id, estimate_line_item_id, project_id, subcontractor_id, payment_status, pay_approval_status, pay_approved_by, pay_approved_at, approved_for_pay_by, approved_for_pay_at, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description, cost)").is("non_job_reason", null)
           .is("duplicate_of_id", null)
           .gte("invoice_date", startDate)
           .lte("invoice_date", endDate)
@@ -154,7 +154,7 @@ export default async function WeekPage({
       ? [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
       : await Promise.all([
           // Everything ever billed to the same budget lines — the line's remaining budget.
-          supabase.from("invoices").select("id, estimate_line_item_id, amount").in("estimate_line_item_id", orNil(subLineIds)),
+          supabase.from("invoices").select("id, estimate_line_item_id, amount").is("non_job_reason", null).in("estimate_line_item_id", orNil(subLineIds)),
           // Same vendor + same invoice number anywhere in the books — the double-entry check.
           supabase.from("invoices").select("id, vendor_name, invoice_number, amount, split_group_id").in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]).in("invoice_number", subInvoiceNumbers.length ? subInvoiceNumbers : ["—"]),
           // Awarded contract per sub per job. Active rows only: a QR visit
@@ -165,8 +165,8 @@ export default async function WeekPage({
           // (catches vendor-name variants), plus bills on the same job with no
           // subcontractor_id under the same vendor name (older bills never got
           // the link, so the sub-id match alone understates what he's billed).
-          supabase.from("invoices").select("id, project_id, subcontractor_id, vendor_name, amount").in("project_id", orNil(subProjectIds)).in("subcontractor_id", orNil(subContractorIds)),
-          supabase.from("invoices").select("id, project_id, subcontractor_id, vendor_name, amount").in("project_id", orNil(subProjectIds)).is("subcontractor_id", null).in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]),
+          supabase.from("invoices").select("id, project_id, subcontractor_id, vendor_name, amount").is("non_job_reason", null).in("project_id", orNil(subProjectIds)).in("subcontractor_id", orNil(subContractorIds)),
+          supabase.from("invoices").select("id, project_id, subcontractor_id, vendor_name, amount").is("non_job_reason", null).in("project_id", orNil(subProjectIds)).is("subcontractor_id", null).in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]),
           supabase.from("subcontractors").select("id, insurance_expiry").in("id", orNil(subContractorIds)),
           supabase.from("profiles").select("id, full_name").in("id", orNil(approverIds)),
         ]);

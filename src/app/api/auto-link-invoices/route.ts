@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       .from("invoices")
       .select("*")
       .eq("project_id", projectId)
+      .is("non_job_reason", null)
       .is("estimate_line_item_id", null)
       .order("invoice_date", { ascending: false });
 
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
       .from("invoices")
       .select("estimate_line_item_id, amount")
       .eq("project_id", projectId)
+      .is("non_job_reason", null)
       .not("estimate_line_item_id", "is", null);
 
     const spendByLine = new Map<string, number>();
@@ -187,7 +189,8 @@ Rules:
             estimate_line_item_id: validSplits[0].line_item_id,
             description: validSplits[0].note || original.description,
           })
-          .eq("id", mapping.invoice_id);
+          .eq("id", mapping.invoice_id)
+          .is("non_job_reason", null);
 
         if (error) errors.push(`Link error: ${error.message}`);
         else linked++;

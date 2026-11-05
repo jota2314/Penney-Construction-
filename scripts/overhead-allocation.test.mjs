@@ -19,6 +19,26 @@ const base = () => ({
   bills: [bill('rent', 90)],
 });
 
+test('nullable non-job metadata leaves ordinary overhead audit fingerprints unchanged', () => {
+  const input = base();
+  const before = calculate(input);
+  input.bills[0].non_job_reason = null;
+  assert.equal(calculate(input).fingerprint, before.fingerprint);
+});
+
+test('non-job money is excluded from operating overhead and its classification remains fingerprinted', () => {
+  const input = base();
+  input.bills.push(bill('draw', 1500, { non_job_reason: 'owner_draw' }), bill('transfer', 39509.14, { non_job_reason: 'card_payment_transfer' }));
+  const result = calculate(input);
+  assert.equal(result.months[0].overhead, 20000);
+  assert.equal(result.allocated, 5000);
+  assert.equal(classifyOverheadBill(input.bills[1]), 'excluded');
+  assert.ok(result.source_register['overhead_bills:draw']);
+  input.bills[1].non_job_reason = null;
+  assert.notEqual(calculate(input).fingerprint, result.fingerprint);
+  assert.equal(calculate(input).allocated, 42500);
+});
+
 test('allocates actual payroll, fees and net overhead bills against signed net receipts in the same month', () => {
   const input = base();
   input.jobReceipts.push(receipt('bounce', -25)); input.companyReceipts.push(receipt('bounce', -25));

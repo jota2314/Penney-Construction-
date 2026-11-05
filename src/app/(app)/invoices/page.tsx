@@ -52,7 +52,7 @@ export default async function InvoicesPage({
     .from("invoices")
     .select(
       "id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, amount, paid_amount, payment_status, pay_approval_status, approved_for_pay_at, review_status, review_reason, source, project_id, quickbooks_purchase_id, quickbooks_bill_id, quickbooks_id, projects(name, project_number)",
-    )
+    ).is("non_job_reason", null)
     .order("invoice_date", { ascending: false, nullsFirst: false })
     .limit(300);
 

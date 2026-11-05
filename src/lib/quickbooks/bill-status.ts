@@ -43,6 +43,7 @@ export async function syncBillPaymentStatuses(): Promise<{
     .from("invoices")
     .select("id, amount, quickbooks_bill_id, payment_status")
     .not("quickbooks_bill_id", "is", null)
+    .is("non_job_reason", null)
     .neq("payment_status", "paid")
     .neq("source", "quickbooks")
     .limit(200);
@@ -86,7 +87,8 @@ export async function syncBillPaymentStatuses(): Promise<{
               paid_amount: Number(row.amount) || paidAmount,
               paid_date: today,
             })
-            .eq("id", row.id);
+            .eq("id", row.id)
+            .is("non_job_reason", null);
           result.markedPaid++;
         } else if (
           bill.Balance > 0 &&
@@ -96,7 +98,8 @@ export async function syncBillPaymentStatuses(): Promise<{
           await supabase
             .from("invoices")
             .update({ payment_status: "partial", paid_amount: paidAmount })
-            .eq("id", row.id);
+            .eq("id", row.id)
+            .is("non_job_reason", null);
           result.markedPartial++;
         }
       }

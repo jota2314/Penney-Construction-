@@ -121,6 +121,7 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
   const { data, error } = await supabase
     .from("invoices")
     .select(fields)
+    .is("non_job_reason", null)
     // Both intake paths land here: crew photos AND office drops (bills/PDFs).
     .in("source", ["field_capture", "office_entry"])
     .order("created_at", { ascending: false })
@@ -144,7 +145,7 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
     if (!values.length) continue;
     // Page through siblings rather than silently truncating a large allocation.
     for (let offset = 0; ; offset += 500) {
-      const result = await supabase.from("invoices").select(fields).in(column, values).order("id").range(offset, offset + 499);
+      const result = await supabase.from("invoices").select(fields).is("non_job_reason", null).in(column, values).order("id").range(offset, offset + 499);
       if (result.error) throw new Error("Couldn't load complete invoices");
       for (const row of result.data ?? []) byId.set(row.id, row);
       if ((result.data?.length ?? 0) < 500) break;

@@ -11,6 +11,7 @@ export type DailyExpense = Common & {
   split_group_id: string | null; payment_status: string | null;
   payment_method: string | null; duplicate_of_id: string | null;
   attachment_storage_path?: string | null;
+  non_job_reason?: string | null;
 };
 export type DailyIncome = Common & {
   payer_name: string | null; received_date: string | null;
@@ -43,7 +44,7 @@ const amountOf = (n: number | null) => n === null || !Number.isFinite(Number(n))
  * No bank ledger is mixed in, which would count matched transactions twice.
  */
 export function buildDailyLog(expenses: DailyExpense[], income: DailyIncome[]): LogTransaction[] {
-  const bills = expenses.filter(r => !r.duplicate_of_id && r.payment_method !== "internal" && !fromQuickBooks(r.source));
+  const bills = expenses.filter(r => !r.duplicate_of_id && r.non_job_reason == null && r.payment_method !== "internal" && !fromQuickBooks(r.source));
   const result: LogTransaction[] = groupReceiptInvoices(bills).map(g => {
     const r = g.head;
     const statuses = new Set(g.rows.map(r => r.payment_status));

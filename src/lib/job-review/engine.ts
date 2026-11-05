@@ -10,15 +10,21 @@ export type Snapshot = { as_of: string; records: Record<string, Row[]> };
 export type Evidence = { id: string; title: string; action: string; classification: "allocation_question" | "verified_cost" | "question"; line_id: string | null; refs: Record<string, string>; reviewed_at: string; resolved: boolean; priority?: number; supersedes_id?: string | null };
 export type Scope = { id: string; name: string; budget: number | null; vendor_cost: number; wages: number; cost: number; minutes: number; unbilled_commitment: number; bill_ids: string[]; shift_ids: string[] };
 export type Finding = { id: string; kind: string; title: string; detail: string; action: string; line_id: string | null; amount: number | null; refs: string[]; evidence_state: string };
-export const ENGINE_VERSION = "1.0.0";
+export const ENGINE_VERSION = "1.1.0";
 const str = (v: unknown) => typeof v === "string" ? v : "";
 const vendorKey = (v: unknown) => str(v).toLowerCase().replace(/\b(inc|llc|corp|corporation|incorporated)\b/g, "").replace(/[^a-z0-9]/g, "");
 const money = (v: unknown): number | null => v == null || v === "" || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 100);
 const sum = <T>(a: T[], f: (r: T) => number) => a.reduce((s, r) => s + f(r), 0);
 const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v !== null && typeof v === "object" ? `{${Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => `${JSON.stringify(k)}:${canonical(x)}`).join(",")}}` : JSON.stringify(v) ?? "null";
 export const fingerprint = (v: unknown) => createHash("sha256").update(canonical(v)).digest("hex");
+const NON_JOB_METADATA = new Set(["non_job_reason", "non_job_resolved_at", "non_job_resolved_by", "non_job_note"]);
 export function sourceRegister(s: Snapshot) {
-  return Object.fromEntries(Object.entries(s.records).flatMap(([source, rows]) => rows.map(r => [`${source}:${r.id}`, fingerprint(r)])));
+  return Object.fromEntries(Object.entries(s.records).flatMap(([source, rows]) => rows.map(r => {
+    // Adding nullable classification columns must not invalidate every saved
+    // ordinary bill. Actual resolution metadata remains part of its evidence.
+    const record = source === "invoices" ? Object.fromEntries(Object.entries(r).filter(([key, value]) => !NON_JOB_METADATA.has(key) || value != null)) : r;
+    return [`${source}:${r.id}`, fingerprint(record)];
+  })));
 }
 export function changesSince(current: Record<string, string>, previous: Record<string, string> = {}) {
   return { added: Object.keys(current).filter(k => !(k in previous)), changed: Object.keys(current).filter(k => k in previous && current[k] !== previous[k]), removed: Object.keys(previous).filter(k => !(k in current)), unchanged: Object.keys(current).filter(k => current[k] === previous[k]).length };
@@ -53,7 +59,9 @@ export function calculateReview(snapshot: Snapshot, evidence: Evidence[] = []) {
   const byLine = new Map(scopes.map(l => [l.id, l]));
   const findings: Finding[] = [];
   const gaps: string[] = [];
-  const bills = rows("invoices").filter(b => !b.duplicate_of_id);
+  // Keep classified records in the source register, but never treat their
+  // cash movement as a job cost, payable, or billed commitment.
+  const bills = rows("invoices").filter(b => !b.duplicate_of_id && b.non_job_reason == null);
   for (const b of bills) {
     const scope = byLine.get(str(b.estimate_line_item_id)) ?? unallocated;
     const amount = money(b.amount);

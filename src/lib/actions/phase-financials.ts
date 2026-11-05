@@ -74,7 +74,7 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
     phase.estimate_line_item_id
       ? supabase
           .from("invoices")
-          .select("id, vendor_name, trade, amount, paid_amount, payment_status, invoice_number, invoice_date")
+          .select("id, vendor_name, trade, amount, paid_amount, payment_status, invoice_number, invoice_date").is("non_job_reason", null)
           .eq("estimate_line_item_id", phase.estimate_line_item_id)
           .order("invoice_date", { ascending: false })
       : Promise.resolve({ data: [] }),

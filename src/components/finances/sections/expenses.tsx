@@ -97,7 +97,7 @@ export default async function Expenses({ searchParams }: {
   // only to make missing coverage visible, not to assign them to this period.
   const [records, needsReview, bankPeriod] = await Promise.all([
     financialRows((from, to) => supabase.from("invoices")
-      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, source, review_status, is_capex, projects(name, project_number, is_overhead), estimate_line_items(description)")
+      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, source, review_status, is_capex, projects(name, project_number, is_overhead), estimate_line_items(description)").is("non_job_reason", null)
       .is("duplicate_of_id", null)
       .or(`and(invoice_date.gte.${start},invoice_date.lte.${end}),invoice_date.is.null`)
       .order("invoice_date", { ascending: false, nullsFirst: false }).order("id").range(from, to)),

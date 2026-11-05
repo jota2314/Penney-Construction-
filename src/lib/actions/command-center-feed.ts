@@ -126,7 +126,7 @@ export async function getCommandCenterFeedData(
     safe<{ amount: number | null; paid_amount: number | null; payment_method: string | null }[]>(
       supabase
         .from("invoices")
-        .select("amount, paid_amount, payment_method")
+        .select("amount, paid_amount, payment_method").is("non_job_reason", null)
         .eq("payment_status", "paid")
         .gte("invoice_date", weekAgoISO),
     ),
@@ -135,7 +135,7 @@ export async function getCommandCenterFeedData(
     safeCount(
       supabase
         .from("invoices")
-        .select("id", { count: "exact", head: true })
+        .select("id", { count: "exact", head: true }).is("non_job_reason", null)
         .eq("review_status", "needs_review"),
     ),
     safeCount(

@@ -8,6 +8,7 @@ export type BillRecord = {
   payment_status: string | null; payment_method: string | null;
   source: string | null; review_status: string | null; review_reason: string | null;
   description?: string | null;
+  non_job_reason?: string | null;
   duplicate_of_id: string | null; split_group_id: string | null;
   estimate_line_item_id: string | null;
   pay_approval_status: string | null; approved_for_pay_at: string | null;
@@ -31,7 +32,7 @@ const quickbooks = (source: string | null) => /^(qb(?:_|$)|quickbooks)/i.test(so
  */
 export function buildOpenBills(records: BillRecord[], today: string): OpenBillsSummary {
   const result: OpenBillsSummary = { bills: [], review: [], total: 0, reviewBalance: 0 };
-  const eligible = records.filter(row => !row.duplicate_of_id).map(row => ({
+  const eligible = records.filter(row => !row.duplicate_of_id && row.non_job_reason == null).map(row => ({
     ...row, vendor_name: row.vendor_name || "Unknown vendor",
     amount: row.amount === null ? null : Number(row.amount),
   }));
