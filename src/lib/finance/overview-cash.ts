@@ -39,9 +39,12 @@ export type RecordedActivity = {
   undatedReceipts: number;
   undatedReceiptAmount: number;
   invalidDateCount: number;
-  /** Partially paid records without a usable positive payment amount; inventory-wide. */
+  /** Partial records with missing or inconsistent signed payment amounts; inventory-wide. */
   unresolvedPaymentAmounts: number;
   unresolvedPaymentIds: string[];
+  /** In-period paid/partial records whose amounts or status conflict. Excluded from subtotals. */
+  paymentIssueCount: number;
+  paymentIssueIds: string[];
 };
 export type ImportedBankActivity = {
   received: number;
@@ -116,12 +119,36 @@ function uniqueRows<T extends { id?: string }>(rows: T[], label: string): T[] {
   });
 }
 
+function isInternalBill(row: CashBill): boolean {
+  return row.payment_method?.trim().toLowerCase() === "internal"
+    || /^(in.house labor|penney construction \(labor\))$/i.test(row.vendor_name?.trim() ?? "");
+}
+
+function paymentFor(row: CashBill): { cents: number | null; issue: boolean } {
+  const parse = (value: Amount | undefined) => {
+    if (value === undefined) return null;
+    try { return toCents(value, "recorded bill amount"); } catch { return null; }
+  };
+  const face = parse(row.amount);
+  // An absent historical value may use paid status as book evidence. An
+  // explicit zero is a recorded value and must never become the face amount.
+  const paid = row.paid_amount === null || row.paid_amount === undefined
+    ? row.payment_status === "paid" ? face : null
+    : parse(row.paid_amount);
+  if (face === null || paid === null) return { cents: null, issue: true };
+  const outsideFace = face >= 0 ? paid < 0 || paid > face : paid > 0 || paid < face;
+  const statusConflict = row.payment_status === "paid" ? paid !== face
+    : row.payment_status === "partial" ? paid === 0 || paid === face : true;
+  return { cents: paid, issue: outsideFace || statusConflict };
+}
+
 const emptyRecords = (): RecordedActivity => ({
   received: 0, receiptCount: 0, paidBills: 0, paidBillCount: 0,
   directPayments: 0, cardPurchases: 0, unclassifiedPayments: 0,
   estimatedDateCount: 0, undatedPayments: 0, undatedPaymentAmount: 0,
   undatedReceipts: 0, undatedReceiptAmount: 0, invalidDateCount: 0,
   unresolvedPaymentAmounts: 0, unresolvedPaymentIds: [],
+  paymentIssueCount: 0, paymentIssueIds: [],
 });
 
 /** Recorded receipts and paid bill amounts are not bank activity. Undated/invalid-date warnings describe the supplied inventory, not one period. */
@@ -144,25 +171,30 @@ export function summarizeRecordedActivity(receipts: CashReceipt[], bills: CashBi
   }
   for (const row of uniqueRows(bills, "bill")) {
     const method = row.payment_method?.trim().toLowerCase() ?? "";
-    if (row.duplicate_of_id || method === "internal") continue;
+    if (row.duplicate_of_id || isInternalBill(row)) continue;
     if (row.payment_status !== "paid" && row.payment_status !== "partial") continue;
     const paymentDay = isDay(row.paid_date) ? row.paid_date : null;
     const invoiceDay = isDay(row.invoice_date) ? row.invoice_date : null;
     if (row.paid_date && !paymentDay) result.invalidDateCount++;
     if (!paymentDay && row.invoice_date && !invoiceDay) result.invalidDateCount++;
     const day = paymentDay ?? invoiceDay;
-    // A partial bill needs an explicit positive payment; never guess from its face amount.
-    // Track unresolved rows across the inventory without making old bad values fatal.
-    const rawPaid = Number(row.paid_amount);
-    if (row.payment_status === "partial" && (!Number.isFinite(rawPaid) || Math.round(rawPaid * 100) <= 0)) {
-      result.unresolvedPaymentAmounts++;
-      if (row.id) result.unresolvedPaymentIds.push(row.id);
+    const payment = paymentFor(row);
+    if (payment.issue) {
+      // Preserve inventory-wide partial-payment warnings, while the period
+      // warning also covers paid-zero, status conflicts and overpayments.
+      if (row.payment_status === "partial") {
+        result.unresolvedPaymentAmounts++;
+        if (row.id) result.unresolvedPaymentIds.push(row.id);
+      }
       if (!day) result.undatedPayments++;
+      if (day && inPeriod(day)) {
+        result.paymentIssueCount++;
+        if (row.id) result.paymentIssueIds.push(row.id);
+      }
       continue;
     }
     if (day && !inPeriod(day)) continue;
-    const recordedPaid = row.paid_amount === null ? 0 : toCents(row.paid_amount, "bill payment");
-    const amount = recordedPaid !== 0 ? recordedPaid : toCents(row.amount, "paid bill");
+    const amount = payment.cents!;
     if (!day) {
       result.undatedPayments++;
       result.undatedPaymentAmount += amount;
@@ -212,7 +244,7 @@ export function summarizeCashFlow(receipts: CashReceipt[], bills: CashBill[], ba
   const start = `${year}-01-01`;
   const bank = emptyBank();
   const payrollBills = uniqueRows(bills, "bill").filter(row => /^ADP\b/i.test(row.vendor_name?.trim() ?? "")
-    && !row.duplicate_of_id && row.payment_method?.trim().toLowerCase() !== "internal"
+    && !row.duplicate_of_id && !isInternalBill(row)
     && (row.payment_status === "paid" || row.payment_status === "partial"));
   const billDay = (row: CashBill) => isDay(row.paid_date) ? row.paid_date : isDay(row.invoice_date) ? row.invoice_date : null;
   const undatedPayrollBills = payrollBills.filter(row => !billDay(row)).length;
@@ -254,7 +286,7 @@ export function summarizeCashFlow(receipts: CashReceipt[], bills: CashBill[], ba
     const unresolvedCandidate = payrollBills.some(row => {
       const day = billDay(row);
       return day !== null && day <= today && day.slice(0, 7) === month.key
-        && row.payment_status === "partial" && (!Number.isFinite(Number(row.paid_amount)) || Math.round(Number(row.paid_amount) * 100) <= 0);
+        && paymentFor(row).issue;
     });
     p.overlapUncertain = undatedPayrollBills > 0 || unresolvedCandidate
       || (p.recordedBillCount > 0 && toCents(p.recordedADPpayroll, "recorded payroll") !== month.bank.payroll);
