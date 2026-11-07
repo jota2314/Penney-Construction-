@@ -51,11 +51,11 @@ function MonthlyChart({ months }: { months: StatementMonth[] }) {
         aria-label={months.map((m) => `${monthLong(m.key)}: in ${whole(m.cashIn)}, out ${whole(m.cashOut)}, net ${signed(m.net)}`).join("; ")}>
         {months.map((m) => (
           <div key={m.key} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
-            <div className="flex h-36 w-full items-end justify-center gap-[3px]" aria-hidden="true">
+            <div className={`flex h-36 w-full items-end justify-center gap-[3px] ${m.provisional ? "opacity-45" : ""}`} aria-hidden="true">
               <div className="w-[38%] max-w-5 rounded-t-sm bg-emerald-500/85" style={{ height: `${Math.max(1.5, (m.cashIn / max) * 100)}%` }} />
               <div className="w-[38%] max-w-5 rounded-t-sm bg-amber-500/85" style={{ height: `${Math.max(1.5, (m.cashOut / max) * 100)}%` }} />
             </div>
-            <span className="text-[10px] font-medium text-muted-foreground">{monthShort(m.key)}</span>
+            <span className="text-[10px] font-medium text-muted-foreground">{monthShort(m.key)}{m.provisional ? "*" : ""}</span>
             <span className={`hidden text-[10px] tabular-nums sm:block ${m.net < 0 ? "text-red-400" : "text-emerald-500"}`}>
               {m.net < 0 ? "−" : "+"}{Math.abs(Math.round(m.net / 100000))}k
             </span>
@@ -69,14 +69,16 @@ function MonthlyChart({ months }: { months: StatementMonth[] }) {
 const cell = "whitespace-nowrap px-2 py-2 text-right tabular-nums sm:px-3";
 const label = "sticky left-0 z-10 w-[9rem] min-w-[9rem] bg-card px-3 py-2 text-left font-normal leading-snug shadow-[1px_0_0_var(--border)] sm:w-auto sm:min-w-[14rem] sm:shadow-none";
 
-function Row({ name, keys, values, total, strong, tone, muted, indent }: {
-  name: string; keys: string[]; values: number[]; total: number; strong?: boolean; tone?: (n: number) => string; muted?: boolean; indent?: boolean;
+const PROV = "bg-amber-500/[0.07] italic";
+
+function Row({ name, keys, prov, values, total, strong, tone, muted, indent }: {
+  name: string; keys: string[]; prov: boolean[]; values: number[]; total: number; strong?: boolean; tone?: (n: number) => string; muted?: boolean; indent?: boolean;
 }) {
   return (
     <tr className={strong ? "border-t font-semibold" : ""}>
       <th scope="row" className={`${label} ${indent ? "pl-6" : ""} ${muted ? "text-muted-foreground" : ""} ${strong ? "font-semibold" : ""}`}>{name}</th>
       {values.map((v, i) => (
-        <td key={keys[i]} className={`${cell} ${muted ? "text-muted-foreground" : ""} ${tone ? tone(v) : ""}`}>{acct(v)}</td>
+        <td key={keys[i]} className={`${cell} ${prov[i] ? PROV : ""} ${muted ? "text-muted-foreground" : ""} ${tone ? tone(v) : ""}`}>{acct(v)}</td>
       ))}
       <td className={`${cell} border-l bg-muted/30 font-semibold ${tone ? tone(total) : ""}`}>{acct(total)}</td>
     </tr>
@@ -87,6 +89,7 @@ function StatementTable({ statement }: { statement: CashStatement }) {
   const { months, totals } = statement;
   const groups = OUTFLOW_GROUPS.filter((g) => totals.byGroup[g.key] !== 0);
   const keys = months.map((m) => m.key);
+  const prov = months.map((m) => !!m.provisional);
   const netTone = (n: number) => (n < 0 ? "text-red-400" : "text-emerald-600 dark:text-emerald-500");
   return (
     <section className="min-w-0 rounded-xl border bg-card">
@@ -103,7 +106,9 @@ function StatementTable({ statement }: { statement: CashStatement }) {
             <tr className="border-b text-[11px] uppercase tracking-wider text-muted-foreground">
               <th scope="col" className={`${label} font-medium`}>2026</th>
               {months.map((m) => (
-                <th key={m.key} scope="col" className={`${cell} font-medium`}>{monthShort(m.key)}</th>
+                <th key={m.key} scope="col" className={`${cell} font-medium ${m.provisional ? "bg-amber-500/[0.07] text-amber-700 dark:text-amber-400" : ""}`}>
+                  {monthShort(m.key)}{m.provisional && <span className="block text-[9px] normal-case tracking-normal">so far*</span>}
+                </th>
               ))}
               <th scope="col" className={`${cell} border-l font-medium`}>Year to date</th>
             </tr>
@@ -114,37 +119,44 @@ function StatementTable({ statement }: { statement: CashStatement }) {
               <td colSpan={months.length} />
               <td className="border-l bg-muted/30" />
             </tr>
-            <Row keys={keys} name="Client deposits" values={months.map((m) => m.deposits)} total={totals.deposits} indent />
+            <Row keys={keys} prov={prov} name="Client deposits" values={months.map((m) => m.deposits)} total={totals.deposits} indent />
             {totals.returned !== 0 && (
-              <Row keys={keys} name="Returned checks" values={months.map((m) => -m.returned)} total={-totals.returned} indent muted />
+              <Row keys={keys} prov={prov} name="Returned checks" values={months.map((m) => -m.returned)} total={-totals.returned} indent muted />
             )}
-            <Row keys={keys} name="Total cash in" values={months.map((m) => m.cashIn)} total={totals.cashIn} strong />
+            <Row keys={keys} prov={prov} name="Total cash in" values={months.map((m) => m.cashIn)} total={totals.cashIn} strong />
             <tr>
               <th scope="rowgroup" className={`${label} pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-500`}>Cash out</th>
               <td colSpan={months.length} />
               <td className="border-l bg-muted/30" />
             </tr>
             {groups.map((g) => (
-              <Row key={g.key} keys={keys} name={g.label} values={months.map((m) => -m.byGroup[g.key])} total={-totals.byGroup[g.key]} indent />
+              <Row key={g.key} keys={keys} prov={prov} name={g.label} values={months.map((m) => -m.byGroup[g.key])} total={-totals.byGroup[g.key]} indent />
             ))}
-            <Row keys={keys} name="Total cash out" values={months.map((m) => -m.cashOut)} total={-totals.cashOut} strong />
+            <Row keys={keys} prov={prov} name="Total cash out" values={months.map((m) => -m.cashOut)} total={-totals.cashOut} strong />
             <tr className="border-t-2 border-foreground/20 text-[14px] font-semibold">
               <th scope="row" className={`${label} font-semibold`}>Net cash flow</th>
               {months.map((m) => (
-                <td key={m.key} className={`${cell} ${netTone(m.net)}`}>{acct(m.net)}</td>
+                <td key={m.key} className={`${cell} ${m.provisional ? PROV : ""} ${netTone(m.net)}`}>{acct(m.net)}</td>
               ))}
               <td className={`${cell} border-l bg-muted/30 ${netTone(totals.net)}`}>{acct(totals.net)}</td>
             </tr>
             <tr className="text-muted-foreground">
               <th scope="row" className={`${label} text-muted-foreground`}>Running total since Jan 1</th>
               {months.map((m) => (
-                <td key={m.key} className={cell}>{acct(m.cumulative)}</td>
+                <td key={m.key} className={`${cell} ${m.provisional ? PROV : ""}`}>{acct(m.cumulative)}</td>
               ))}
               <td className={`${cell} border-l bg-muted/30`} />
             </tr>
           </tbody>
         </table>
       </div>
+      {months.some((m) => m.provisional) && (
+        <p className="border-t px-4 py-3 text-[11px] leading-relaxed text-muted-foreground sm:px-5">
+          * {months.filter((m) => m.provisional).map((m) => monthLong(m.key)).join(", ")} so far comes from the app until the bank statement
+          is imported: client payments recorded, crew payroll from clock-ins (wages before payroll taxes), bills by bill date, and card
+          purchases on the card line. It switches to the bank automatically once the statement is in.
+        </p>
+      )}
     </section>
   );
 }
@@ -219,7 +231,7 @@ function BooksVsBank({ statement }: { statement: CashStatement }) {
               </tr>
             </thead>
             <tbody>
-              {statement.months.map((m) => {
+              {statement.months.filter((m) => !m.provisional).map((m) => {
                 const diff = m.recordedReceipts - m.cashIn;
                 const off = Math.abs(diff) >= 100_00;
                 return (
@@ -269,14 +281,19 @@ export function CashFlowStatement({ statement, tracker, check }: {
       </section>
     );
   }
-  const avg = months.length ? Math.round(totals.net / months.length) : 0;
-  const best = [...months].sort((a, b) => b.net - a.net)[0];
-  const worst = [...months].sort((a, b) => a.net - b.net)[0];
+  // Average / best / weakest use full bank months; a month in progress would skew them.
+  const banked = months.filter((m) => !m.provisional);
+  const live = months.filter((m) => m.provisional);
+  const liveNote = live.length ? ` · incl. ${live.map((m) => monthShort(m.key)).join(", ")} so far` : "";
+  const avg = banked.length ? Math.round(banked.reduce((s2, m) => s2 + m.net, 0) / banked.length) : 0;
+  const best = [...banked].sort((a, b) => b.net - a.net)[0];
+  const worst = [...banked].sort((a, b) => a.net - b.net)[0];
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Jan 1 – {dayLabel(through)} · {statement.bankCount.toLocaleString()} checking transactions
+          Jan 1 – {dayLabel(live.length ? statement.today : through)} · {statement.bankCount.toLocaleString()} checking transactions
+          {live.length > 0 && <> · {live.map((m) => monthLong(m.key)).join(", ")} so far from app records</>}
         </p>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -290,12 +307,12 @@ export function CashFlowStatement({ statement, tracker, check }: {
       )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Cash in" value={whole(totals.cashIn)} tone="text-emerald-600 dark:text-emerald-500"
-          detail={totals.returned ? `Client deposits, less ${whole(totals.returned)} in returned checks` : "Client deposits"} />
+          detail={`${totals.returned ? `Client deposits, less ${whole(totals.returned)} in returned checks` : "Client deposits"}${liveNote}`} />
         <Kpi label="Cash out" value={whole(totals.cashOut)} tone="text-amber-600 dark:text-amber-500"
-          detail="Payroll, checks, ACH and card payoffs" />
+          detail={`Payroll, checks, ACH and card payoffs${liveNote}`} />
         <Kpi label="Net cash flow" value={signed(totals.net)} tone={totals.net < 0 ? "text-red-400" : "text-emerald-600 dark:text-emerald-500"}
-          detail={`Year to date · ${pct(totals.cashIn ? totals.net / totals.cashIn : 0)} of cash in`} />
-        <Kpi label="Average month" value={signed(avg)} tone={avg < 0 ? "text-red-400" : ""}
+          detail={`Year to date · ${pct(totals.cashIn ? totals.net / totals.cashIn : 0)} of cash in${liveNote}`} />
+        <Kpi label={live.length ? "Average full month" : "Average month"} value={signed(avg)} tone={avg < 0 ? "text-red-400" : ""}
           detail={best && worst && best.key !== worst.key ? `Best ${monthShort(best.key)} ${signed(best.net)} · weakest ${monthShort(worst.key)} ${signed(worst.net)}` : "Net per month"} />
       </div>
       {tracker}

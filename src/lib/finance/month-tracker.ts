@@ -8,6 +8,7 @@
 // Pure module. All amounts are integer cents.
 
 import { spendCategoryFor } from "./spend-category";
+import { OUTFLOW_GROUPS, type CashStatement, type StatementMonth } from "./cash-statement";
 
 export const TRACK_LINES = [
   { key: "payroll", label: "Crew payroll (clock in/out)" },
@@ -163,4 +164,58 @@ export function compareMonth(track: MonthTrack, bank: BankMonth | null): Compare
     { key: "other", label: "Other", tracked: track.lines.other, bank: b(bank?.byGroup.other ?? 0) },
   ];
   return rows.map((r) => ({ ...r, diff: r.bank === null ? null : r.tracked - r.bank }));
+}
+
+/**
+ * Months after the last bank statement join the statement as provisional
+ * columns, from the tracker: client payments in, crew payroll from the clock,
+ * subs + materials, card purchases on the card line (the cash leaves when the
+ * card is paid), and the rest line for line. Totals, the running total and
+ * the top-line numbers then include them. When that month's statement is
+ * imported, the bank replaces the tracker automatically.
+ */
+export function withTrackedMonths(statement: CashStatement, tracks: MonthTrack[]): CashStatement {
+  const have = new Set(statement.months.filter((m) => m.bankCount > 0).map((m) => m.key));
+  const lastBank = statement.through?.slice(0, 7) ?? "";
+  const extra: StatementMonth[] = tracks
+    .filter((t) => t.key > lastBank && !have.has(t.key))
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((t) => {
+      const byGroup = {
+        payroll: t.lines.payroll,
+        subs: t.lines.subs + t.lines.materials,
+        card: t.lines.card,
+        insurance: t.lines.insurance,
+        site: t.lines.site,
+        vehicles: t.lines.vehicles,
+        permits: t.lines.permits,
+        office: t.lines.office,
+        other: t.lines.other,
+      };
+      const cashOut = Object.values(byGroup).reduce((a, b) => a + b, 0);
+      return {
+        key: t.key, deposits: t.receipts, returned: 0, cashIn: t.receipts, cashOut, net: t.receipts - cashOut,
+        cumulative: 0, byGroup, bankCount: 0, recordedReceipts: t.receipts, cardPurchases: 0, provisional: true,
+      };
+    });
+  if (!extra.length) return statement;
+  // Gap months between the last statement and the tracked months would read
+  // as zero; drop empty placeholders and keep the order.
+  const months = [...statement.months.filter((m) => m.bankCount > 0 || !extra.some((e) => e.key === m.key)), ...extra]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((m) => ({ ...m, byGroup: { ...m.byGroup } }));
+  let running = 0;
+  for (const m of months) { running += m.net; m.cumulative = running; }
+  const totals = { ...statement.totals, byGroup: { ...statement.totals.byGroup } };
+  for (const e of extra) {
+    totals.deposits += e.deposits; totals.cashIn += e.cashIn; totals.cashOut += e.cashOut; totals.net += e.net;
+    totals.recordedReceipts += e.recordedReceipts;
+    for (const g of OUTFLOW_GROUPS) totals.byGroup[g.key] += e.byGroup[g.key];
+  }
+  const outflows = OUTFLOW_GROUPS.map((g) => ({
+    key: g.key, label: g.label, amount: totals.byGroup[g.key],
+    share: totals.cashOut ? totals.byGroup[g.key] / totals.cashOut : 0,
+    count: statement.outflows.find((o) => o.key === g.key)?.count ?? 0,
+  })).filter((g) => g.amount !== 0).sort((a, b) => b.amount - a.amount);
+  return { ...statement, months, totals, outflows };
 }

@@ -12,7 +12,7 @@ import { CollectionPlanDialog } from "@/components/ceo/collection-plan-dialog";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
 import { CashFlowStatement } from "@/components/finances/cash-flow-statement";
-import { compareMonth, trackMonth, type TrackBill } from "@/lib/finance/month-tracker";
+import { compareMonth, trackMonth, withTrackedMonths, type TrackBill } from "@/lib/finance/month-tracker";
 import { MonthEndCheck, MonthTrackerCard } from "@/components/finances/month-tracker";
 
 export default async function CashPage({ searchParams }: { searchParams?: Promise<{ m?: string }> } = {}) {
@@ -55,7 +55,7 @@ export default async function CashPage({ searchParams }: { searchParams?: Promis
     .or(`paid_date.gte.${billsFrom},and(paid_date.is.null,invoice_date.gte.${billsFrom})`)
     .order("id").range(from, to));
 
-  const statement = buildCashStatement({ bank, receipts, bills, today });
+  const bankStatement = buildCashStatement({ bank, receipts, bills, today });
 
   const one = <T,>(v: unknown): T | null => (Array.isArray(v) ? ((v[0] as T) ?? null) : ((v as T) ?? null));
   const trackBills: TrackBill[] = yearBills.map((b) => ({
@@ -70,7 +70,14 @@ export default async function CashPage({ searchParams }: { searchParams?: Promis
   const trackInput = { bills: trackBills, shifts, receipts };
   const current = trackMonth(currentKey, trackInput);
   const checkTrack = checkKey === currentKey ? current : trackMonth(checkKey, trackInput);
-  const bankMonth = statement.months.find((m) => m.key === checkKey && m.bankCount > 0) ?? null;
+  const bankMonth = bankStatement.months.find((m) => m.key === checkKey && m.bankCount > 0) ?? null;
+  // Months after the last statement become "so far" columns in the statement
+  // and count in the totals at the top.
+  const lastBank = bankStatement.through?.slice(0, 7) ?? "";
+  const statement = withTrackedMonths(
+    bankStatement,
+    monthKeys.filter((k) => k > lastBank).map((k) => (k === currentKey ? current : trackMonth(k, trackInput))),
+  );
   const checkRows = compareMonth(checkTrack, bankMonth);
 
   const owedToUs = workspace.collections.filter(isActionableCollection)

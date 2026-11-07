@@ -9,9 +9,13 @@ const url = (path, swap = {}) => {
   const out = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   return `data:text/javascript;base64,${Buffer.from(out).toString("base64")}`;
 };
-const { trackMonth, trackLine, compareMonth } = await import(
-  url("../src/lib/finance/month-tracker.ts", { "./spend-category": url("../src/lib/finance/spend-category.ts") }),
+const { trackMonth, trackLine, compareMonth, withTrackedMonths } = await import(
+  url("../src/lib/finance/month-tracker.ts", {
+    "./spend-category": url("../src/lib/finance/spend-category.ts"),
+    "./cash-statement": url("../src/lib/finance/cash-statement.ts"),
+  }),
 );
+const { buildCashStatement } = await import(url("../src/lib/finance/cash-statement.ts"));
 
 const bill = (o = {}) => ({ vendor_name: "Cosentino Plumbing", vendor_type: "subcontractor", trade: "plumbing", invoice_date: "2026-11-03", amount: 1000, paid_amount: 0, payment_status: "unpaid", payment_method: "check", ...o });
 const shift = (o = {}) => ({ date: "2026-11-02", open: false, paidMinutes: 480, wageCents: 24000, rate: 30, ...o });
@@ -80,4 +84,34 @@ test("month-end check: subs + materials vs checks, card vs card statement, payro
   assert.equal(row("card").diff, 0);
   const pending = compareMonth(t, null);
   assert.ok(pending.every((r) => r.bank === null && r.diff === null));
+});
+
+test("months after the last statement join the table and the totals as 'so far' columns", () => {
+  const bank = [
+    { id: "a", txn_date: "2026-10-05", source: "eastern_deposit", direction: "credit", amount: 1000 },
+    { id: "b", txn_date: "2026-10-31", source: "eastern_check", direction: "debit", amount: 400 },
+  ];
+  const base = buildCashStatement({ bank, receipts: [], bills: [], today: "2026-11-06" });
+  const nov = trackMonth("2026-11", {
+    shifts: [shift({ wageCents: 30000 })],
+    bills: [bill({ amount: 200 }), bill({ vendor_name: "Home Depot", vendor_type: "supplier", payment_method: "capital_one", amount: 50 })],
+    receipts: [{ received_date: "2026-11-02", amount: 700 }],
+  });
+  const s = withTrackedMonths(base, [nov]);
+  assert.deepEqual(s.months.map((m) => [m.key, !!m.provisional]), [["2026-01", false], ["2026-02", false], ["2026-03", false], ["2026-04", false], ["2026-05", false], ["2026-06", false], ["2026-07", false], ["2026-08", false], ["2026-09", false], ["2026-10", false], ["2026-11", true]]);
+  const m = s.months.at(-1);
+  assert.equal(m.cashIn, 70000);
+  assert.equal(m.byGroup.payroll, 30000);
+  assert.equal(m.byGroup.subs, 20000);
+  assert.equal(m.byGroup.card, 5000);
+  assert.equal(m.cashOut, 55000);
+  assert.equal(m.net, 15000);
+  assert.equal(m.cumulative, 60000 + 15000);
+  assert.equal(s.totals.cashIn, 170000);
+  assert.equal(s.totals.cashOut, 95000);
+  assert.equal(s.totals.net, 75000);
+  assert.equal(base.totals.net, 60000, "the bank statement itself is not mutated");
+  // Once the month's statement is in, the bank wins and nothing is added.
+  const banked = buildCashStatement({ bank: [...bank, { id: "c", txn_date: "2026-11-03", source: "eastern_deposit", direction: "credit", amount: 5 }], receipts: [], bills: [], today: "2026-11-06" });
+  assert.equal(withTrackedMonths(banked, [nov]), banked);
 });

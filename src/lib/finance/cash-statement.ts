@@ -73,6 +73,8 @@ export type StatementMonth = {
   recordedReceipts: number;
   /** Capital One statement purchases dated this month (paid later through "Credit card payments"). */
   cardPurchases: number;
+  /** No bank statement yet: the numbers come from app records (crew clock + bills + client payments). */
+  provisional?: boolean;
 };
 
 export type CashStatement = {
