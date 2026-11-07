@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import type { CashStatement, StatementMonth } from "@/lib/finance/cash-statement";
 import { OUTFLOW_GROUPS } from "@/lib/finance/cash-statement";
@@ -180,47 +181,6 @@ function WhereItWent({ statement }: { statement: CashStatement }) {
   );
 }
 
-function SinceStatement({ statement }: { statement: CashStatement }) {
-  const after = statement.after;
-  if (!after) return null;
-  const empty = after.receiptCount === 0 && after.billCount === 0 && after.cardCount === 0;
-  return (
-    <section className="min-w-0 rounded-xl border border-dashed bg-card p-4 sm:p-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">
-          {statement.through ? `Since the ${dayLabel(statement.through, false)} statement` : "This year (no bank statements imported)"}
-        </h2>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">From app records · not bank-verified</span>
-      </div>
-      <p className="mt-0.5 text-xs text-muted-foreground">{dayLabel(after.from, false)} – {dayLabel(after.through, false)}</p>
-      {empty ? (
-        <p className="mt-3 text-sm text-muted-foreground">Nothing recorded yet.</p>
-      ) : (
-        <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-          <div>
-            <dt className="text-xs text-muted-foreground">Client payments recorded</dt>
-            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-500">{whole(after.receipts)}</dd>
-            <dd className="text-xs text-muted-foreground">{after.receiptCount} payments</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Bills marked paid</dt>
-            <dd className="mt-0.5 text-lg font-semibold tabular-nums">{whole(after.billsPaid)}</dd>
-            <dd className="text-xs text-muted-foreground">{after.billCount} bills · payroll not included</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Card purchases</dt>
-            <dd className="mt-0.5 text-lg font-semibold tabular-nums">{whole(after.cardPurchases)}</dd>
-            <dd className="text-xs text-muted-foreground">{after.cardCount} receipts · paid later from checking</dd>
-          </div>
-        </dl>
-      )}
-      <p className="mt-3 text-xs text-muted-foreground">
-        These move into the statement above once the {monthLong(after.from.slice(0, 7))} bank statement is imported.
-      </p>
-    </section>
-  );
-}
-
 function BooksVsBank({ statement }: { statement: CashStatement }) {
   const r = statement.reconciliation;
   const share = r.total ? r.matched / r.total : 0;
@@ -289,7 +249,13 @@ function BooksVsBank({ statement }: { statement: CashStatement }) {
   );
 }
 
-export function CashFlowStatement({ statement }: { statement: CashStatement }) {
+export function CashFlowStatement({ statement, tracker, check }: {
+  statement: CashStatement;
+  /** The running month, tracked from app records (crew clock + bills). */
+  tracker?: ReactNode;
+  /** Month-end check: app vs bank. */
+  check?: ReactNode;
+}) {
   const { totals, months, through } = statement;
   if (!through) {
     return (
@@ -299,7 +265,7 @@ export function CashFlowStatement({ statement }: { statement: CashStatement }) {
           Import the Eastern Bank checking statements to see cash in, cash out and net cash flow. Until then only app records are
           available, below.
         </p>
-        <div className="mt-4"><SinceStatement statement={statement} /></div>
+        {tracker && <div className="mt-4">{tracker}</div>}
       </section>
     );
   }
@@ -332,14 +298,13 @@ export function CashFlowStatement({ statement }: { statement: CashStatement }) {
         <Kpi label="Average month" value={signed(avg)} tone={avg < 0 ? "text-red-400" : ""}
           detail={best && worst && best.key !== worst.key ? `Best ${monthShort(best.key)} ${signed(best.net)} · weakest ${monthShort(worst.key)} ${signed(worst.net)}` : "Net per month"} />
       </div>
+      {tracker}
       <MonthlyChart months={months} />
       <StatementTable statement={statement} />
+      {check}
       <div className="grid gap-4 lg:grid-cols-2">
         <WhereItWent statement={statement} />
-        <div className="flex min-w-0 flex-col gap-4">
-          <SinceStatement statement={statement} />
-          <BooksVsBank statement={statement} />
-        </div>
+        <BooksVsBank statement={statement} />
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground">
         Net cash flow is money in minus money out of checking. It is not profit (that depends on what was earned, not when it was

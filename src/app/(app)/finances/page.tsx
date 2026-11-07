@@ -148,7 +148,7 @@ function renderTab(key: TabKey, shared: Promise<Params>) {
     case "bills":
       return <SafeSection load={BillsTab} />;
     case "cash":
-      return <SafeSection load={Cash} />;
+      return <SafeSection load={() => Cash({ searchParams: shared })} />;
     case "expenses":
       return <SafeSection load={() => Expenses({ searchParams: shared })} />;
     case "income":

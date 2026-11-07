@@ -71,6 +71,8 @@ export type StatementMonth = {
   bankCount: number;
   /** Client payments recorded in the app with a received date this month. */
   recordedReceipts: number;
+  /** Capital One statement purchases dated this month (paid later through "Credit card payments"). */
+  cardPurchases: number;
 };
 
 export type CashStatement = {
@@ -185,6 +187,7 @@ export function buildCashStatement(input: {
     byGroup: emptyGroups(),
     bankCount: 0,
     recordedReceipts: 0,
+    cardPurchases: 0,
   }));
   const counts = emptyGroups();
   const reconciliation = { total: 0, matched: 0, open: 0, openAmount: 0 };
@@ -237,10 +240,11 @@ export function buildCashStatement(input: {
       t.net += m.net;
       t.bankCount += m.bankCount;
       t.recordedReceipts += m.recordedReceipts;
+      t.cardPurchases += m.cardPurchases;
       for (const g of OUTFLOW_GROUPS) t.byGroup[g.key] += m.byGroup[g.key];
       return t;
     },
-    { deposits: 0, returned: 0, cashIn: 0, cashOut: 0, net: 0, byGroup: emptyGroups(), bankCount: 0, recordedReceipts: 0 },
+    { deposits: 0, returned: 0, cashIn: 0, cashOut: 0, net: 0, byGroup: emptyGroups(), bankCount: 0, recordedReceipts: 0, cardPurchases: 0 },
   );
 
   const outflows = OUTFLOW_GROUPS.map((g) => ({
@@ -258,10 +262,15 @@ export function buildCashStatement(input: {
     if (!isCardStatement(row) || !isDay(row.txn_date) || !inYear(row.txn_date)) continue;
     const cents = Math.abs(toCents(row.amount) ?? 0);
     card.count++;
-    if (row.direction === "debit") card.purchases += cents;
-    else card.credits += cents;
+    if (row.direction === "debit") {
+      card.purchases += cents;
+      const month = months[Number(row.txn_date.slice(5, 7)) - 1];
+      if (month) month.cardPurchases += cents;
+    } else card.credits += cents;
     if (card.through === null || row.txn_date > card.through) card.through = row.txn_date;
   }
+  // The year totals were summed before the card pass; card months fill in here.
+  totals.cardPurchases = months.reduce((sum, m) => sum + m.cardPurchases, 0);
 
   let after: CashStatement["after"] = null;
   const afterFrom = through ? nextDay(through) : start;

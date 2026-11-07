@@ -314,6 +314,16 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   unapproved CO cost (O'Mealia +$13k). Budget = base lines (no
   `change_order_id`) + `cost_impact` of APPROVED COs, mirroring contract =
   locked price + approved CO price.
+- **Month tracker + month-end check** (Jorge, 11/6: track November as it
+  goes, then match it to the bank). `src/lib/finance/month-tracker.ts`:
+  `trackMonth()` = crew payroll from clock-in/out (labor ledger wages, before
+  payroll taxes) + every bill by bill date on lines subs / materials / card /
+  insurance / site / vehicles / permits / office / other (ADP + In-House Labor
+  bills skipped — payroll comes from the clock). `compareMonth()` lines it up
+  with the bank: subs+materials vs checks/ACH, card vs the Capital One
+  statement's purchases (not the payoff), payroll vs ADP drafts (bank runs
+  higher by taxes/fees). Cash flow tab shows "{Month} so far" on top and the
+  month-end table under the statement (`?m=YYYY-MM` picks the month).
 
 ### August 22, 2026 — Material suppliers stopped counting as subs
 - **The bug:** Weekly Close listed Building Center of Essex under "Payments to
