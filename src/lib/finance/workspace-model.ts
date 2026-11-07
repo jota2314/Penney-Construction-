@@ -38,12 +38,20 @@ export type ProjectHealth = {
   status: string;
   closedOn: string | null;
   contract: number | null;
+  /** Original contract price, before change orders. */
+  baseContract?: number | null;
+  /** Approved change orders: price added to the contract. */
+  changeOrderPrice?: number;
+  changeOrderCount?: number;
+  /** Estimated cost: base estimate lines + approved change-order cost. */
   budget: number | null;
   vendorCost: number;
   laborCost: number;
   cost: number;
   hours: number;
   received: number;
+  /** Client invoices sent (not drafts or voids). */
+  invoiced?: number;
   outstanding: number;
   overdue: number;
   warnings: string[];
@@ -113,6 +121,79 @@ export function forecastFor(job: ProjectHealth) {
     stale,
   };
 }
+/** Statuses that are not (yet, or any longer) a job being built or closed out. */
+export const NOT_A_JOB = ["lead", "estimating", "proposal_sent", "waiting_for_approval", "cancelled", "lost"];
+
+/** Being built, about to start, or closing out — and not financially closed. */
+export function isOpenJob(job: Pick<ProjectHealth, "status" | "audit" | "finalNeedsReview">) {
+  if (NOT_A_JOB.includes(job.status)) return false;
+  return job.audit?.kind !== "final" || job.finalNeedsReview;
+}
+
+/**
+ * Work-in-progress numbers — the contractor's standard job schedule.
+ *
+ * Percent complete is cost-to-cost: cost to date ÷ estimated total cost.
+ * Earned revenue is that share of the contract. Billed is what the client
+ * has been billed: the invoices sent in the app, or the payments received
+ * when those are higher (older jobs were billed outside the app). Billed
+ * minus earned is over-billing (positive, cash ahead of the work) or
+ * under-billing (negative, work done that hasn't been billed yet).
+ *
+ * Estimated total cost is the saved forecast when it is current, otherwise
+ * the estimate budget — never less than what has already been spent.
+ */
+export type Wip = {
+  pct: number | null;
+  earned: number | null;
+  billed: number;
+  overUnder: number | null;
+  estimatedCost: number | null;
+  toFinish: number | null;
+  profit: number | null;
+  margin: number | null;
+  basis: "forecast" | "budget" | null;
+};
+export function wipFor(job: ProjectHealth): Wip {
+  const forecast = forecastFor(job);
+  const billed = Math.max(job.invoiced ?? 0, job.received ?? 0);
+  let estimatedCost: number | null = null;
+  let basis: Wip["basis"] = null;
+  if (forecast && !forecast.stale) {
+    estimatedCost = job.cost + Math.max(0, forecast.remaining);
+    basis = "forecast";
+  } else if (job.budget !== null && job.budget > 0) {
+    estimatedCost = Math.max(job.budget, job.cost);
+    basis = "budget";
+  }
+  const pct = estimatedCost && estimatedCost > 0 ? Math.min(1, job.cost / estimatedCost) : null;
+  const earned = job.contract !== null && pct !== null ? Math.round(job.contract * pct) : null;
+  const profit = job.contract !== null && estimatedCost !== null ? job.contract - estimatedCost : null;
+  return {
+    pct,
+    earned,
+    billed,
+    overUnder: earned === null ? null : billed - earned,
+    estimatedCost,
+    toFinish: estimatedCost === null ? null : estimatedCost - job.cost,
+    profit,
+    margin: profit !== null && job.contract ? profit / job.contract : null,
+    basis,
+  };
+}
+
+/** Under-billing worth acting on: 5% of the contract, at least $2,500. */
+export const underbilledBy = (job: ProjectHealth, wip: Wip = wipFor(job)) =>
+  wip.overUnder !== null && job.contract !== null && -wip.overUnder >= Math.max(250_000, job.contract * 0.05)
+    ? -wip.overUnder
+    : 0;
+
+/**
+ * One headline per job, from the numbers that move money: losing money, over
+ * budget, unbilled work, overdue collections. Bookkeeping gaps (bills not on
+ * a budget line, missing rates) stay in `warnings` as data checks — they no
+ * longer hide every job behind "Needs verification".
+ */
 export function healthFor(job: ProjectHealth): {
   label: string;
   tone: "good" | "warn" | "bad" | "neutral";
@@ -121,25 +202,16 @@ export function healthFor(job: ProjectHealth): {
     return job.finalNeedsReview
       ? { label: "Final · new activity", tone: "warn" }
       : { label: "Financially closed", tone: "good" };
-  const forecast = forecastFor(job);
-  if (
-    job.contract !== null &&
-    (job.cost > job.contract ||
-      (forecast &&
-        !forecast.stale &&
-        forecast.profit !== null &&
-        forecast.profit < 0))
-  )
+  const wip = wipFor(job);
+  if (job.contract !== null && (job.cost > job.contract || (wip.profit !== null && wip.profit < 0)))
     return { label: "Loss risk", tone: "bad" };
-  if (job.budget !== null && job.cost > job.budget)
+  if (job.budget !== null && job.budget > 0 && job.cost > job.budget)
     return { label: "Over budget", tone: "bad" };
-  // Source warnings remain visible on the job, but must not hide an overrun
-  // already apparent in its recorded amounts.
-  if (job.warnings.length) return { label: "Needs verification", tone: "warn" };
   if (job.overdue > 0) return { label: "Collection overdue", tone: "warn" };
-  if (!forecast || forecast.stale)
-    return { label: "Forecast needed", tone: "neutral" };
-  return { label: "Within recorded plan", tone: "good" };
+  if (underbilledBy(job, wip) > 0) return { label: "Underbilled", tone: "warn" };
+  if (job.contract === null) return { label: "No contract price", tone: "neutral" };
+  if (job.budget === null || job.budget <= 0) return { label: "No cost budget", tone: "neutral" };
+  return { label: "On track", tone: "good" };
 }
 export function closedPeriod(
   records: FinanceRecord[],

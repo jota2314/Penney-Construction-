@@ -28,6 +28,9 @@ const {
   latestRecords,
   forecastFor,
   healthFor,
+  wipFor,
+  isOpenJob,
+  underbilledBy,
 } = await import(moduleURL("../src/lib/finance/workspace-model.ts"));
 const { finalAuditReadiness } = await import(
   moduleURL("../src/lib/finance/final-audit.ts")
@@ -121,9 +124,12 @@ test("reopening supersedes final state without deleting prior final or forecasts
   assert.equal(rows.length, 3);
 });
 const job = {
+  status: "in_progress",
   cost: 60000,
   contract: 100000,
   budget: 75000,
+  received: 0,
+  invoiced: 0,
   overdue: 0,
   warnings: [],
   audit: null,
@@ -133,7 +139,7 @@ const job = {
 };
 test("missing and stale forecasts never imply a final or expected profit", () => {
   assert.equal(forecastFor(job), null);
-  assert.equal(healthFor(job).label, "Forecast needed");
+  assert.equal(healthFor(job).label, "On track");
   const current = {
     ...job,
     forecast: record("f", "forecast", "2026-10-09", null),
@@ -143,13 +149,16 @@ test("missing and stale forecasts never imply a final or expected profit", () =>
   assert.equal(forecastFor({ ...current, cost: 61000 }).stale, true);
   assert.equal(forecastFor({ ...current, financialBasis: "b" }).stale, true);
 });
-test("health differentiates unverified evidence, overrun, overdue and changed final", () => {
-  assert.equal(
-    healthFor({ ...job, warnings: ["Missing rates"] }).label,
-    "Needs verification",
-  );
+test("health differentiates loss, overrun, overdue, unbilled work and changed final", () => {
+  // Bookkeeping gaps are data checks, not the headline.
+  assert.equal(healthFor({ ...job, warnings: ["Missing rates"] }).label, "On track");
   assert.equal(healthFor({ ...job, cost: 80000 }).label, "Over budget");
+  assert.equal(healthFor({ ...job, cost: 101000 }).label, "Loss risk");
+  assert.equal(healthFor({ ...job, budget: 110000 }).label, "Loss risk");
   assert.equal(healthFor({ ...job, overdue: 100 }).label, "Collection overdue");
+  assert.equal(healthFor({ ...job, contract: 10000000, budget: 7500000, cost: 6000000, received: 0 }).label, "Underbilled");
+  assert.equal(healthFor({ ...job, contract: null }).label, "No contract price");
+  assert.equal(healthFor({ ...job, budget: null }).label, "No cost budget");
   assert.equal(
     healthFor({
       ...job,
@@ -162,7 +171,8 @@ test("health differentiates unverified evidence, overrun, overdue and changed fi
 test("recorded loss and budget overruns remain prominent when source review is also needed", () => {
   assert.deepEqual(healthFor({ ...job, cost: 110000, warnings: ["Missing rates"] }), { label: "Loss risk", tone: "bad" });
   assert.deepEqual(healthFor({ ...job, cost: 80000, warnings: ["Bills need review"] }), { label: "Over budget", tone: "bad" });
-  assert.deepEqual(healthFor({ ...job, contract: null, budget: null, warnings: ["Contract amount needs verification"] }), { label: "Needs verification", tone: "warn" });
+  // Bookkeeping warnings are per-job data checks, not the headline.
+  assert.deepEqual(healthFor({ ...job, contract: null, budget: null, warnings: ["Contract amount needs verification"] }), { label: "No contract price", tone: "neutral" });
   assert.deepEqual(healthFor({ ...job, cost: 110000, warnings: ["Changed source"], audit: record("f", "final", "2026-10-09", "2026-10-09"), finalNeedsReview: true }), { label: "Final · new activity", tone: "warn" });
 });
 const sources = [
@@ -316,4 +326,57 @@ test("a failed later page never returns a partial financial total", async () => 
     () => financialRows(() => Promise.resolve({ data: null, error: null })),
     /could not load/,
   );
+});
+
+test("WIP: cost-to-cost percent complete, earned revenue, over/under billing and projected profit", () => {
+  // $100k contract, $75k estimated cost, $60k spent → 80% complete, $80k earned.
+  const w = wipFor({ ...job, received: 50000, invoiced: 90000 });
+  assert.equal(w.basis, "budget");
+  assert.equal(w.pct, 0.8);
+  assert.equal(w.earned, 80000);
+  assert.equal(w.billed, 90000, "billed is invoices sent, or payments received when higher");
+  assert.equal(w.overUnder, 10000);
+  assert.equal(w.estimatedCost, 75000);
+  assert.equal(w.toFinish, 15000);
+  assert.equal(w.profit, 25000);
+  assert.equal(w.margin, 0.25);
+  assert.equal(wipFor({ ...job, received: 95000, invoiced: 20000 }).billed, 95000);
+});
+test("WIP: past the budget the job is held at cost (100%) until a forecast says otherwise", () => {
+  const w = wipFor({ ...job, cost: 90000 });
+  assert.equal(w.estimatedCost, 90000);
+  assert.equal(w.pct, 1);
+  assert.equal(w.toFinish, 0);
+  assert.equal(w.profit, 10000);
+  const withForecast = { ...job, cost: 90000, forecast: { ...record("f", "forecast", "2026-10-09", null), payload: { ...record("f", "forecast", "2026-10-09", null).payload, cost: 90000, remaining: 20000 } } };
+  const f = wipFor(withForecast);
+  assert.equal(f.basis, "forecast");
+  assert.equal(f.estimatedCost, 110000);
+  assert.equal(f.profit, -10000);
+  assert.equal(healthFor(withForecast).label, "Loss risk");
+});
+test("WIP: no price or no budget means no percent, earned or profit — never a made-up number", () => {
+  const tm = wipFor({ ...job, contract: null, received: 4000 });
+  assert.equal(tm.earned, null);
+  assert.equal(tm.profit, null);
+  assert.equal(tm.overUnder, null);
+  assert.equal(tm.billed, 4000);
+  const nb = wipFor({ ...job, budget: null });
+  assert.equal(nb.pct, null);
+  assert.equal(nb.profit, null);
+  assert.equal(wipFor({ ...job, budget: 0 }).pct, null);
+});
+test("underbilling must be material: 5% of the contract and at least $2,500", () => {
+  assert.equal(underbilledBy({ ...job, contract: 10000000, budget: 7500000, cost: 6000000 }), 8000000);
+  assert.equal(underbilledBy({ ...job, contract: 10000000, budget: 7500000, cost: 6000000, received: 7600000 }), 0);
+  assert.equal(underbilledBy(job), 0, "$800 unbilled on a $1,000 job is under the $2,500 floor");
+});
+test("open jobs exclude leads, cancelled work and financially closed jobs", () => {
+  assert.equal(isOpenJob(job), true);
+  assert.equal(isOpenJob({ ...job, status: "audit" }), true);
+  assert.equal(isOpenJob({ ...job, status: "proposal_sent" }), false);
+  assert.equal(isOpenJob({ ...job, status: "cancelled" }), false);
+  const final = record("f", "final", "2026-10-09", "2026-10-09");
+  assert.equal(isOpenJob({ ...job, audit: final }), false);
+  assert.equal(isOpenJob({ ...job, audit: final, finalNeedsReview: true }), true);
 });

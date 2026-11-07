@@ -293,6 +293,28 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### November 5, 2026 — Finances: real cash flow statement + WIP job schedule
+- **Cash flow tab rebuilt** on the Eastern Bank checking import only
+  (`src/lib/finance/cash-statement.ts`, UI `cash-flow-statement.tsx`). Monthly
+  statement: deposits − returned checks = cash in; cash out by line (payroll,
+  subs & suppliers = all checks + subs/materials ACH, card payoffs, insurance,
+  site, vehicles, permits, office, other); net + running total. Card purchases
+  count once, at payoff. After the last statement, app receipts/bills show as a
+  provisional block. Same rules as the CEO page. Verified to the cent vs SQL
+  (Jan–Oct 2026: in $3,466,632.34, out $3,192,537.35, net +$274,094.99).
+  Replaced `overview-cash.ts` + `cash-activity.tsx` (deleted).
+- **Projects tab is now a WIP schedule** (`wipFor` in `workspace-model.ts`):
+  cost-to-cost % complete, earned, billed = max(invoices sent, payments
+  received) because older jobs were billed outside the app, over/(under)
+  billing, projected profit. `healthFor` now headlines Loss risk / Over budget /
+  Collection overdue / Underbilled; bookkeeping gaps stay as per-job "data
+  checks" (824 bills have no budget line — they used to flag every job).
+- **Budget bug fixed** (`workspace-data.ts`): every change order — draft and
+  void too — inserts a cost line into the estimate, so the old budget summed
+  unapproved CO cost (O'Mealia +$13k). Budget = base lines (no
+  `change_order_id`) + `cost_impact` of APPROVED COs, mirroring contract =
+  locked price + approved CO price.
+
 ### August 22, 2026 — Material suppliers stopped counting as subs
 - **The bug:** Weekly Close listed Building Center of Essex under "Payments to
   subs", and the QuickBooks push booked those bills to Subcontractors Expense.

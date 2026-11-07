@@ -91,14 +91,14 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
     financialRows((f, t) =>
       db
         .from("estimate_line_items")
-        .select("id,estimate_id,cost,total_cost,is_section_header")
+        .select("id,estimate_id,cost,total_cost,is_section_header,change_order_id")
         .order("id")
         .range(f, t),
     ),
     financialRows((f, t) =>
       db
         .from("change_orders")
-        .select("id,project_id,status,price_impact")
+        .select("id,project_id,status,price_impact,cost_impact")
         .eq("status", "approved")
         .order("id")
         .range(f, t),
@@ -219,14 +219,21 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
       const budgetLines = lines.filter(
         (l) => l.estimate_id === estimate?.id && !l.is_section_header,
       );
-      const budget =
-        estimate &&
-        budgetLines.length &&
-        budgetLines.every((l) => l.cost != null || l.total_cost != null)
-          ? total(budgetLines, (l) => Math.round(lineCost(l) * 100))
-          : null;
       const base = cents(p.contract_locked_amount ?? p.contract_value),
         co = changes.filter((c) => c.project_id === p.id);
+      // Every change order — draft and void included — writes a cost line
+      // into the estimate. Budget = the base estimate lines plus the cost of
+      // APPROVED change orders, the same rule the contract follows
+      // (locked price + approved change-order price).
+      const baseLines = budgetLines.filter((l) => !l.change_order_id);
+      const rawBudget =
+        estimate &&
+        baseLines.length &&
+        baseLines.every((l) => l.cost != null || l.total_cost != null)
+          ? total(baseLines, (l) => Math.round(lineCost(l) * 100)) +
+            total(co, (c) => cents(c.cost_impact) ?? 0)
+          : null;
+      const budget = rawBudget !== null && rawBudget > 0 ? rawBudget : null;
       const contract =
         base === null || co.some((c) => cents(c.price_impact) === null)
           ? null
@@ -237,6 +244,15 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
       const received = total(
         receipts.filter((r) => r.project_id === p.id),
         (r) => cents(r.amount) ?? 0,
+      );
+      const invoiced = total(
+        invoices.filter(
+          (i) =>
+            i.project_id === p.id &&
+            !!i.sent_to_client_at &&
+            !["draft", "void", "voided", "cancelled"].includes(i.status),
+        ),
+        (i) => cents(i.amount) ?? 0,
       );
       const { audit, forecast } = latestRecords(
         records.filter((r) => r.project_id === p.id),
@@ -254,6 +270,8 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
       if (contract === null)
         warnings.push("Contract amount needs verification");
       if (budget === null) warnings.push("Cost budget missing or incomplete");
+      if (co.some((c) => cents(c.cost_impact) === null))
+        warnings.push("Approved change order has no cost — budget may be low");
       if (jobBills.some((b) => cents(b.amount) === null))
         warnings.push("Bill amount missing");
       if (
@@ -284,12 +302,16 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
         status: p.status,
         closedOn: audit?.kind === "final" ? audit.closed_on : p.actual_end_date,
         contract,
+        baseContract: base,
+        changeOrderPrice: total(co, (c) => cents(c.price_impact) ?? 0),
+        changeOrderCount: co.length,
         budget,
         vendorCost,
         laborCost,
         cost,
         hours: total(shifts, (l) => l.paidMinutes) / 60,
         received,
+        invoiced,
         outstanding: total(ownCollections, (i) => i.balance),
         overdue: total(
           ownCollections.filter((i) => i.daysLate > 0),

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { getFinanceWorkspace } from "@/lib/finance/workspace-data";
 import { getCollectionPace } from "@/lib/finance/collection-pace";
-import { healthFor, isActionableCollection, total } from "@/lib/finance/workspace-model";
+import { healthFor, isActionableCollection, isOpenJob, total } from "@/lib/finance/workspace-model";
 import { buildExpenseView, type ExpenseRecord } from "@/lib/finance/expense-model";
 import type { ReactNode } from "react";
 
@@ -73,7 +73,7 @@ export default async function FinanceOverview() {
   const logged = data?.collections.filter(row => !row.issue && row.loggedPayment) ?? [];
   const flagged = data?.collections.filter(row => row.issue) ?? [];
   const followup = [...open].sort((a, b) => b.daysLate - a.daysLate || b.daysWaiting - a.daysWaiting || b.balance - a.balance).slice(0, 5);
-  const watch = (data?.jobs ?? []).map(job => ({ job, health: healthFor(job) }))
+  const watch = (data?.jobs ?? []).filter(isOpenJob).map(job => ({ job, health: healthFor(job) }))
     .filter(({ health }) => health.tone === "bad" || health.tone === "warn")
     .sort((a, b) => Number(b.health.tone === "bad") - Number(a.health.tone === "bad") || b.job.cost - a.job.cost);
   const bills = data?.bills.bills ?? [];

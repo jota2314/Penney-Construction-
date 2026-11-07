@@ -63,7 +63,7 @@ No reconciliation approval button is introduced that could bypass those checks.
 
 ## Verification
 
-Run bank-period, cash-activity, expense-model and overview-cash tests with Node's
+Run bank-period, cash-statement and expense-model tests with Node's
 test runner. Server-rendered component tests cover exact cents, native bill links,
 unavailable periods, malformed data and overlinked records without controlling a
 browser. Run targeted lint, TypeScript and the production build. Read-only live

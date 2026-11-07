@@ -34,7 +34,7 @@ Command Center behavior, or email workflows are changed.
 ## Validation
 
 Run `node --test scripts/expense-model.test.mjs scripts/finance-overview.test.mjs
-scripts/finance-workspace.test.mjs scripts/overview-cash.test.mjs
+scripts/finance-workspace.test.mjs scripts/cash-statement.test.mjs
 scripts/open-bills.test.mjs scripts/receipt-invoice-groups.test.cjs`, then targeted
 ESLint, TypeScript and the production build. Server-rendered fixture tests cover
 source failures and native links without operating a browser or live session.

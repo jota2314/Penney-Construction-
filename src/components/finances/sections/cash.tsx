@@ -5,96 +5,98 @@ import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { formatMoney } from "@/lib/money";
-import { summarizeCashFlow } from "@/lib/finance/overview-cash";
+import { buildCashStatement } from "@/lib/finance/cash-statement";
 import { getFinanceWorkspace } from "@/lib/finance/workspace-data";
 import { isActionableCollection } from "@/lib/finance/workspace-model";
 import { CollectionPlanDialog } from "@/components/ceo/collection-plan-dialog";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
-import { CashActivity } from "@/components/finances/cash-activity";
-import { selectCashMonth } from "@/lib/finance/cash-month-selection";
-import { summarizeBankPeriod, type BankPeriodRecord } from "@/lib/finance/bank-period";
+import { CashFlowStatement } from "@/components/finances/cash-flow-statement";
 
-export default async function CashPage({ searchParams }: {
-  searchParams?: Promise<{ m?: string }>;
-}) {
+export default async function CashPage() {
   const user = await requireAuth();
   if (!canSeeBoardMoney(user.profile?.role)) redirect("/command-center");
-  const params = (await searchParams) || {};
   const db = await createClient();
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
   const start = today.slice(0, 4) + "-01-01";
-  // Bank reads must be complete. Book-source failures leave their comparison unavailable.
-  const [bank, receipts, bills, workspace, collectionInvoices] = await Promise.all([
+  // A failed page fails the section, never turning a partial inventory into a total.
+  const [bank, receipts, workspace, collectionInvoices] = await Promise.all([
     financialRows((from, to) => db.from("bank_transactions")
-      .select("id, source, txn_date, amount, direction, description, category_key, check_number, statement_file, statement_month, match_status, match_note, external_ref, bank_transaction_matches(id, invoice_id, payment_id, amount_applied, confidence)")
-      .like("source", "eastern%").gte("txn_date", start).lte("txn_date", today)
+      .select("id, source, txn_date, amount, direction, description, category_key, match_status")
+      .gte("txn_date", start).lte("txn_date", today)
       .order("id").range(from, to)),
     financialRows((from, to) => db.from("payments_received")
       .select("id, received_date, amount").gte("received_date", start).lte("received_date", today)
-      .order("id").range(from, to)).catch(() => null),
-    // Older bills can be paid this year. Missing/backfilled payment dates remain visible.
-    financialRows((from, to) => db.from("invoices")
-      .select("id, invoice_date, paid_date, paid_date_source, amount, paid_amount, payment_status, payment_method, duplicate_of_id, vendor_name, source")
-      .is("duplicate_of_id", null).in("payment_status", ["paid", "partial"])
-      .order("id").range(from, to)).catch(() => null),
-    getFinanceWorkspace().catch(() => null), getCollectionInvoices().catch(() => null),
+      .order("id").range(from, to)),
+    getFinanceWorkspace(), getCollectionInvoices(),
   ]);
-  if (bank.some(row => (row.bank_transaction_matches?.length ?? 0) >= 1000)) {
-    throw new Error("Complete saved bank link inventory unavailable.");
-  }
-  // Apply the same strict bank checks before producing the year and chart
-  // aggregates. A questionable import must not look valid elsewhere on this page.
-  const yearBank = summarizeBankPeriod(bank as BankPeriodRecord[], { start, end: today });
-  if (yearBank.status === "invalid") throw new Error("Bank records need verification before totaling cash activity.");
-  // A malformed or unavailable book record must not replace valid bank cash.
-  let cash = summarizeCashFlow([], [], bank, today);
-  let recordsUnavailable = receipts === null || bills === null;
-  if (receipts !== null && bills !== null) {
-    try { cash = summarizeCashFlow(receipts, bills, bank, today); }
-    catch { recordsUnavailable = true; }
-  }
-  const isYear = params.m === "ytd";
-  const { selected } = selectCashMonth(cash.months, isYear ? undefined : params.m);
-  const selectedBank = isYear ? yearBank : selected ? summarizeBankPeriod(bank as BankPeriodRecord[], {
-    start: `${selected.key}-01`,
-    end: new Date(Date.UTC(Number(selected.key.slice(0, 4)), Number(selected.key.slice(5, 7)), 0)).toISOString().slice(0, 10),
-  }) : undefined;
-  const owedToUs = workspace ? workspace.collections.filter(isActionableCollection)
-    .reduce((sum, row) => sum + row.balance, 0) / 100 : null;
+  // Bills only matter after the last imported statement (inside it the bank
+  // is the record), so load just that window.
+  const through = bank
+    .filter((r) => String(r.source).startsWith("eastern"))
+    .reduce<string | null>((max, r) => (max === null || r.txn_date > max ? r.txn_date : max), null);
+  const billsFrom = through ?? start;
+  const bills = await financialRows((from, to) => db.from("invoices")
+    .select("id, vendor_name, invoice_date, paid_date, amount, paid_amount, payment_status, payment_method, duplicate_of_id")
+    .is("duplicate_of_id", null).eq("payment_status", "paid")
+    .or(`paid_date.gte.${billsFrom},and(paid_date.is.null,invoice_date.gte.${billsFrom})`)
+    .order("id").range(from, to));
+
+  const statement = buildCashStatement({ bank, receipts, bills, today });
+
+  const owedToUs = workspace.collections.filter(isActionableCollection)
+    .reduce((sum, row) => sum + row.balance, 0) / 100;
   const vendorTotals = new Map<string, number>();
-  for (const bill of workspace?.bills.bills ?? []) {
+  for (const bill of workspace.bills.bills) {
     vendorTotals.set(bill.vendor, (vendorTotals.get(bill.vendor) ?? 0) + bill.amount);
   }
-  const vendors = [...vendorTotals].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const vendors = [...vendorTotals].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const debtors = new Map<string, number>();
+  for (const row of workspace.collections) {
+    if (!isActionableCollection(row)) continue;
+    debtors.set(row.projectName, (debtors.get(row.projectName) ?? 0) + row.balance / 100);
+  }
+  const topDebtors = [...debtors].sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-  return <div className="flex min-w-0 flex-col gap-5">
-    <CashActivity cash={cash} today={today} month={params.m} bankPeriod={selectedBank} recordsUnavailable={recordsUnavailable} />
-    <div className="grid gap-4 lg:grid-cols-2">
+  return <div className="flex min-w-0 flex-col gap-6">
+    <CashFlowStatement statement={statement} />
+    <div>
+      <h2 className="text-base font-semibold">Coming up</h2>
+      <p className="mt-0.5 text-xs text-muted-foreground">What clients owe us and what we owe, as of today.</p>
+    </div>
+    <div className="-mt-3 grid gap-4 lg:grid-cols-2">
       <section className="@container min-w-0 rounded-xl border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold">Owed to us</h2>
-        <div className="mt-1 text-[clamp(1rem,10cqi,1.875rem)] font-bold tabular-nums text-sky-400 [overflow-wrap:anywhere]">{owedToUs === null ? "Unavailable" : formatMoney(owedToUs)}</div>
-        <p className="mt-1 text-xs text-muted-foreground">{workspace ? "Issued invoices · excludes reconciliation issues and matching receipts awaiting application" : "Collection balances could not load. Bank activity is calculated independently."}</p>
-        {collectionInvoices ? <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}
-          triggerClassName="mt-3 text-sm font-medium text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          View collection plan &amp; invoices →
-        </CollectionPlanDialog> : <Link href="/finances?section=collections" className="mt-3 inline-block text-sm font-medium text-amber-500">Review collections →</Link>}
+        <h3 className="text-sm font-semibold">Owed to us</h3>
+        <div className="mt-1 text-[clamp(1.125rem,10cqi,1.875rem)] font-semibold tabular-nums text-sky-500 [overflow-wrap:anywhere]">{formatMoney(owedToUs)}</div>
+        <p className="mt-1 text-xs text-muted-foreground">Open balances on invoices sent to clients</p>
+        <div className="mt-3 space-y-2 text-xs">
+          {topDebtors.map(([name, amount]) => <div key={name} className="flex justify-between gap-3">
+            <span className="min-w-0 truncate">{name}</span><span className="shrink-0 tabular-nums">{formatMoney(amount)}</span>
+          </div>)}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+          <Link href="/finances?section=collections" className="text-sm font-medium text-amber-600 dark:text-amber-500">All collections →</Link>
+          <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}
+            triggerClassName="text-sm font-medium text-amber-600 dark:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            Collection plan →
+          </CollectionPlanDialog>
+        </div>
       </section>
       <section className="@container min-w-0 rounded-xl border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold">We owe</h2>
-        <div className="mt-1 text-[clamp(1rem,10cqi,1.875rem)] font-bold tabular-nums text-red-400 [overflow-wrap:anywhere]">{workspace ? formatMoney(workspace.bills.total) : "Unavailable"}</div>
+        <h3 className="text-sm font-semibold">We owe</h3>
+        <div className="mt-1 text-[clamp(1.125rem,10cqi,1.875rem)] font-semibold tabular-nums text-red-400 [overflow-wrap:anywhere]">{formatMoney(workspace.bills.total)}</div>
         <p className="mt-1 text-xs text-muted-foreground">
-          {workspace ? "Reviewed open balances; see Bills for approval status." : "Open bill balances could not load. Bank activity is calculated independently."}
-          {workspace && workspace.bills.reviewBalance > 0 && <> {formatMoney(workspace.bills.reviewBalance)} in unresolved balances needs review.</>}
+          Open bills that have been reviewed
+          {workspace.bills.reviewBalance > 0 && <> · {formatMoney(workspace.bills.reviewBalance)} more still in review</>}
         </p>
         <div className="mt-3 space-y-2 text-xs">
           {vendors.map(([vendor, amount]) => <div key={vendor} className="flex justify-between gap-3">
             <span className="min-w-0 truncate">{vendor}</span><span className="shrink-0 tabular-nums">{formatMoney(amount)}</span>
           </div>)}
         </div>
-        <Link href="/finances?section=bills" className="mt-3 inline-block text-sm font-medium text-amber-500">All open bills →</Link>
+        <Link href="/finances?section=bills" className="mt-3 inline-block text-sm font-medium text-amber-600 dark:text-amber-500">All open bills →</Link>
       </section>
     </div>
   </div>;
