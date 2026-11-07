@@ -7,7 +7,7 @@ import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload"
 import { scanBill, allocateBill } from "@/lib/bills/scan-client";
 import type { BillScanResult } from "@/lib/bills/types";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
-import { parseMoney } from "@/lib/money";
+import { formatMoney, parseMoney } from "@/lib/money";
 import { DecimalInput } from "@/components/ui/decimal-input";
 
 /**
@@ -184,6 +184,15 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
     setBudgetLines(next.budgetLines);
     setError(next.allocationError ?? null);
     setPhase("idle");
+  }
+
+  /** The amount box: typed, or the "use the job total" button. One line follows it. */
+  function setFiledAmount(value: string) {
+    setAmountInput(value);
+    const amount = parseMoney(value);
+    if (amount !== null) {
+      setAllocations((rows) => rows.length === 1 ? [{ ...rows[0], amount }] : rows);
+    }
   }
 
   function discard() {
@@ -396,19 +405,12 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
         >
           <div>
             <label className="block text-[12px]" style={{ color: v("muted") }}>
-              Invoice total ($)
+              {scan.scan.jobTotal ? "Amount due on this invoice ($)" : "Invoice total ($)"}
               <input
                 aria-label="Invoice total"
                 inputMode="decimal"
                 value={amountInput}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setAmountInput(value);
-                  const amount = parseMoney(value);
-                  if (amount !== null) {
-                    setAllocations((rows) => rows.length === 1 ? [{ ...rows[0], amount }] : rows);
-                  }
-                }}
+                onChange={(e) => setFiledAmount(e.target.value)}
                 className="block w-full rounded-xl px-3 py-2 mt-1 text-[22px] font-semibold outline-none"
                 style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("ink") }}
               />
@@ -439,6 +441,31 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
               Hard to read — check the total before you confirm.
             </div>
           )}
+
+          {scan.scan.jobTotal ? (
+            <div
+              className="rounded-xl px-3 py-2 text-[12px]"
+              style={{
+                background: "rgba(217,119,6,0.12)",
+                border: "1px solid rgba(217,119,6,0.3)",
+                color: "#FBBF24",
+              }}
+            >
+              <div className="font-semibold">Progress invoice: amount set to what this invoice asks for</div>
+              <div className="mt-0.5">
+                {scan.scan.amountReason ?? `Job total ${formatMoney(scan.scan.jobTotal)}.`} Check it against the invoice before you confirm.
+              </div>
+              {parseMoney(amountInput) !== scan.scan.jobTotal && (
+                <button
+                  type="button"
+                  onClick={() => setFiledAmount(String(scan.scan.jobTotal))}
+                  className="mt-1 underline underline-offset-2"
+                >
+                  Use the job total, {formatMoney(scan.scan.jobTotal)}, instead
+                </button>
+              )}
+            </div>
+          ) : null}
 
           {scan.scan.isCredit && (
             <div

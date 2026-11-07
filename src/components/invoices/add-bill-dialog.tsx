@@ -16,7 +16,7 @@ import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { compressImage } from "@/lib/image/compress";
 import { scanBill } from "@/lib/bills/scan-client";
 import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
-import { parseMoney } from "@/lib/money";
+import { formatMoney, parseMoney } from "@/lib/money";
 import { DecimalInput } from "@/components/ui/decimal-input";
 
 /**
@@ -59,6 +59,8 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
   const [storagePath, setStoragePath] = useState<string | null>(resumePath ?? null);
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState<string>("");
+  // Set when the scan read a progress invoice: file the draw, not the job total.
+  const [jobTotal, setJobTotal] = useState<{ total: number; reason: string | null } | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [date, setDate] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -102,6 +104,7 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
     setStoragePath(null);
     setVendor("");
     setAmount("");
+    setJobTotal(null);
     setInvoiceNumber("");
     setDate("");
     setDueDate("");
@@ -158,6 +161,7 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
       setStoragePath(result.scan.storagePath);
       setVendor(result.scan.vendor === "Unknown vendor" ? "" : result.scan.vendor);
       setAmount(result.scan.amount == null ? "" : String(result.scan.amount));
+      setJobTotal(result.scan.jobTotal ? { total: result.scan.jobTotal, reason: result.scan.amountReason ?? null } : null);
       setInvoiceNumber(result.scan.invoiceNumber ?? "");
       setDate(result.scan.date ?? "");
       setDueDate(result.scan.dueDate ?? "");
@@ -353,6 +357,23 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <FileText className="h-3.5 w-3.5" />
                   File attached — check the read below
+                </div>
+              )}
+
+              {jobTotal && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                  <div className="font-medium">Progress invoice: amount set to what this invoice asks for</div>
+                  <div className="mt-0.5">
+                    {jobTotal.reason ?? `Job total ${formatMoney(jobTotal.total)}.`} Check it against the invoice before filing.
+                  </div>
+                  {parseMoney(amount) !== jobTotal.total && (
+                    <button
+                      onClick={() => setAmount(String(jobTotal.total))}
+                      className="mt-1 underline underline-offset-2"
+                    >
+                      Use the job total, {formatMoney(jobTotal.total)}, instead
+                    </button>
+                  )}
                 </div>
               )}
 

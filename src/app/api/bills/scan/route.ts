@@ -5,6 +5,7 @@ import { askClaude } from "@/lib/bills/model";
 import { ownsBillUpload, loadBillRead, saveBillRead, billReadResponse } from "@/lib/bills/read-store";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { detectCreditDocument, signedAmount } from "@/lib/finance/credit-detection";
+import { pickBillAmount } from "@/lib/finance/amount-due";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 import { correctScannedYear, scanDatePromptNote } from "@/lib/finance/document-date";
 import { crewToday } from "@/lib/crew/schedule-dates";
@@ -167,7 +168,7 @@ It is most likely one of:
 Extract:
 1. document_type — "quote" if it is a quote / quotation / estimate / proposal: look for a "Quotation" or "Quote" header, a Quote No, an expiration or valid-until date, or a customer acceptance signature line — a quote is a price OFFERED, never money owed, and must NOT be read as an invoice. "credit_memo" if it is a credit / credit memo / credit note / return: look for a "Credit Memo" header, a Credit Memo No, a "Total Credit" line, returned or restocked material, or totals printed in parentheses like ($42.50) — a credit is money coming BACK, the mirror of a bill. Otherwise "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
 2. vendor_name — the company or person billing us
-3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. On a CREDIT MEMO, return the total as a NEGATIVE number — ($42.50) or a "Total Credit" of 42.50 is -42.50. null only if no charges are shown at all.
+3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges here and put the balance due in balance_due. A sub's PROGRESS invoice shows the whole job ("Job Total", "Total job price", "Contract amount") and then a smaller "Invoice Amount" / "Amount Due" for this draw, because earlier payments are subtracted: put the job total here and this draw's figure in balance_due; the app decides which one to file. On a CREDIT MEMO, return the total as a NEGATIVE number — ($42.50) or a "Total Credit" of 42.50 is -42.50. null only if no charges are shown at all.
 Never add SUBTOTAL and BALANCE DUE together: they may repeat the same charge. A dash or blank on DEPOSIT means no deposit, not an amount inferred to reconcile other figures. For example, SUBTOTAL 350.00, DEPOSIT —, BALANCE DUE 350.00 means amount 350.00. Read each printed or handwritten figure independently; do not invent a larger total or a deposit. Mark confidence low when handwriting is unclear.
 4. invoice_number — invoice / receipt number if visible
 5. date — the invoice date, YYYY-MM-DD if visible. ${scanDatePromptNote(today)}
@@ -179,7 +180,7 @@ Never add SUBTOTAL and BALANCE DUE together: they may repeat the same charge. A 
 11. job_hint — any site address, client surname, lot number or PO on the bill. null if none.
 12. matched_project_id — if job_hint clearly identifies one job below, its exact id. A company bill with no jobsite (insurance, fuel, software) matches the COMPANY OVERHEAD project. null if unsure. DO NOT guess between jobs.
 13. confidence — 0 to 1, how sure you are of vendor_name AND amount together.
-14. balance_due — the "Balance Due" / "Amount Due" figure if the document shows one, as a number (0 is meaningful — it means paid). null if not shown.
+14. balance_due — what this document asks to be paid now: the "Balance Due" / "Amount Due" / "Invoice Amount" figure (Housecall Pro invoices print it as "Invoice Amount" under "Job Total"), as a number (0 is meaningful — it means paid). Not an early-pay discounted amount. null if not shown.
 15. paid_stamp — true if the document carries a PAID stamp, "payment received", or Payments/Credits equal to the total. false otherwise.
 16. purchase_kind — "fuel" if this is a gas-station FILL-UP (gallons, price per gallon, pump number, unleaded/diesel — company truck gas, not job material); "meals" if it is restaurant/coffee/food; otherwise "materials". A gas-station ticket that is only snacks or coffee is "meals", not "fuel".
 
@@ -231,7 +232,19 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       extractedText: extracted.extracted_text,
       amount: amountRead,
     });
-    const amount = signedAmount(amountRead, creditCheck.isCredit);
+    // A progress invoice files the draw it asks for, not the whole job
+    // (DL Services 6701: Job Total $21,550, Invoice Amount $14,000).
+    const amountPick = pickBillAmount({
+      total: amountRead,
+      balanceDue:
+        typeof extracted.balance_due === "number" && Number.isFinite(extracted.balance_due)
+          ? round2(extracted.balance_due)
+          : null,
+      paidStamp: extracted.paid_stamp,
+      isCredit: creditCheck.isCredit,
+      extractedText: extracted.extracted_text,
+    });
+    const amount = signedAmount(amountPick.amount, creditCheck.isCredit);
     const confidence =
       typeof extracted.confidence === "number" ? extracted.confidence : 0;
 
@@ -293,6 +306,8 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       creditReason: creditCheck.reason,
       vendor: vendorName,
       amount,
+      jobTotal: amountPick.jobTotal,
+      amountReason: amountPick.reason,
       invoiceNumber: extracted.invoice_number || null,
       // The year is the part the model gets wrong; month and day it reads fine.
       date: scannedDate.date,

@@ -12,6 +12,10 @@ export type BillScan = {
   filename: string | null;
   vendor: string;
   amount: number | null;
+  /** Set when `amount` is a progress draw: the whole job's total printed on the invoice. */
+  jobTotal?: number | null;
+  /** Why the amount is the draw and not the printed total. */
+  amountReason?: string | null;
   invoiceNumber: string | null;
   date: string | null;
   /** What the model read, when its year was implausible and got corrected. */

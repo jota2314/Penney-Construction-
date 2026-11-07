@@ -40,6 +40,7 @@ function harness() {
     '@/lib/supabase/server': { createClient: async () => client },
     '@/lib/finance/credit-detection': { detectCreditDocument: () => ({ isCredit: false }), signedAmount: n => n },
     '@/lib/finance/quote-detection': { detectQuoteDocument: () => ({ isQuote: false }) },
+    '@/lib/finance/amount-due': load('src/lib/finance/amount-due.ts'),
     '@/lib/finance/spend-category': { looksLikeFuelPurchase: () => false },
     '@/lib/finance/document-date': load('src/lib/finance/document-date.ts'),
     '@/lib/crew/schedule-dates': load('src/lib/crew/schedule-dates.ts'),
@@ -90,6 +91,22 @@ test('read persists before allocation; allocation failure and reopening do not r
   assert.equal(retried.body.allocations.length, 2);
   assert.equal(retried.body.allocations.reduce((sum, a) => sum + Math.round(a.amount * 100), 0), 101973);
   assert.equal(h.counts().extractionCalls, 1);
+});
+
+test('a progress invoice files the draw it asks for and keeps the job total beside it (DL 6701)', async () => {
+  const h = harness();
+  h.imports['@/lib/bills/model'].askClaude = async () => ({
+    document_type: 'invoice', vendor_name: 'D L Services HVAC Inc', amount: 21550, balance_due: 14000,
+    invoice_number: '6701', matched_project_id: 'job', confidence: 0.98, paid_stamp: false,
+    items: [{ description: 'GE four-zone mini-split heat pump system', amount: 21550 }],
+    extracted_text: 'Subtotal $21,550.00\nJob Total $21,550.00\nInvoice Amount $14,000.00\nPayment History\nJun 24 Wed 8:38am Bank Account $1,000.00',
+  });
+  const read = await h.read().POST(scanRequest());
+  assert.equal(read.status, 200);
+  assert.equal(h.saved().scan.amount, 14000);
+  assert.equal(h.saved().scan.jobTotal, 21550);
+  assert.match(h.saved().scan.amountReason, /\$14,000\.00/);
+  assert.equal(h.saved().scan.alreadyPaid, false);
 });
 
 test('wrong-user paths and unauthenticated requests cannot read or allocate checkpoints', async () => {
