@@ -253,6 +253,24 @@ export function EmailDetail({
         });
       setMessages(loaded);
       setTimeout(() => inputRef.current?.focus(), 100);
+    } else if (
+      // No prior conversation — fire the heavy AI analysis automatically.
+      // The user wants the email to be "already figured out" by the time
+      // they open it. If we were called from a fresh fetch, this just
+      // backfills what the server-side analyzer should also be doing.
+      !email.is_processed &&
+      classifiedEmail.ai_action_required !== false &&
+      classifiedEmail.sender_type !== "newsletter" &&
+      classifiedEmail.sender_type !== "promotional"
+    ) {
+      fireAutoAnalyze();
+    }
+
+    // Pre-fetch the quick reply draft so the Reply tab is instant when
+    // the user taps it. Skip for outbound emails — there's nothing to
+    // reply to on a sent message.
+    if (email.direction !== "outbound" && classifiedEmail.sender_type !== "newsletter") {
+      fetchQuickReplyDraft();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -924,8 +942,53 @@ ${activeDraft.body}]
 
   // ── Render ─────────────────────────────────────────────────
 
+  // ── Tab switcher ───────────────────────────────────────────
+  // The user wanted a clear three-way navigation:
+  //   Email   = read what came in
+  //   AI      = read the analysis + approve actions
+  //   Reply   = jump straight to the pre-drafted quick reply
+  // Reply opens the existing QuickReplySheet (already pre-fetched on
+  // mount so it appears instantly). Switching back from Reply restores
+  // the previous tab.
+  const activeTab: "email" | "ai" | "reply" =
+    quickReplyOpen ? "reply" : viewMode === "email" ? "email" : "ai";
+
+  function selectTab(tab: "email" | "ai" | "reply") {
+    if (tab === "reply") {
+      handleOpenQuickReply();
+      return;
+    }
+    if (quickReplyOpen) setQuickReplyOpen(false);
+    setViewMode(tab === "email" ? "email" : "chat");
+    setEmailCollapsed(tab === "ai");
+    setChatCollapsed(tab === "email");
+  }
+
   return (
     <>
+      {/* Tab bar — three-way switch above the content panels */}
+      <div className="flex items-center justify-around border-b bg-background shrink-0 sticky top-0 z-10">
+        {([
+          { id: "email", label: "Email" },
+          { id: "ai", label: "AI" },
+          { id: "reply", label: "Reply" },
+        ] as const).map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => selectTab(tab.id)}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+              activeTab === tab.id
+                ? "text-amber-500 border-b-2 border-amber-500"
+                : "text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+            }`}
+          >
+            {tab.label}
+            {tab.id === "reply" && quickReplyLoading ? "…" : ""}
+            {tab.id === "ai" && loading && activeTab !== "ai" ? "…" : ""}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
         {/* Left panel: Email content */}
         <EmailContent
