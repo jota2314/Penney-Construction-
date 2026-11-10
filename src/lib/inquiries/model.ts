@@ -1,4 +1,4 @@
-import { addDays, etDate, etStartOfDay } from "@/lib/sub-portal/et-day";
+import { addDays, etDate, etStartOfDay, todayET, weekdayOf } from "@/lib/sub-portal/et-day";
 
 /** Pipeline order. Lead, Estimating, Proposal sent and Won also move on their own (advance_website_inquiries). */
 export const INTAKE_STATUSES = ["new", "contacted", "lead", "walkthrough", "qualified", "estimating", "proposal_sent", "won", "closed", "spam"] as const;
@@ -91,6 +91,12 @@ export function inquiryAge(createdAt: string, now: number): string {
   return hours < 1 ? "Under an hour" : hours < 24 ? `${hours}h old` : `${Math.floor(hours / 24)}d old`;
 }
 export function inquiryDueDay(value: string | null): string { return value ? etDate(value) || "" : ""; }
+/** The next weekday in Eastern time: the follow-up date a quick stage change uses when none is set. */
+export function nextFollowUpDay(now: number = Date.now()): string {
+  let day = addDays(todayET(new Date(now)), 1);
+  while (weekdayOf(day) === 0 || weekdayOf(day) === 6) day = addDays(day, 1);
+  return day;
+}
 /** The office picks an ET calendar day; deadlines are always 5 PM ET, including DST transitions. */
 export function inquiryDueIso(day: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
