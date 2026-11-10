@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
+import { buildChangeOrderEmail } from "@/lib/change-orders/email";
 import { z } from "zod";
 
 export const runtime = "nodejs";
 
-const INTERNAL_CC = [
-  "rpenney@penneyconstructioninc.com",   // Ryan
-  "nsmith@penneyconstructioninc.com",    // Nicole
-  "jbetancur@penneyconstructioninc.com", // Jorge
-].join(", ");
 const requestSchema = z.object({
   changeOrderId: z.string().uuid(),
   clientEmail: z.string().email().optional(),
@@ -64,38 +60,34 @@ export async function POST(request: Request) {
     headers: { cookie: request.headers.get("cookie") || "" },
   });
 
+  // One builder for the wording, shared with the Penney MCP's send
+  // (src/lib/change-orders/service.ts), so the client gets the same email
+  // whoever sends it. The amount prints to the penny; a credit says "Credit".
+  const email = buildChangeOrderEmail({
+    changeOrderNumber: co.change_order_number,
+    title: co.title,
+    priceImpact: Number(co.price_impact ?? 0),
+    approvalToken: co.approval_token,
+    projectName: proj?.name ?? null,
+    clientFirstName: clientName,
+    origin,
+  });
+  const { approvalUrl, subject, body } = email;
+
   let attachments: { filename: string; mimeType: string; content: string }[] | undefined;
   if (pdfRes.ok) {
     const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
     attachments = [{
-      filename: `CO${co.change_order_number} - ${co.title}.pdf`,
+      filename: email.attachmentFilename,
       mimeType: "application/pdf",
       content: pdfBuffer.toString("base64"),
     }];
   }
 
-  // Build approval link
-  const approvalUrl = `${origin}/approve/${co.approval_token}`;
-
-  const subject = `Change Order #${co.change_order_number} — ${proj?.name || "Project"} | Penney Construction`;
-
-  const body = `Hi ${clientName},
-
-Please review the attached Change Order #${co.change_order_number} for ${proj?.name || "your project"}.
-
-${co.title}
-Amount: $${Math.round(Number(co.price_impact)).toLocaleString()}
-
-To approve this change order, please click the link below and sign:
-
-${approvalUrl}
-
-Thank you,`;
-
   try {
     const sent = await sendEmail({
       to: clientEmail,
-      cc: INTERNAL_CC,
+      cc: email.cc,
       subject,
       body,
       attachments,
@@ -108,13 +100,16 @@ Thank you,`;
       status: co.status === "draft" ? "submitted" : co.status,
     }).eq("id", changeOrderId);
 
-    // Log email
+    // Log email. (email_logs has no created_by column; naming one made this
+    // insert fail quietly, so change order sends were never logged.)
     await supabase.from("email_logs").insert({
       gmail_message_id: sent.id,
+      subject,
+      from_email: user.email ?? "",
+      to_email: clientEmail,
       direction: "outbound",
       category: "client_update",
       project_id: co.project_id,
-      created_by: user.id,
     });
 
     return NextResponse.json({ success: true, message: `CO #${co.change_order_number} sent to ${clientEmail}`, approvalUrl });
