@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { updateWebsiteInquiry, convertWebsiteInquiry } from "@/lib/actions/website-inquiries";
+import { updateWebsiteInquiry, convertWebsiteInquiry, createProjectFromWebsiteInquiry } from "@/lib/actions/website-inquiries";
 import type { WebsiteInquiryEmail } from "@/lib/actions/website-inquiry-email";
 import { InquiryActions } from "@/components/inquiries/inquiry-actions";
 import { InquiryBooking } from "@/components/inquiries/inquiry-booking";
@@ -43,6 +43,12 @@ export function InquiryDetail({ inquiry, assignees, matchingLeads, readOnly, sen
     const result = await updateWebsiteInquiry({ id: inquiry.id, expectedUpdatedAt: inquiry.updated_at, status, assignee, dueDay });
     if (result.error) setError(result.error); else { setMessage("Follow-up saved."); router.refresh(); }
   }
+  async function createProject(projectStatus: "lead" | "estimating") {
+    setError(""); setMessage("");
+    const result = await createProjectFromWebsiteInquiry(inquiry.id, projectStatus);
+    if (result.error) setError(result.error);
+    else { setMessage(result.created ? `Created ${result.projectNumber} from this inquiry.` : `Linked to ${result.projectNumber}.`); router.refresh(); }
+  }
   async function convert() {
     setError(""); setMessage("");
     const result = await convertWebsiteInquiry(inquiry.id, existingLeadId || null);
@@ -74,11 +80,18 @@ export function InquiryDetail({ inquiry, assignees, matchingLeads, readOnly, sen
       </form>
       {error && <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
     </section>
-    <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Move into estimating</h2><p className="mt-2 text-sm text-muted-foreground">Create a lead when the inquiry is ready, or choose a matching lead for the same project. Customer and project creation follow the lead workflow.</p>
+    <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Project</h2>
+      {!inquiryProject(inquiry) && <>
+        <p className="mt-2 text-sm text-muted-foreground">Creates the customer and the project from this inquiry: name, email, cell, town, walkthrough address, what they want to do and how they found us. A reply from the homeowner or a walkthrough invitation creates it on its own.</p>
+        <button disabled={readOnly || pending || !email || ["spam", "closed"].includes(intakeStatus(inquiry))} onClick={() => startTransition(() => createProject("lead"))} className="mt-4 min-h-10 w-full rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50">{pending ? "Working…" : "Create project"}</button>
+        <button disabled={readOnly || pending || !email || ["spam", "closed"].includes(intakeStatus(inquiry))} onClick={() => startTransition(() => createProject("estimating"))} className="mt-2 min-h-10 w-full rounded-md border px-3 text-sm font-medium disabled:opacity-50">Create project in Estimating</button>
+      </>}
+      {inquiryProject(inquiry)?.status === "lead" && <button disabled={readOnly || pending} onClick={() => startTransition(() => createProject("estimating"))} className="mt-4 min-h-10 w-full rounded-md border px-3 text-sm font-medium disabled:opacity-50">Move project to Estimating</button>}
       {inquiryProject(inquiry) && <Link className="mt-4 block rounded-lg border bg-muted/20 p-3 text-sm hover:border-amber-500/40" href={`/projects/${inquiryProject(inquiry)!.id}`}><span className="block font-medium">{inquiryProject(inquiry)!.project_number} · {inquiryProject(inquiry)!.name}</span><span className="mt-1 block text-xs text-muted-foreground">Linked project, {(inquiryProject(inquiry)!.status || "").replaceAll("_", " ")}. This inquiry follows its status.</span></Link>}
-      {inquiry.lead_id ? <Link className="mt-4 inline-block text-sm font-medium underline underline-offset-4" href={`/crm/leads/${inquiry.lead_id}`}>Open lead record →</Link> : <>
+      {inquiry.lead_id ? <Link className="mt-4 inline-block text-sm font-medium underline underline-offset-4" href={`/crm/leads/${inquiry.lead_id}`}>Open lead record →</Link> : !inquiryProject(inquiry) && <>
+        <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">Or keep it as a lead record for now.</p>
         {matchingLeads.length > 0 && <label className="mt-4 block text-sm">Leads with this email<select disabled={readOnly || pending} value={existingLeadId} onChange={(event) => setExistingLeadId(event.target.value)} className="mt-1.5 min-h-10 w-full min-w-0 rounded-md border bg-background px-2 text-sm"><option value="">Create a new lead</option>{matchingLeads.map((lead) => <option key={lead.id} value={lead.id}>{[`${lead.first_name} ${lead.last_name}`, lead.project_type, lead.city, lead.status].filter(Boolean).join(" · ")}</option>)}</select><span className="mt-1 block text-xs text-muted-foreground">Only link an existing lead if it is the same project.</span></label>}
-        <button disabled={readOnly || pending || !email || ["spam", "closed"].includes(intakeStatus(inquiry))} onClick={() => startTransition(convert)} className="mt-4 min-h-10 w-full rounded-md border px-3 text-sm font-medium disabled:opacity-50">{existingLeadId ? "Link selected lead" : "Create a new lead"}</button>
+        <button disabled={readOnly || pending || !email || ["spam", "closed"].includes(intakeStatus(inquiry))} onClick={() => startTransition(convert)} className="mt-2 min-h-9 w-full rounded-md px-3 text-sm text-muted-foreground underline underline-offset-4 disabled:opacity-50">{existingLeadId ? "Link selected lead" : "Create a lead record"}</button>
       </>}
     </section></aside>
   </div>;

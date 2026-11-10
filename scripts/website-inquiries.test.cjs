@@ -62,6 +62,7 @@ const actions = load("src/lib/actions/website-inquiries.ts", {
   "next/cache": { revalidatePath: (path) => state.invalidations.push(path) },
   "@/lib/auth/get-user": { getUser: async () => state.user },
   "@/lib/supabase/server": { createClient: async () => { state.clients++; return db; } },
+  "@/lib/supabase/admin": { createAdminClient: () => { state.adminClients = (state.adminClients || 0) + 1; return db; } },
   "@/lib/supabase/fetch-all": {},
   "@/lib/inquiries/model": model,
 });
@@ -89,6 +90,7 @@ const scopedImports = {
   "next/cache": { revalidatePath() {} },
   "@/lib/auth/get-user": { getUser: async () => state.user },
   "@/lib/supabase/server": { createClient: async () => scopedDb },
+  "@/lib/supabase/admin": { createAdminClient: () => scopedDb },
   "@/lib/inquiries/model": model,
 };
 const todoActions = load("src/lib/actions/command-center.ts", {
@@ -159,6 +161,30 @@ const notificationActions = load("src/lib/actions/notifications.ts", { ...scoped
     }
   }
 
+  // Inquiry -> project: team check before any client, service-role RPC with the signed-in actor.
+  const projectId = "33333333-3333-4333-8333-333333333333";
+  for (const user of deniedUsers) {
+    reset({ user }); assert.ok((await actions.createProjectFromWebsiteInquiry(id)).error);
+    assert.equal(state.calls.length, 0); assert.equal(state.adminClients || 0, 0);
+  }
+  reset({ user: { profile: { id, email: allowedEmails[2] }, realProfile: { id, email: allowedEmails[0] }, isImpersonating: true } });
+  assert.ok((await actions.createProjectFromWebsiteInquiry(id)).error); assert.equal(state.adminClients || 0, 0);
+  reset(); assert.ok((await actions.createProjectFromWebsiteInquiry("invalid")).error); assert.equal(state.calls.length, 0);
+  reset(); assert.ok((await actions.createProjectFromWebsiteInquiry(id, "contracted")).error); assert.equal(state.calls.length, 0);
+  reset({ user: { profile: { id: leadId, email: allowedEmails[0] }, realProfile: { id: leadId, email: allowedEmails[0] }, isImpersonating: false },
+          response: { data: { project_id: projectId, project_number: "PC-2026-999", created: true }, error: null } });
+  const made = await actions.createProjectFromWebsiteInquiry(id, "estimating");
+  assert.equal(made.error, null); assert.equal(made.projectId, projectId); assert.equal(made.projectNumber, "PC-2026-999"); assert.equal(made.created, true);
+  assert.equal(state.calls[0].name, "create_project_from_website_inquiry");
+  assert.equal(JSON.stringify(state.calls[0].args), JSON.stringify({ p_todo_id: id, p_status: "estimating", p_actor: leadId, p_update_stage: true }));
+  assert.ok(state.invalidations.includes("/projects"));
+  reset({ response: { data: { project_id: projectId, project_number: "PC-2026-999", created: false }, error: null } });
+  assert.equal((await actions.createProjectFromWebsiteInquiry(id)).created, false); assert.equal(state.calls[0].args.p_status, "lead");
+  reset({ response: { data: null, error: { message: "This inquiry is marked spam. Reopen it before creating a project." } } });
+  assert.match((await actions.createProjectFromWebsiteInquiry(id)).error, /spam/);
+  reset({ response: { data: { project_id: "not-a-uuid" }, error: null } });
+  assert.ok((await actions.createProjectFromWebsiteInquiry(id)).error);
+
   const env = { CRON_SECRET: "test-secret" };
   let reminders = 0;
   const cron = load("src/app/api/cron/website-inquiries/route.ts", {
@@ -170,5 +196,5 @@ const notificationActions = load("src/lib/actions/notifications.ts", { ...scoped
   assert.equal((await res.json()).reminders, 2); assert.equal(reminders, 1);
   delete env.CRON_SECRET;
   assert.equal((await cron.GET(new Request("https://example.com/api/cron/website-inquiries", { headers: { authorization: "Bearer undefined" } }))).status, 401); assert.equal(reminders, 1);
-  console.log("PASS: exact inquiry allowlist across roles and routes, read/write and View as guards, assignee allowlist, legacy intake, deadlines, RPC validation, lead conversion, and cron protection.");
+  console.log("PASS: exact inquiry allowlist across roles and routes, read/write and View as guards, assignee allowlist, legacy intake, deadlines, RPC validation, lead conversion, inquiry-to-project creation, and cron protection.");
 })().catch((error) => { console.error(error); process.exit(1); });

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/auth/get-user";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { canManageWebsiteInquiries, WEBSITE_INQUIRY_EMAILS, INTAKE_STATUSES, isHandedOffStatus, inquiryDueIso, inquiryText, summarizeInquiries, type Inquiry, type InquiryState, type IntakeStatus, type MatchingInquiryLead } from "@/lib/inquiries/model";
 
@@ -92,6 +93,32 @@ export async function convertWebsiteInquiry(id: string, existingLeadId: string |
     revalidatePath("/crm"); revalidatePath("/crm/leads");
     return { error: null, leadId: data };
   } catch (error) { return { error: error instanceof Error ? error.message : "The inquiry could not be converted." }; }
+}
+
+/**
+ * Website inquiry -> customer + project in one step, through the same DB
+ * function the Penney MCP tool and the stage job use
+ * (create_project_from_website_inquiry). The function only runs for the
+ * service role, so the inquiry-team check happens here first and the signed-in
+ * person is passed as the actor. Repeating it links the existing project
+ * instead of creating a second one.
+ */
+export async function createProjectFromWebsiteInquiry(id: string, status: "lead" | "estimating" = "lead") {
+  try {
+    const { user } = await inquiryAccess(true);
+    if (!UUID.test(id)) return { error: "The inquiry is invalid." };
+    if (status !== "lead" && status !== "estimating") return { error: "Choose Lead or Estimating." };
+    const actorId = user.realProfile?.id ?? user.profile?.id ?? null;
+    const { data, error } = await createAdminClient().rpc("create_project_from_website_inquiry", {
+      p_todo_id: id, p_status: status, p_actor: actorId, p_update_stage: true,
+    });
+    if (error) return { error: error.message };
+    const result = data as { project_id?: string; project_number?: string; created?: boolean } | null;
+    if (!result?.project_id || !UUID.test(result.project_id)) return { error: "The project could not be confirmed. Refresh before trying again." };
+    refreshInquiry(id);
+    revalidatePath("/projects"); revalidatePath("/customers"); revalidatePath("/dashboard");
+    return { error: null, projectId: result.project_id, projectNumber: result.project_number ?? "", created: result.created === true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "The project could not be created." }; }
 }
 
 export async function deleteWebsiteInquiry(input: { id: string; expectedUpdatedAt: string }): Promise<{ error: string | null }> {

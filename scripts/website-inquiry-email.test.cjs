@@ -66,6 +66,7 @@ const shared = {
   "@/lib/auth/get-user": { getUser: async () => state.user },
   "@/lib/auth/role-access": roleAccess,
   "@/lib/supabase/server": { createClient: async () => db },
+  "@/lib/supabase/admin": { createAdminClient: () => db },
   "@/lib/supabase/fetch-all": { fetchAllRows: async (fetch) => (await fetch(0, 999)).data },
   "@/lib/inquiries/model": model,
 };
