@@ -21,7 +21,7 @@ export function InquiryList({ rows, now, assignees, senderName, readOnly }: {
   const [filter, setFilter] = useState("pending");
   const [search, setSearch] = useState("");
   const [owner, setOwner] = useState("all");
-  const [sort, setSort] = useState("due");
+  const [sort, setSort] = useState("newest");
   const [message, setMessage] = useState("");
   const summary = summarizeInquiries(rows, now);
   const owners = [...new Set([...assignees, ...rows.map((row) => row.assignee).filter((name): name is string => !!name)])].sort();
@@ -47,7 +47,7 @@ export function InquiryList({ rows, now, assignees, senderName, readOnly }: {
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label className="text-xs text-muted-foreground">Status<select className="mt-1.5 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="pending">Awaiting follow-up</option><option value="waiting-ryan">Visit requests waiting on Ryan</option><option value="overdue">Overdue follow-up</option><option value="all">All inquiries</option>{INTAKE_STATUSES.map((status) => <option key={status} value={status}>{INTAKE_LABELS[status]}</option>)}</select></label>
         <label className="text-xs text-muted-foreground">Owner<select className="mt-1.5 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground" value={owner} onChange={(event) => setOwner(event.target.value)}><option value="all">All owners</option>{owners.map((name) => <option key={name} value={name}>{name}</option>)}<option value="unassigned">Unassigned</option></select></label>
-        <label className="text-xs text-muted-foreground">Sort by<select className="mt-1.5 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground" value={sort} onChange={(event) => setSort(event.target.value)}><option value="due">Next follow-up</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+        <label className="text-xs text-muted-foreground">Sort by<select className="mt-1.5 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground" value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="due">Next follow-up</option><option value="oldest">Oldest first</option></select></label>
       </div>
     </div>
     {readOnly && <p className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">You are in View as. Exit it to email, edit, or delete an inquiry.</p>}
