@@ -32,6 +32,7 @@ const {
   isOpenJob,
   underbilledBy,
 } = await import(moduleURL("../src/lib/finance/workspace-model.ts"));
+const { findAttention } = await import(moduleURL("../src/lib/finance/attention.ts"));
 const { finalAuditReadiness } = await import(
   moduleURL("../src/lib/finance/final-audit.ts")
 );
@@ -44,16 +45,22 @@ const invoice = {
   status: "sent",
   sent_to_client_at: "2026-10-01",
 };
-test("partial receipts reduce AR once; discrepant amounts remain in review", () => {
+test("partial receipts reduce AR once; only unbacked payments are flagged", () => {
   assert.deepEqual(collectionBalance(invoice, [{ amount: 200 }]), {
     balance: 80000,
     issue: null,
   });
-  assert.equal(collectionBalance(invoice, [{ amount: 250 }]).balance, 75000);
-  assert.match(collectionBalance(invoice, [{ amount: 250 }]).issue, /differ/);
+  // More checks linked than the paid field says: the balance uses the checks.
+  assert.deepEqual(collectionBalance(invoice, [{ amount: 250 }]), { balance: 75000, issue: null });
+  // Overpaid by cents is paid (O'Mealia #7, $4,410.35 against $4,410.00).
+  assert.deepEqual(
+    collectionBalance({ ...invoice, amount: 4410, paid_amount: 4410, status: "paid" }, [{ amount: 4410.35 }]),
+    { balance: 0, issue: null },
+  );
+  assert.match(collectionBalance(invoice, []).issue, /no check linked/);
   assert.match(
     collectionBalance({ ...invoice, status: "paid" }, [{ amount: 200 }]).issue,
-    /Paid status/,
+    /Marked paid/,
   );
   assert.match(
     collectionBalance({ ...invoice, amount: null }, []).issue,
@@ -84,6 +91,63 @@ test("collection totals consistently exclude unapplied matching receipts and rec
   assert.equal(jobRows.reduce((sum, row) => sum + row.balance, 0), 100000);
   assert.equal(jobRows.filter(row => row.daysLate > 0).reduce((sum, row) => sum + row.balance, 0), 80000);
   assert.deepEqual(rows, original, "Display eligibility must not apply receipts or alter invoices");
+});
+test("needs attention lists only duplicates and wrong-job records", () => {
+  const bill = (id, o = {}) => ({
+    id, project_id: "pelkey", vendor_name: "Building Center of Essex", invoice_number: null,
+    invoice_date: "2026-11-05", amount: 100, split_group_id: null, estimate_line_item_id: null, ...o,
+  });
+  const bills = [
+    // Same split bill entered twice on one job.
+    bill("a1", { invoice_number: "373837", amount: 126.3, split_group_id: "s1" }),
+    bill("a2", { invoice_number: "373837", amount: 1129.66, split_group_id: "s1" }),
+    bill("b1", { invoice_number: "373837", amount: 126.3, split_group_id: "s2" }),
+    bill("b2", { invoice_number: "373837", amount: 1129.66, split_group_id: "s2" }),
+    // Same bill on two jobs.
+    bill("ez1", { vendor_name: "EZ Disposal Service Inc", invoice_number: "152528", invoice_date: "2026-09-04", amount: 425, project_id: "parziale" }),
+    bill("ez2", { vendor_name: "EZ Disposal Service Inc", invoice_number: "152528", invoice_date: "2026-09-04", amount: 425, project_id: "buckley" }),
+    // One credit legitimately spread across jobs: different amounts, not a copy.
+    bill("cr1", { invoice_number: "17126", amount: -118.18, project_id: "grelle" }),
+    bill("cr2", { invoice_number: "17126", amount: -105.97, project_id: "omealia" }),
+    // Porta-potty rentals: same vendor, day and price, no bill number. Normal.
+    bill("p1", { vendor_name: "The Rest Stop", amount: 192.4, project_id: "gouthro" }),
+    bill("p2", { vendor_name: "The Rest Stop", amount: 192.4, project_id: "disalvo" }),
+    // Coded to another job's budget line; and on no job at all.
+    bill("line", { invoice_number: "9", project_id: "pelkey", estimate_line_item_id: "haight-line" }),
+    bill("ok-line", { invoice_number: "10", project_id: "pelkey", estimate_line_item_id: "pelkey-line" }),
+    bill("nojob", { vendor_name: "Capital One Crd Cd", project_id: null, amount: 1500 }),
+  ];
+  const invoices = [
+    { id: "i1", project_id: "ouellette", invoice_number: 2, title: "Foundation and framing", amount: 75000, status: "paid", sent_to_client_at: "2026-07-30T12:00:00Z" },
+    { id: "i2", project_id: "ouellette", invoice_number: 5, title: "Drywall complete", amount: 75000, status: "sent", sent_to_client_at: "2026-10-27T12:00:00Z" },
+    { id: "i3", project_id: "white", invoice_number: 3, title: "Final invoice", amount: 1000, status: "sent", sent_to_client_at: "2026-10-01T12:00:00Z" },
+    { id: "i4", project_id: "white", invoice_number: 4, title: "Final  Invoice", amount: 1000, status: "sent", sent_to_client_at: "2026-10-02T12:00:00Z" },
+    { id: "i5", project_id: "white", invoice_number: 5, title: "Final invoice", amount: 1000, status: "void", sent_to_client_at: "2026-10-03T12:00:00Z" },
+  ];
+  const receipts = [
+    { id: "r1", project_id: "cleary", client_invoice_id: null, amount: 8623, received_date: "2026-06-29", reference_number: "CK-6280" },
+    { id: "r2", project_id: "cleary", client_invoice_id: null, amount: 8623, received_date: "2026-06-29", reference_number: "CK-6286" },
+    { id: "r3", project_id: "danti", client_invoice_id: null, amount: 500, received_date: "2026-10-25", reference_number: "374" },
+    { id: "r4", project_id: "danti", client_invoice_id: null, amount: 500, received_date: "2026-10-26", reference_number: "Check 374" },
+    { id: "r5", project_id: "harmon", client_invoice_id: "i2", amount: 75000, received_date: "2026-11-03", reference_number: "869" },
+  ];
+  const names = new Map(["pelkey", "parziale", "buckley", "haight", "danti", "harmon", "ouellette", "white"].map(id => [id, id[0].toUpperCase() + id.slice(1)]));
+  const input = { bills, receipts, invoices, names, lineJob: new Map([["haight-line", "haight"], ["pelkey-line", "pelkey"]]) };
+  const before = structuredClone({ bills, receipts, invoices });
+  const items = findAttention(input);
+  assert.deepEqual(structuredClone({ bills, receipts, invoices }), before, "Finding problems must not change records");
+  const view = items.map(i => [i.kind, i.title, i.detail, i.amount]);
+  assert.deepEqual(view, [
+    ["duplicate", "Building Center of Essex #373837", "Entered twice on Pelkey", 125596],
+    ["duplicate", "Check 374", "Logged twice on Danti", 50000],
+    ["duplicate", "White", "Client invoices #3 and #4 are the same invoice", 100000],
+    ["wrong_job", "Building Center of Essex #9", "On Pelkey, coded to a Haight budget line", 10000],
+    ["wrong_job", "Capital One Crd Cd", "Not on any job", 150000],
+    ["wrong_job", "Check 869", "Logged on Harmon, applied to Ouellette invoice #5", 7500000],
+    ["wrong_job", "EZ Disposal Service Inc #152528", "Same bill on Parziale and Buckley", 42500],
+  ]);
+  assert.ok(items.every(i => i.href.startsWith("/")));
+  assert.equal(items.find(i => i.title.includes("373837")).href, "/spent/b1");
 });
 const record = (id, kind, created, closed) => ({
   id,

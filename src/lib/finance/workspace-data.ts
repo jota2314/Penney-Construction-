@@ -11,6 +11,7 @@ import { fingerprint, sourceRegister } from "@/lib/job-review/engine";
 import { loadSnapshot } from "@/lib/job-review/service";
 import { buildOpenBills, type BillRecord } from "./open-bills";
 import { getJobOverheadAllocation } from "./overhead";
+import { findAttention } from "./attention";
 import {
   cents,
   total,
@@ -173,9 +174,10 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
     ];
   });
   // Checks are often logged from the deposit side without being linked to the
-  // invoice, so a paid invoice keeps showing as owed. Flag an unlinked receipt
-  // for exactly the open balance, received after the invoice was issued; each
-  // receipt can flag one invoice, oldest invoice first.
+  // invoice. An unlinked receipt on the job for exactly the open balance,
+  // received after the invoice was issued, pays that invoice: it is neither
+  // owed nor flagged (Jorge 11/10/26, "that shit is already good"). Each
+  // receipt pays one invoice, oldest invoice first. No record is changed.
   const issuedOn = new Map(
     invoices.map((i) => {
       const sentDay = i.sent_to_client_at ? nyDay(i.sent_to_client_at) : null;
@@ -290,8 +292,6 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
         warnings.push("Live crew hours are provisional");
       if (collections.some((i) => i.projectId === p.id && i.issue))
         warnings.push("Client receipts need reconciliation");
-      if (collections.some((i) => i.projectId === p.id && i.loggedPayment))
-        warnings.push("Recorded client receipt needs invoice matching");
       const ownCollections = collections.filter(
         (i) => i.projectId === p.id && isActionableCollection(i),
       );
@@ -362,10 +362,24 @@ export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
     }
   }));
   }
+  const estimateJob = new Map(estimates.map((e) => [e.id, e.project_id]));
+  const attention = findAttention({
+    bills,
+    receipts,
+    invoices,
+    lineJob: new Map(
+      lines.flatMap((l) => {
+        const job = estimateJob.get(l.estimate_id);
+        return job ? [[l.id, job] as [string, string]] : [];
+      }),
+    ),
+    names,
+  });
   return {
     today,
     jobs,
     collections,
+    attention,
     records,
     auditError: recordResult.error,
     bills: buildOpenBills(bills as BillRecord[], today),

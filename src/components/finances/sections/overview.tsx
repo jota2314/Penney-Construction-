@@ -70,8 +70,9 @@ export default async function FinanceOverview() {
   const bankThrough = fulfilled(bankResult);
   const open = data?.collections.filter(isActionableCollection) ?? [];
   const overdue = open.filter(row => row.daysLate > 0);
-  const logged = data?.collections.filter(row => !row.issue && row.loggedPayment) ?? [];
-  const flagged = data?.collections.filter(row => row.issue) ?? [];
+  const attention = data?.attention ?? [];
+  const duplicates = attention.filter(item => item.kind === "duplicate");
+  const wrongJob = attention.filter(item => item.kind === "wrong_job");
   const followup = [...open].sort((a, b) => b.daysLate - a.daysLate || b.daysWaiting - a.daysWaiting || b.balance - a.balance).slice(0, 5);
   const watch = (data?.jobs ?? []).filter(isOpenJob).map(job => ({ job, health: healthFor(job) }))
     .filter(({ health }) => health.tone === "bad" || health.tone === "warn")
@@ -101,28 +102,29 @@ export default async function FinanceOverview() {
       <div><h2 id="balances-heading" className="text-sm font-semibold">Open balances today</h2><p className="mt-1 text-xs text-muted-foreground">All dates · amounts needing reconciliation are listed separately.</p></div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Metric label="Customer invoices to follow up" value={data ? money(total(open, row => row.balance)) : null} href="/finances?section=collections" icon={<Wallet className="h-4 w-4" />}
-          detail={data ? <>{open.length} issued invoices · {money(total(overdue, row => row.balance))} past due<br />{logged.length ? `${logged.length} possible receipt matches excluded pending review.` : "Recorded balances on issued invoices."}</> : "Open collection balances could not load."} />
+          detail={data ? <>{open.length} issued invoices · {money(total(overdue, row => row.balance))} past due<br />Invoices with a matching check on the job count as paid.</> : "Open collection balances could not load."} />
         <Metric label="Reviewed vendor bills open" value={data ? money(Math.round(data.bills.total * 100)) : null} href="/finances?section=bills" icon={<ArrowUpRight className="h-4 w-4" />}
           detail={data ? <>{bills.length} bills · {bills.filter(bill => !bill.approved).length} awaiting payment approval<br />{data.bills.review.length ? `${money(Math.round(data.bills.reviewBalance * 100))} unresolved balances excluded.` : "Payment approval remains separate."}</> : "Open vendor balances could not load."} />
       </div>
     </section>
 
-    {data && <section aria-labelledby="attention-heading" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 sm:p-5">
-      <h2 id="attention-heading" className="flex items-center gap-2 text-sm font-semibold"><CircleAlert className="h-4 w-4 text-amber-600" />Needs attention</h2>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <Link href="/finances?section=collections" className="min-w-0 rounded-lg border bg-background/60 p-3 hover:bg-muted/40">
-          <p className="text-sm font-medium">{flagged.length + logged.length} invoice checks</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{flagged.length} balance discrepancies · {logged.length} possible receipt matches. Review and apply receipts before closing invoices.</p>
-        </Link>
-        <Link href="/finances?section=bills" className="min-w-0 rounded-lg border bg-background/60 p-3 hover:bg-muted/40">
-          <p className="text-sm font-medium">{data.bills.review.length} bill groups to reconcile</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Source, duplicate, allocation or payment questions. Unresolved balances are not confirmed amounts to pay.</p>
-        </Link>
-        <Link href="/finances?section=projects" className="min-w-0 rounded-lg border bg-background/60 p-3 hover:bg-muted/40">
-          <p className="text-sm font-medium">{watch.length} projects to review</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Cost risks, overdue collections or evidence gaps. Open the job for its scope costs and crew hours.</p>
-        </Link>
-      </div>
+    {data && <section aria-labelledby="attention-heading" className={`rounded-xl border p-4 sm:p-5 ${attention.length ? "border-amber-500/30 bg-amber-500/5" : "bg-card"}`}>
+      <h2 id="attention-heading" className="flex items-center gap-2 text-sm font-semibold">
+        <CircleAlert className={`h-4 w-4 ${attention.length ? "text-amber-600" : "text-muted-foreground"}`} />
+        Needs attention{attention.length > 0 && ` · ${attention.length}`}
+      </h2>
+      <p className="mt-1 text-xs text-muted-foreground">Duplicates and anything on the wrong job.</p>
+      {!attention.length && <p className="mt-3 text-sm">Nothing found. No duplicate bills, checks or invoices, and nothing on the wrong job.</p>}
+      {[{ label: "Duplicates", items: duplicates }, { label: "Wrong job", items: wrongJob }].filter(group => group.items.length).map(group =>
+        <div key={group.label} className="mt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.label} · {group.items.length}</h3>
+          <ul className="mt-2 divide-y overflow-hidden rounded-lg border bg-background/60">{group.items.map(item => <li key={item.key}>
+            <Link href={item.href} className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5 hover:bg-muted/40">
+              <div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{item.title}</p><p className="mt-0.5 break-words text-xs text-muted-foreground">{item.detail}</p></div>
+              <div className="text-right"><p className="text-sm font-semibold tabular-nums">{money(item.amount)}</p>{item.date && <p className="mt-0.5 text-xs text-muted-foreground">{day(item.date)}</p>}</div>
+            </Link>
+          </li>)}</ul>
+        </div>)}
       {data.auditError && <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">{data.auditError}</p>}
     </section>}
 

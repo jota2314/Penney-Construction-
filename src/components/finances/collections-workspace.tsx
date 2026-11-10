@@ -8,8 +8,8 @@ import { SendInvoiceButton } from "@/components/invoices/send-invoice-button";
  * Collections, the simple version (Jorge 10/28: "way too complicated, I can't
  * see the data and the invoices"). Three numbers, then one list of who owes
  * what, oldest first. Each invoice opens its PDF and can be reminded in place.
- * Invoices that already have a matching check logged sit in their own box so
- * nobody chases a client who has paid. Amounts are cents.
+ * An invoice with a matching check logged on the job is paid and not listed
+ * (Jorge 11/10/26: "that shit is already good"). Amounts are cents.
  */
 
 const dollars = (n: number) =>
@@ -66,7 +66,6 @@ export function CollectionsWorkspace({ rows, pace }: { rows: CollectionRow[]; pa
   const open = rows
     .filter(isActionableCollection)
     .sort((a, b) => b.daysWaiting - a.daysWaiting || a.projectName.localeCompare(b.projectName));
-  const logged = rows.filter((r) => !r.issue && r.loggedPayment);
   const flagged = rows.filter((r) => r.issue);
   const { thisWeek, lastWeek, month } = pace;
   return (
@@ -98,9 +97,7 @@ export function CollectionsWorkspace({ rows, pace }: { rows: CollectionRow[]; pa
         </div>
         {open.length === 0 ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">
-            {logged.length || flagged.length
-              ? "No invoices ready for collection. Review the unapplied receipts and reconciliation items below."
-              : "No recorded open invoices."}
+            {flagged.length ? "Nothing owed right now. See the invoices below that need a look." : "Nothing owed right now."}
           </p>
         ) : (
           <ul className="divide-y">
@@ -128,45 +125,6 @@ export function CollectionsWorkspace({ rows, pace }: { rows: CollectionRow[]; pa
           </ul>
         )}
       </section>
-
-      {logged.length > 0 && (
-        <section aria-label="Check logged, not linked yet" className="overflow-hidden rounded-xl border border-amber-500/40">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5">
-            <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-              Check logged, not linked yet · {exact(total(logged, (r) => r.balance))}
-            </h2>
-            <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
-              Not in the total above. Link the check on the job to close the invoice.
-            </p>
-          </div>
-          <ul className="divide-y">
-            {logged.map((r) => (
-              <li key={r.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:gap-6">
-                <InvoiceTitle row={r} />
-                <div className="flex items-center justify-between gap-4 sm:justify-end">
-                  <div className="text-left sm:w-40 sm:text-right">
-                    <p className="font-semibold tabular-nums">{exact(r.balance)}</p>
-                    <p className="whitespace-nowrap text-xs text-muted-foreground">
-                      {r.loggedPayment!.reference ? `Check ${r.loggedPayment!.reference}` : "Payment"} ·{" "}
-                      {shortDay(r.loggedPayment!.date)}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <PdfButton id={r.id} />
-                    <Link
-                      href={jobHref(r.projectId)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium transition-colors hover:bg-muted"
-                    >
-                      Link check
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
       {flagged.length > 0 && (
         <section aria-label="Needs a look" className="overflow-hidden rounded-xl border">

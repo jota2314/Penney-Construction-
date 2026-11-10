@@ -76,15 +76,15 @@ export type CollectionRow = {
   daysWaiting: number;
   /**
    * A recorded receipt on this job, not linked to any invoice, for exactly this
-   * balance and received after the invoice went out. Display only: it still has
-   * to be reviewed and applied before the invoice counts as paid.
+   * balance and received after the invoice went out. The invoice is paid: it is
+   * neither owed nor flagged (Jorge 11/10/26). Display only: the receipt and
+   * invoice records are not changed.
    */
   loggedPayment: { amount: number; date: string; reference: string | null } | null;
   issue: string | null;
 };
-/** Keep unresolved invoices and matching, unapplied receipts out of collection
- * totals everywhere. A matching receipt still needs review; this does not mark
- * the invoice paid or change its recorded balance. */
+/** Owed and collectible: no reconciliation issue and not already paid by a
+ * matching check on the job. Does not change any record. */
 export function isActionableCollection(
   row: Pick<CollectionRow, "issue" | "loggedPayment">,
 ): boolean {
@@ -243,16 +243,20 @@ export function collectionBalance(
   const amount = cents(invoice.amount),
     paid = cents(invoice.paid_amount) ?? 0;
   const linked = total(receipts, (r) => cents(r.amount) ?? 0);
+  const covered = Math.max(paid, linked);
+  // Checks linked beyond the paid field (a stale field, or an overpayment by
+  // a few cents) are not a problem: the balance already uses them. Flag only
+  // a paid amount no check backs up, or a "paid" invoice still short.
   const issue =
     amount === null || receipts.some((r) => cents(r.amount) === null)
       ? "Amount needs verification"
-      : linked !== paid
-        ? "Linked receipts and invoice paid amount differ"
-        : invoice.status === "paid" && paid < amount
-          ? "Paid status and recorded amount differ"
+      : paid > linked && linked < amount
+        ? "Invoice shows a payment with no check linked"
+        : invoice.status === "paid" && covered < amount
+          ? "Marked paid but not paid in full"
           : null;
   return {
-    balance: amount === null ? 0 : Math.max(0, amount - Math.max(paid, linked)),
+    balance: amount === null ? 0 : Math.max(0, amount - covered),
     issue,
   };
 }

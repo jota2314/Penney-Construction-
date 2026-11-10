@@ -76,6 +76,10 @@ function harness() {
       jobs: [{ id: "watch-job", name: "Watch job", number: "PC-WATCH", cost: 1000000, budget: 500000,
         contract: 2000000, overdue: 0, warnings: ["Bills need source review"], audit: null,
         forecast: null, financialBasis: "fixture", finalNeedsReview: false }],
+      attention: [
+        { key: "bill:dup", kind: "duplicate", title: "Fixture supplier #373837", detail: "Entered twice on Open job", amount: 125596, date: "2026-11-05", href: "/spent/dup-bill" },
+        { key: "bill:two-jobs", kind: "wrong_job", title: "Fixture disposal #152528", detail: "Same bill on Job A and Job B", amount: 42500, date: "2026-09-04", href: "/spent/two-jobs" },
+      ],
       bills: { total: 350, reviewBalance: 900, review: [{ id: "unresolved-bill" }], bills: [
         { id: "vendor-bill", vendor: "Fixture vendor", projects: ["Open job"], amount: 350,
           dueDate: "2026-11-04", approved: false },
@@ -139,10 +143,15 @@ test("overview uses actionable collections and retains reconciliation queues plu
   const html = await render();
   assert.match(metric(html, "Recorded receipts"), /\$5,432\.10/);
   assert.match(metric(html, "Recorded expenses"), /\$100\.00/);
-  assert.match(metric(html, "Customer invoices to follow up"), /\$1,200\.00.*1 issued invoices.*1 possible receipt matches excluded/);
+  assert.match(metric(html, "Customer invoices to follow up"), /\$1,200\.00.*1 issued invoices.*matching check on the job count as paid/);
   assert.doesNotMatch(metric(html, "Customer invoices to follow up"), /\$2,700\.00/);
   assert.match(metric(html, "Reviewed vendor bills open"), /\$350\.00.*\$900\.00 unresolved/);
-  assert.match(textOf(html), /2 invoice checks.*1 balance discrepancies.*1 possible receipt matches/);
+  // Needs attention: only duplicates and wrong-job records, never paid invoices
+  // or bookkeeping queues (Jorge 11/10/26).
+  assert.match(textOf(html), /Needs attention · 2/);
+  assert.match(textOf(html), /Duplicates · 1 Fixture supplier #373837 Entered twice on Open job \$1,255\.96/);
+  assert.match(textOf(html), /Wrong job · 1 Fixture disposal #152528 Same bill on Job A and Job B \$425\.00/);
+  assert.doesNotMatch(textOf(html), /receipt matches|invoice checks|bill groups to reconcile|projects to review/);
   assert.match(textOf(html), /Over budget/);
   assert.match(textOf(html), /Latest imported Eastern transaction: Oct 31, 2026/);
   assert.match(textOf(html), /do not confirm statement completeness or today’s bank balance/);
@@ -150,11 +159,20 @@ test("overview uses actionable collections and retains reconciliation queues plu
   for (const href of [
     "/finances?section=weekly", "/finances?section=income&range=month", "/finances?section=expenses&range=month",
     "/finances?section=collections&collection=project-open", "/spent/vendor-bill", "/projects/watch-job?tab=finances", "/finances?section=cash",
+    "/spent/dup-bill", "/spent/two-jobs",
   ]) assert.ok(links.includes(href), `Missing native link ${href}`);
   assert.ok(!links.some(href => /collection=project-(matching|flagged)/.test(href)));
   const invoiceQuery = state.queries.find(query => query.table === "invoices");
   assert.ok(invoiceQuery.calls.some(call => call[0] === "gte" && call[1] === "invoice_date" && call[2] === "2026-11-01"));
   assert.ok(invoiceQuery.calls.some(call => call[0] === "lte" && call[1] === "invoice_date" && call[2] === "2026-11-05"));
+});
+
+test("with no duplicates or wrong-job records, needs attention says nothing was found", async () => {
+  const { state, render } = harness();
+  state.workspace.attention = [];
+  const text = textOf(await render());
+  assert.match(text, /Needs attention Duplicates and anything on the wrong job\. Nothing found\./);
+  assert.doesNotMatch(text, /Needs attention ·/);
 });
 
 test("independent source failures show unavailable figures without replacing balances with zero", async () => {
