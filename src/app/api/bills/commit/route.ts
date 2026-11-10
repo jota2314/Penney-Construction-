@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveBillCaller } from "@/lib/bills/caller";
+import { duplicateReviewReason, findBookedDuplicate } from "@/lib/bills/duplicate";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { isMaterialSupplier, resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
@@ -177,27 +178,22 @@ export async function POST(request: NextRequest) {
 
     // Duplicate guard: the same bill often arrives twice — WRD emails their
     // invoice (email triage files it) and then someone drops the same PDF at
-    // the tile. Same money, same job, same vendor family, recent = suspicious.
-    // Zero-touch still files it, but FLAGGED, so it dies in Needs check
-    // instead of silently doubling the job's Spent.
-    let duplicateOf: { vendor_name: string; invoice_date: string | null } | null = null;
-    {
-      const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
-      if (vendorToken.length >= 3) {
-        let dupeQuery = supabase
-          .from("invoices")
-          .select("id, vendor_name, invoice_date")
-          .eq("amount", amount)
-          .ilike("vendor_name", `${vendorToken}%`)
-          .gte("created_at", new Date(Date.now() - 45 * 86400_000).toISOString())
-          .limit(1);
-        dupeQuery = projectId
-          ? dupeQuery.eq("project_id", projectId)
-          : dupeQuery.is("project_id", null);
-        const { data: dupes } = await dupeQuery;
-        duplicateOf = dupes?.[0] ?? null;
-      }
-    }
+    // the tile. Same job, same vendor family, and the same invoice number or
+    // the same total (a split bill counted whole) = suspicious. Zero-touch
+    // still files it, but FLAGGED, so it dies in Needs check instead of
+    // silently doubling the job's Spent. Rules: src/lib/bills/duplicate.ts.
+    const invoiceNumber = typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null;
+    // If the check itself fails, file it flagged rather than block the person.
+    let duplicateCheckFailed = false;
+    const duplicateOf = await findBookedDuplicate(supabase, {
+      projectId: projectId || null,
+      vendorName,
+      invoiceNumber,
+      amount,
+    }).catch(() => {
+      duplicateCheckFailed = true;
+      return null;
+    });
 
     // A quote is a price OFFERED, not money owed — booking one inflates the
     // job's Spent (the Sobol BC of Essex quotation, $6,834.48 of phantom
@@ -229,7 +225,9 @@ export async function POST(request: NextRequest) {
     const reviewReason = quoteCheck.isQuote
       ? `this looks like a QUOTE, not a bill (${quoteCheck.reason}) — a price offered is not money owed; discard it, or confirm it really is an invoice`
       : duplicateOf
-      ? `looks like the SAME bill as ${duplicateOf.vendor_name} for the same amount${duplicateOf.invoice_date ? ` (${duplicateOf.invoice_date})` : ""} already in the books — confirm it's really a second one, or discard`
+      ? duplicateReviewReason(duplicateOf)
+      : duplicateCheckFailed
+      ? "couldn't check whether this bill is already in the books — look before paying it"
       : !projectId
         ? "AI couldn't tell the job — pick one"
         : allocations.length === 0
@@ -256,7 +254,7 @@ export async function POST(request: NextRequest) {
         subcontractor_id: subcontractorId,
         vendor_type: vendorType,
         trade: typeof body?.trade === "string" ? body.trade : null,
-        invoice_number: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
+        invoice_number: invoiceNumber,
         invoice_date: invoiceDate,
         due_date: dueDate,
         description: summary || `${vendorName} — ${isCredit ? "credit" : "bill"}`,

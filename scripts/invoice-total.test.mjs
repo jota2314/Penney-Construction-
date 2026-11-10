@@ -66,12 +66,12 @@ for (const corrected of ['350', '3.50', '3.23']) test(`mobile correction to ${co
   } finally { await browser.close(); }
 });
 
-function commitRoute() {
+function commitRoute({bookedBills=[]}={}) {
   const inserted=[];
   const db={rpc:async()=>({data:[{id:'child1'},{id:'child2'}],error:null}),from(table){
     let insert=false;
     const q=new Proxy({}, {get(_,prop){
-      if(prop==='then') return resolve=>resolve({data:table==='estimate_line_items'?[{id:'line',estimates:{project_id:'job'}},{id:'line2',estimates:{project_id:'job'}}]:[],error:null});
+      if(prop==='then') return resolve=>resolve({data:table==='estimate_line_items'?[{id:'line',estimates:{project_id:'job'}},{id:'line2',estimates:{project_id:'job'}}]:table==='invoices'&&!insert?bookedBills:[],error:null});
       return (...args)=>{
         if(prop==='insert'){insert=true;inserted.push(args[0]);}
         if(prop==='single'||prop==='maybeSingle') return Promise.resolve({data:insert?{id:'invoice'}:table==='projects'?{id:'job',name:'White Kitchen'}:{full_name:'Tester'},error:null});
@@ -86,6 +86,8 @@ function commitRoute() {
     '@/lib/auth/get-user':{getUser:async()=>({id:'user'})},
     // The signed-in path of the shared bill caller (src/lib/bills/caller.ts).
     '@/lib/bills/caller':{resolveBillCaller:async()=>({ok:true,caller:{profileId:'user',email:null,db,viaService:false}})},
+    // The real duplicate rule, run against the bills this test puts on the job.
+    '@/lib/bills/duplicate':(()=>{const m={exports:{}};new Function('require','module','exports',compile('src/lib/bills/duplicate.ts'))(()=>({}),m,m.exports);return m.exports;})(),
     '@/lib/subs/resolve-subcontractor':{resolveSubcontractorId:async()=>null},
     '@/lib/finance/spend-category':{resolveVendorType:()=> 'subcontractor'},
     '@/lib/finance/quote-detection':{detectQuoteDocument:()=>({isQuote:false})},
@@ -103,6 +105,25 @@ test('commit saves the human $350 correction despite stale $700 OCR',async()=>{
   const {post,inserted}=commitRoute(); const response=await post(body);
   assert.equal(response.status,200);assert.equal(response.body.amount,350);
   assert.equal(inserted[0].amount,350);assert.equal(inserted[0].estimate_line_item_id,'line');
+});
+test('a split bill dropped again files flagged, not clean, and is not approved',async()=>{
+  // Sygma Stone #16789 on Ouellette: filed 11/10 at 12:17 as three split rows.
+  const at=new Date().toISOString();
+  const bookedBills=[863,2725,4260.44].map((amount,i)=>({id:'booked'+i,vendor_name:'Sygma Stone Inc',invoice_number:'16789',invoice_date:'2026-11-09',amount,split_group_id:'g1',created_at:at}));
+  const {post,inserted}=commitRoute({bookedBills});
+  const response=await post({projectId:'job',vendor:'Sygma Stone',amount:7848.44,invoiceNumber:'16789',approveForPay:true,allocations:[{lineItemId:'line',amount:7848.44}]});
+  assert.equal(response.status,200);
+  assert.equal(inserted[0].review_status,'needs_review');
+  assert.match(inserted[0].review_reason,/Sygma Stone Inc #16789 .*across 3 budget lines/);
+  assert.equal(inserted[0].pay_approval_status,'pending');
+  // the same total with no invoice number read is caught too
+  const second=commitRoute({bookedBills});
+  await second.post({projectId:'job',vendor:'Sygma Stone',amount:7848.44,allocations:[{lineItemId:'line',amount:7848.44}]});
+  assert.equal(second.inserted[0].review_status,'needs_review');
+  // a different bill from the same vendor files clean
+  const third=commitRoute({bookedBills});
+  await third.post({projectId:'job',vendor:'Sygma Stone',amount:1200,invoiceNumber:'16790',allocations:[{lineItemId:'line',amount:1200}]});
+  assert.equal(third.inserted[0].review_status,'ok');
 });
 test('commit rejects $700 total with $350 allocation before any insert',async()=>{
   const {post,inserted}=commitRoute(); const response=await post({...body,amount:700});
