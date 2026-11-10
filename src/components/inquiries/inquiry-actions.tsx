@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { deleteWebsiteInquiry, updateWebsiteInquiry } from "@/lib/actions/website-inquiries";
 import { getWebsiteInquiryEmailSender, listWebsiteInquiryEmails, sendWebsiteInquiryEmail } from "@/lib/actions/website-inquiry-email";
 import { buildInquiryEmailDraft, INQUIRY_EMAIL_TEMPLATES, type InquiryEmailTemplateId } from "@/lib/inquiries/email-templates";
-import { INTAKE_LABELS, INTAKE_STATUSES, inquiryDueDay, inquiryText, intakeStatus, type Inquiry, type IntakeStatus } from "@/lib/inquiries/model";
+import { INTAKE_LABELS, INTAKE_STATUSES, isHandedOffStatus, inquiryDueDay, inquiryText, intakeStatus, type Inquiry, type IntakeStatus } from "@/lib/inquiries/model";
 
 type Action = "email" | "follow-up" | "delete";
 const fieldClass = "mt-1.5 min-h-10 w-full rounded-md border bg-background px-3 text-sm disabled:opacity-60";
@@ -138,7 +138,7 @@ function InquiryFollowUpDialog({ inquiry, assignees, onClose, onComplete }: { in
     <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); startTransition(save); }}>
       <label className="block text-sm">Status<select className={fieldClass} disabled={pending} value={status} onChange={(event) => setStatus(event.target.value as IntakeStatus)}>{INTAKE_STATUSES.filter((item) => item !== "walkthrough" || intakeStatus(inquiry) === "walkthrough").map((item) => <option key={item} value={item}>{INTAKE_LABELS[item]}</option>)}</select><span className="mt-1 block text-xs text-muted-foreground">Confirm a walkthrough from the inquiry’s calendar panel.</span></label>
       <label className="block text-sm">Owner<select className={fieldClass} required disabled={pending} value={assignee} onChange={(event) => setAssignee(event.target.value)}><option value="">Choose owner</option>{assignees.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-      <label className="block text-sm">Next follow-up<input className={fieldClass} type="date" required={!["qualified", "closed", "spam"].includes(status)} disabled={pending} value={dueDay} onChange={(event) => setDueDay(event.target.value)} /><span className="mt-1 block text-xs text-muted-foreground">Due by 5 p.m. Eastern time.</span></label>
+      <label className="block text-sm">Next follow-up<input className={fieldClass} type="date" required={!isHandedOffStatus(status)} disabled={pending} value={dueDay} onChange={(event) => setDueDay(event.target.value)} /><span className="mt-1 block text-xs text-muted-foreground">Due by 5 p.m. Eastern time.</span></label>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <DialogFooter><Button type="button" variant="outline" className="min-h-10" disabled={pending} onClick={onClose}>Cancel</Button><Button type="submit" className="min-h-10" disabled={pending}>{pending && <Loader2 aria-hidden="true" className="animate-spin" />}{pending ? "Saving…" : "Save follow-up"}</Button></DialogFooter>
     </form>

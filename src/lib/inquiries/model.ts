@@ -1,11 +1,19 @@
 import { addDays, etDate, etStartOfDay } from "@/lib/sub-portal/et-day";
 
-export const INTAKE_STATUSES = ["new", "contacted", "walkthrough", "qualified", "closed", "spam"] as const;
+/** Pipeline order. Lead, Estimating, Proposal sent and Won also move on their own (advance_website_inquiries). */
+export const INTAKE_STATUSES = ["new", "contacted", "lead", "walkthrough", "qualified", "estimating", "proposal_sent", "won", "closed", "spam"] as const;
 export type IntakeStatus = (typeof INTAKE_STATUSES)[number];
 export const INTAKE_LABELS: Record<IntakeStatus, string> = {
-  new: "New", contacted: "Contacted", walkthrough: "Walkthrough booked",
-  qualified: "Qualified", closed: "Closed", spam: "Spam",
+  new: "New", contacted: "Contacted", lead: "Lead", walkthrough: "Walkthrough booked",
+  qualified: "Qualified", estimating: "Estimating", proposal_sent: "Proposal sent", won: "Won",
+  closed: "Closed", spam: "Spam",
 };
+/** Past the office's follow-up: the Todo is done and there is no next follow-up date. */
+export const HANDED_OFF_STATUSES: readonly IntakeStatus[] = ["qualified", "estimating", "proposal_sent", "won", "closed", "spam"];
+export function isHandedOffStatus(status: string): boolean {
+  return (HANDED_OFF_STATUSES as readonly string[]).includes(status);
+}
+export type InquiryProject = { id: string; project_number: string | null; name: string | null; status: string | null };
 /** Jorge's two sign-ins, Ryan, Nicole (Nico), and Shannon only. */
 export const WEBSITE_INQUIRY_EMAILS: readonly string[] = [
   "jbetancur@penneyconstructioninc.com",
@@ -22,7 +30,12 @@ export type Inquiry = {
   assignee: string | null; due_date: string | null; status: string; snooze_until: string | null;
   intake_status: IntakeStatus | null; lead_id: string | null;
   website_inquiry: Record<string, unknown> | null;
+  project_id?: string | null; project?: InquiryProject | InquiryProject[] | null;
 };
+/** The project this inquiry turned into, when one is linked. */
+export function inquiryProject(row: Pick<Inquiry, "project">): InquiryProject | null {
+  return (Array.isArray(row.project) ? row.project[0] : row.project) ?? null;
+}
 export type InquirySummary = { open: number; new: number; overdue: number; unavailable?: boolean };
 export type MatchingInquiryLead = { id: string; first_name: string; last_name: string; city: string | null; project_type: string | null; status: string };
 export type InquiryState = Pick<Inquiry, "intake_status" | "status" | "due_date" | "snooze_until">;
@@ -30,7 +43,11 @@ export function intakeStatus(row: Pick<Inquiry, "intake_status" | "status">): In
   return row.intake_status || (row.status === "done" ? "closed" : "new");
 }
 export function isPendingInquiry(row: Pick<Inquiry, "intake_status" | "status">): boolean {
-  return !["qualified", "closed", "spam"].includes(intakeStatus(row));
+  return !isHandedOffStatus(intakeStatus(row));
+}
+/** Still in the pipeline: anything not won, closed or spam. */
+export function isOpenInquiry(row: Pick<Inquiry, "intake_status" | "status">): boolean {
+  return !["won", "closed", "spam"].includes(intakeStatus(row));
 }
 export function isOverdueInquiry(row: InquiryState, now = Date.now()): boolean {
   return isPendingInquiry(row) && !!row.due_date && Date.parse(row.due_date) < now &&

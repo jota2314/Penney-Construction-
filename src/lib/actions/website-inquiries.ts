@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/auth/get-user";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { canManageWebsiteInquiries, WEBSITE_INQUIRY_EMAILS, INTAKE_STATUSES, inquiryDueIso, inquiryText, summarizeInquiries, type Inquiry, type InquiryState, type IntakeStatus, type MatchingInquiryLead } from "@/lib/inquiries/model";
+import { canManageWebsiteInquiries, WEBSITE_INQUIRY_EMAILS, INTAKE_STATUSES, isHandedOffStatus, inquiryDueIso, inquiryText, summarizeInquiries, type Inquiry, type InquiryState, type IntakeStatus, type MatchingInquiryLead } from "@/lib/inquiries/model";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const COLUMNS = "id,contact_name,description,created_at,updated_at,assignee,due_date,status,snooze_until,intake_status,lead_id,website_inquiry";
+const COLUMNS = "id,contact_name,description,created_at,updated_at,assignee,due_date,status,snooze_until,intake_status,lead_id,website_inquiry,project_id,project:projects(id,project_number,name,status)";
 async function inquiryAccess(write = false) {
   const user = await getUser();
   if (!user || !canManageWebsiteInquiries(user.realProfile?.email) || !canManageWebsiteInquiries(user.profile?.email)) {
@@ -68,7 +68,7 @@ export async function updateWebsiteInquiry(input: { id: string; expectedUpdatedA
     }
     const due = input.dueDay ? inquiryDueIso(input.dueDay) : null;
     if (input.dueDay && !due) return { error: "Choose a valid follow-up date." };
-    if (!["qualified", "closed", "spam"].includes(input.status) && !due) return { error: "Open inquiries need a next follow-up date." };
+    if (!isHandedOffStatus(input.status) && !due) return { error: "Open inquiries need a next follow-up date." };
     const assignees = await listInquiryAssignees();
     if (!assignees.includes(input.assignee)) return { error: "Choose an office team member." };
     const { error } = await db.rpc("update_website_inquiry", {
