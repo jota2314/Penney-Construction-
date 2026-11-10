@@ -76,6 +76,7 @@ export function PmTest({ state }: { state: PmTestState }) {
       {!attempt && (
         <>
           <Intro state={state} />
+          <HowToChangeOrder />
           <JobChangeOrders state={state} />
           {hydrated ? (
             <AnswerForm disabled={state.isImpersonating} />
@@ -136,6 +137,46 @@ function Intro({ state }: { state: PmTestState }) {
             before you submit.
           </p>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The app's own steps, button names exactly as they read on the Money tab. */
+function HowToChangeOrder() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">How to do a change order</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm leading-relaxed">
+        <ol className="flex list-decimal flex-col gap-2 pl-5">
+          <li>
+            Open the TEST job and go to the <span className="font-semibold">Money</span> tab. Find{" "}
+            <span className="font-semibold">Change Orders</span>.
+          </li>
+          <li>
+            Tap <span className="font-semibold">New Change Order</span>. Fill in the Title (the short name the client
+            sees), the Description (the scope in plain words), Our Cost and Client Price. For a credit, put a minus
+            sign on both numbers. Tap <span className="font-semibold">Create Change Order</span>.
+          </li>
+          <li>
+            Tap <span className="font-semibold">PDF</span> and read it the way the client will. Use{" "}
+            <span className="font-semibold">Edit</span> if anything is off.
+          </li>
+          <li>
+            Tap <span className="font-semibold">Send to Client</span>. The client gets an email with the change order
+            PDF attached and a link to sign. Ryan, Nicole and Jorge are copied.
+          </li>
+          <li>
+            On this TEST job the client email is yours. Open that email, tap the link and sign. The change order now
+            shows Signed.
+          </li>
+        </ol>
+        <p className="rounded-md border bg-muted/40 px-3 py-2">
+          Do not tap <span className="font-semibold">Approve</span> yourself. The client approves by signing, and extra
+          work does not start until it says Signed.
+        </p>
       </CardContent>
     </Card>
   );
