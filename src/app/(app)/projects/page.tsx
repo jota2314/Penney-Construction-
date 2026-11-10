@@ -189,7 +189,7 @@ async function ProjectsContent() {
     walkthrough_latest: walkthroughMap[p.id]?.latest ?? null,
   }));
 
-  return <ProjectsView projects={projectsWithHeat} viewerId={user.profile?.id ?? user.id} isProjectManager={user.profile?.role === "project_manager"} />;
+  return <ProjectsView projects={projectsWithHeat} viewerId={user.profile?.id ?? user.id} />;
 }
 
 export default function ProjectsPage() {

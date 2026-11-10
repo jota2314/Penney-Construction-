@@ -69,7 +69,6 @@ interface ProjectData {
 interface ProjectsViewProps {
   projects: ProjectData[];
   viewerId: string;
-  isProjectManager: boolean;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -211,12 +210,12 @@ const FILTER_OPTIONS = [
   { value: "all", label: "All" },
 ];
 
-export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsViewProps) {
+export function ProjectsView({ projects, viewerId }: ProjectsViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [search, setSearch] = useSearchParamState("q", "");
-  const [scope, setScope] = useSearchParamState("scope", isProjectManager ? "mine" : "all");
+  const [scope, setScope] = useSearchParamState("scope", "all");
   const [requestedStatus, setStatusFilter] = useSearchParamState("status", "in_progress");
   // Saved links to retired filters should open a valid tab.
   const statusFilter = FILTER_OPTIONS.some((option) => option.value === requestedStatus)
