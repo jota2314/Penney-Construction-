@@ -79,6 +79,9 @@ export const CLAUDE_SONNET_5_5 = "claude-sonnet-5-5";
 /** Latest Opus — Opus 4.6 (most intelligent; best for drawings analysis) */
 export const CLAUDE_OPUS_4_6 = "claude-opus-4-6";
 
+/** Opus 5.5 — current Opus (grades the PM training test) */
+export const CLAUDE_OPUS_5_5 = "claude-opus-5-5";
+
 /** Premium model — Opus 4 (smartest, for main AI assistant) */
 export const CLAUDE_OPUS = CLAUDE_OPUS_4_6;
 
@@ -108,6 +111,7 @@ export const CLAUDE_HAIKU = "claude-haiku-4-5-20251001";
 
 // Pricing per million tokens (in cents)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-5-5":               { input: 400,  output: 2000 },
   "claude-opus-4-6":               { input: 1500, output: 7500 },
   "claude-opus-4-0-20250514":      { input: 1500, output: 7500 },
   "claude-sonnet-5-5":             { input: 200,  output: 1000 },
