@@ -369,7 +369,7 @@ interface SendContext {
   email: ReturnType<typeof buildChangeOrderEmail>;
 }
 
-async function prepareSend(admin: SupabaseClient, changeOrderId: string, origin: string): Promise<SendContext> {
+async function prepareSend(admin: SupabaseClient, changeOrderId: string, origin: string, senderName?: string | null): Promise<SendContext> {
   const co = await loadChangeOrder(admin, changeOrderId);
   if (co.status === "void" || co.status === "rejected") {
     throw new ChangeOrderError(`Change Order #${co.change_order_number} is ${co.status} and can't be sent.`, 409);
@@ -391,6 +391,7 @@ async function prepareSend(admin: SupabaseClient, changeOrderId: string, origin:
     projectName: project.name,
     clientFirstName: customer.first_name,
     origin,
+    senderName,
   });
   return { co, project, to: customer.email, email };
 }
@@ -430,7 +431,7 @@ export async function previewChangeOrderSend(
   changeOrderId: string,
   origin: string,
 ) {
-  const ctx = await prepareSend(admin, changeOrderId, origin);
+  const ctx = await prepareSend(admin, changeOrderId, origin, actor.name);
   const [pdf, token] = await Promise.all([fetchPdf(ctx.co.id, origin), senderToken(admin, actor)]);
   const blockers = [
     ...(pdf ? [] : ["The change order PDF could not be generated."]),
@@ -463,7 +464,7 @@ export async function sendChangeOrderToClient(
   changeOrderId: string,
   origin: string,
 ) {
-  const ctx = await prepareSend(admin, changeOrderId, origin);
+  const ctx = await prepareSend(admin, changeOrderId, origin, actor.name);
   const pdf = await fetchPdf(ctx.co.id, origin);
   if (!pdf) throw new ChangeOrderError("The change order PDF could not be generated, so nothing was sent. Try again.", 502);
   const token = await senderToken(admin, actor);

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { getUser } from "@/lib/auth/get-user";
+import { resolveBillCaller } from "@/lib/bills/caller";
 import { askClaude } from "@/lib/bills/model";
 import { ownsBillUpload, loadBillRead, billReadResponse } from "@/lib/bills/read-store";
 
@@ -20,16 +19,17 @@ function coPrefix(l: { change_order_id?: string | null; change_orders?: unknown 
 
 export async function POST(request: NextRequest) {
   const deadline = Date.now() + 105_000;
-  const user = await getUser();
-  const owner = user?.profile?.id ?? user?.id;
-  if (!owner) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  // A signed-in person, or the Penney MCP with the verified caller named.
+  const resolved = await resolveBillCaller(request);
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const owner = resolved.caller.profileId;
   try {
     const input = await request.json();
     const path = String(input.storagePath ?? "");
     if (!ownsBillUpload(owner, path)) return NextResponse.json({ error: "Not your upload" }, { status: 403 });
     const read = await loadBillRead(owner, path);
     if (!read) return NextResponse.json({ error: "Read this saved file before dividing it." }, { status: 409 });
-    const result = await billReadResponse(read, typeof input.projectId === "string" ? input.projectId : null);
+    const result = await billReadResponse(read, typeof input.projectId === "string" ? input.projectId : null, resolved.caller.db);
     if (input.amount !== undefined) {
       if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount === 0) {
         return NextResponse.json({ error: "Enter a valid invoice total." }, { status: 400 });
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const creditCheck = { isCredit: amount < 0 };
     const fuelAutoRouted = scan.fuelAutoRouted;
     const extracted = { summary: scan.summary, extracted_text: scan.extractedText };
-    const supabase = await createClient();
+    const supabase = resolved.caller.db;
     let allocationFailed = false;
     // --- Allocate across the job's budget lines (current_estimate_id is the
     // canonical pointer — see the field-capture scan for the history) --------

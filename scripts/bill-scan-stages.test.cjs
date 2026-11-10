@@ -34,10 +34,19 @@ function harness() {
     rpc: async () => ({ data: 'estimate' }),
     storage: { from: () => ({ download: async () => ({ data: new Blob(['pdf'], { type: 'application/pdf' }) }) }) },
   };
+  // The Penney MCP path: service key + named caller, no browser session.
+  let serviceActor = null;
+  const admin = { ...client, from: table => table === 'app_settings'
+    ? { select: () => ({ eq: () => ({ single: async () => ({ data: { value: 'svc-key' }, error: null }) }) }) }
+    : table === 'profiles'
+      ? { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: serviceActor }) }) }) }
+      : client.from(table) };
   const imports = {
     'next/server': { NextResponse: { json: (body, options) => ({ body: plain(body), status: options?.status ?? 200 }) } },
     '@/lib/auth/get-user': { getUser: async () => ({ id: owner }) },
     '@/lib/supabase/server': { createClient: async () => client },
+    '@/lib/supabase/admin': { createAdminClient: () => admin },
+    'node:crypto': require('node:crypto'),
     '@/lib/finance/credit-detection': { detectCreditDocument: () => ({ isCredit: false }), signedAmount: n => n },
     '@/lib/finance/quote-detection': { detectQuoteDocument: () => ({ isQuote: false }) },
     '@/lib/finance/amount-due': load('src/lib/finance/amount-due.ts'),
@@ -55,6 +64,7 @@ function harness() {
       return proposed;
     } },
   };
+  imports['@/lib/bills/caller'] = load('src/lib/bills/caller.ts', imports);
   const store = load('src/lib/bills/read-store.ts', imports);
   imports['@/lib/bills/read-store'] = {
     ...store,
@@ -66,10 +76,13 @@ function harness() {
     allocate: () => load('src/app/api/bills/allocate/route.ts', imports),
     counts: () => ({ extractionCalls, allocationCalls }), saved: () => plain(checkpoint),
     propose: value => { proposed = value; },
+    setServiceActor: value => { serviceActor = value; },
   };
 }
-const scanRequest = () => ({ formData: async () => { const body = new FormData(); body.set('storagePath', path); return body; } });
-const allocationRequest = (extra = {}) => ({ json: async () => ({ storagePath: path, projectId: 'job', ...extra }) });
+const scanRequest = (headers = {}, storagePath = path) => ({ headers: new Headers(headers),
+  formData: async () => { const body = new FormData(); body.set('storagePath', storagePath); return body; } });
+const allocationRequest = (extra = {}, headers = {}) => ({ headers: new Headers(headers),
+  json: async () => ({ storagePath: path, projectId: 'job', ...extra }) });
 
 test('read persists before allocation; allocation failure and reopening do not re-read the PDF', async () => {
   const h = harness();
@@ -156,4 +169,30 @@ test('browser keeps the read after a lost allocation response; retry calls alloc
   assert.equal(result.allocationStatus, 'failed');
   await client.allocateBill(result);
   assert.deepEqual(calls, ['/api/bills/scan', '/api/bills/allocate', '/api/bills/allocate']);
+});
+
+test('the Penney MCP reads and divides with the service key and a named office caller; bad keys and field accounts are refused', async () => {
+  const h = harness();
+  const actor = '11111111-1111-4111-8111-111111111111';
+  const mcpPath = actor + '/bill.pdf';
+  // The browser session is never consulted on the service path.
+  h.imports['@/lib/auth/get-user'].getUser = async () => { throw new Error('session must not be used'); };
+  h.setServiceActor({ id: actor, email: 'jbetancur@penneyconstructioninc.com', role: 'owner' });
+  assert.equal((await h.read().POST(scanRequest({ 'x-service-key': 'wrong-key', 'x-penney-actor': actor }, mcpPath))).status, 401);
+  assert.equal((await h.read().POST(scanRequest({ 'x-service-key': 'svc-key' }, mcpPath))).status, 401);
+  h.setServiceActor({ id: actor, email: 'crew@example.com', role: 'field' });
+  assert.equal((await h.read().POST(scanRequest({ 'x-service-key': 'svc-key', 'x-penney-actor': actor }, mcpPath))).status, 403);
+  assert.deepEqual(h.counts(), { extractionCalls: 0, allocationCalls: 0 });
+  h.setServiceActor({ id: actor, email: 'jbetancur@penneyconstructioninc.com', role: 'owner' });
+  const svc = { 'x-service-key': 'svc-key', 'x-penney-actor': actor };
+  const read = await h.read().POST(scanRequest(svc, mcpPath));
+  assert.equal(read.status, 200);
+  assert.equal(read.body.scan.amount, 1019.73);
+  assert.equal(read.body.job.id, 'job');
+  // Someone else's staged file stays theirs, even for the MCP.
+  assert.equal((await h.allocate().POST(allocationRequest({}, svc))).status, 403);
+  h.propose({ allocations: [{ line_item_id: 'siding', amount: 600 }, { line_item_id: 'concrete', amount: 419.73 }] });
+  const split = await h.allocate().POST(allocationRequest({ storagePath: mcpPath }, svc));
+  assert.equal(split.body.allocationStatus, 'complete');
+  assert.equal(split.body.allocations.length, 2);
 });

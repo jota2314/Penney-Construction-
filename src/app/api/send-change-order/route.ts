@@ -63,6 +63,8 @@ export async function POST(request: Request) {
   // One builder for the wording, shared with the Penney MCP's send
   // (src/lib/change-orders/service.ts), so the client gets the same email
   // whoever sends it. The amount prints to the penny; a credit says "Credit".
+  // The sender signs the email under "Thank you," (it used to end there).
+  const { data: senderProfile } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
   const email = buildChangeOrderEmail({
     changeOrderNumber: co.change_order_number,
     title: co.title,
@@ -71,6 +73,7 @@ export async function POST(request: Request) {
     projectName: proj?.name ?? null,
     clientFirstName: clientName,
     origin,
+    senderName: senderProfile?.full_name ?? null,
   });
   const { approvalUrl, subject, body } = email;
 

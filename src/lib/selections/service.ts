@@ -50,6 +50,24 @@ export function normalize(row: Record<string, unknown>): SelectionItem {
   return { ...(row as unknown as SelectionItem), quantity: num(row.quantity), unit_price: num(row.unit_price), ext_price: num(row.ext_price) };
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Unit price x quantity fills the extended price when the writer changed the
+ * unit price or quantity and didn't give an extended price. Without it a priced
+ * item never drew on its allowance (MCP smoke test 11/10/2026: $4.50/sf x 60 sf
+ * left ext_price empty and the allowance check counted $0).
+ */
+function withExtPrice(patch: ItemPatch, base: { unit_price: number | null; quantity: number | null }): ItemPatch {
+  if (Object.hasOwn(patch, "ext_price")) return patch;
+  if (!Object.hasOwn(patch, "unit_price") && !Object.hasOwn(patch, "quantity")) return patch;
+  const unit = Object.hasOwn(patch, "unit_price") ? patch.unit_price : base.unit_price;
+  const qty = Object.hasOwn(patch, "quantity") ? patch.quantity : base.quantity;
+  if (unit == null || qty == null) return patch;
+  const ext = Number(unit) * Number(qty);
+  return Number.isFinite(ext) ? { ...patch, ext_price: round2(ext) } : patch;
+}
+
 function pickEditable(input: Record<string, unknown>): ItemPatch {
   const out: Record<string, unknown> = {};
   for (const k of EDITABLE) if (Object.hasOwn(input, k)) out[k] = input[k];
@@ -147,7 +165,7 @@ export async function addSelectionItem(
   sb: SupabaseClient, projectId: string, input: Record<string, unknown>, actor: Actor,
   meta: { source?: string | null; note?: string | null; action?: string } = {},
 ) {
-  const patch = pickEditable(input);
+  const patch = withExtPrice(pickEditable(input), { unit_price: null, quantity: null });
   if (!patch.name || !String(patch.name).trim()) throw new SelectionError("Every item needs a name.");
   const draft = {
     stage: "proposed" as Stage, selected_source: null, unit_price: null, ext_price: null, price_source: null,
@@ -176,7 +194,7 @@ export async function updateSelectionItem(
   const current = normalize(row as Record<string, unknown>);
   if (meta.projectId && current.project_id !== meta.projectId) throw new SelectionError("Selection item not found.", 404);
 
-  const patch = pickEditable(input);
+  const patch = withExtPrice(pickEditable(input), current);
   const changes: Record<string, [unknown, unknown]> = {};
   for (const [k, v] of Object.entries(patch)) {
     const before = (current as unknown as Record<string, unknown>)[k];

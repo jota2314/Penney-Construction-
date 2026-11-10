@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getUser } from "@/lib/auth/get-user";
+import { resolveBillCaller } from "@/lib/bills/caller";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { isMaterialSupplier, resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
@@ -34,13 +33,11 @@ type Allocation = { lineItemId: string; amount: number; note?: string | null };
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 export async function POST(request: NextRequest) {
-  const user = await getUser();
-  const profileId = user?.profile?.id ?? user?.id;
-  if (!profileId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  const supabase = await createClient();
+  // A signed-in person, or the Penney MCP with the verified caller named.
+  const resolved = await resolveBillCaller(request);
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const profileId = resolved.caller.profileId;
+  const supabase = resolved.caller.db;
 
   try {
     const body = await request.json();
@@ -85,7 +82,7 @@ export async function POST(request: NextRequest) {
     // The client only ASKS; this gate decides. Same allowlist as
     // approveBillForPay, checked against the REAL account so View-as can't
     // approve. A paid bill has nothing to approve — the money already left.
-    const approverEmail = user?.realProfile?.email ?? user?.email;
+    const approverEmail = resolved.caller.email;
     const wantsApproval = body?.approveForPay === true && !isPaid;
     const canApprove = wantsApproval && canApproveBillPay(approverEmail);
     const paymentMethod = ["credit_card", "check", "cash", "ach"].includes(

@@ -84,6 +84,8 @@ function commitRoute() {
     '@/lib/supabase/server':{createClient:async()=>db},
     '@/lib/supabase/admin':{createAdminClient:()=>db},
     '@/lib/auth/get-user':{getUser:async()=>({id:'user'})},
+    // The signed-in path of the shared bill caller (src/lib/bills/caller.ts).
+    '@/lib/bills/caller':{resolveBillCaller:async()=>({ok:true,caller:{profileId:'user',email:null,db,viaService:false}})},
     '@/lib/subs/resolve-subcontractor':{resolveSubcontractorId:async()=>null},
     '@/lib/finance/spend-category':{resolveVendorType:()=> 'subcontractor'},
     '@/lib/finance/quote-detection':{detectQuoteDocument:()=>({isQuote:false})},

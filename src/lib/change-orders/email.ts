@@ -27,6 +27,8 @@ export interface ChangeOrderEmailInput {
   clientFirstName: string | null;
   /** e.g. https://www.penneyconstruction.build */
   origin: string;
+  /** Who is sending. The first name signs the email under "Thank you,". */
+  senderName?: string | null;
 }
 
 export interface ChangeOrderEmail {
@@ -37,9 +39,16 @@ export interface ChangeOrderEmail {
   approvalUrl: string;
 }
 
+/** "Jorge" from "Jorge Betancur" or "jbetancur@…" stays out: an email is not a name. */
+function senderFirstName(name: string | null | undefined): string | null {
+  const first = (name ?? "").trim().split(/\s+/)[0] ?? "";
+  return first && !first.includes("@") ? first : null;
+}
+
 export function buildChangeOrderEmail(input: ChangeOrderEmailInput): ChangeOrderEmail {
   const projectName = input.projectName || "Project";
   const approvalUrl = `${input.origin}/approve/${input.approvalToken}`;
+  const signer = senderFirstName(input.senderName);
   const body = `Hi ${input.clientFirstName || "there"},
 
 Please review the attached Change Order #${input.changeOrderNumber} for ${input.projectName || "your project"}.
@@ -51,7 +60,7 @@ To approve this change order, please click the link below and sign:
 
 ${approvalUrl}
 
-Thank you,`;
+Thank you,${signer ? `\n${signer}` : ""}`;
 
   return {
     cc: CHANGE_ORDER_INTERNAL_CC.join(", "),

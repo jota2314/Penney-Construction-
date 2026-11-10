@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { getUser } from "@/lib/auth/get-user";
+import { resolveBillCaller } from "@/lib/bills/caller";
 import { askClaude } from "@/lib/bills/model";
 import { ownsBillUpload, loadBillRead, saveBillRead, billReadResponse } from "@/lib/bills/read-store";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
@@ -62,13 +61,11 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 export async function POST(request: NextRequest) {
   const deadline = Date.now() + SCAN_BUDGET_MS;
-  const user = await getUser();
-  const profileId = user?.profile?.id ?? user?.id;
-  if (!profileId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  const supabase = await createClient();
+  // A signed-in person, or the Penney MCP with the verified caller named.
+  const resolved = await resolveBillCaller(request);
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const profileId = resolved.caller.profileId;
+  const supabase = resolved.caller.db;
 
   try {
     const formData = await request.formData();
@@ -86,7 +83,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Not your upload" }, { status: 403 });
       }
       const cached = await loadBillRead(profileId, priorPath);
-      if (cached) return NextResponse.json(await billReadResponse(cached, pickedProjectId));
+      if (cached) return NextResponse.json(await billReadResponse(cached, pickedProjectId, supabase));
       const { data: blob, error: downloadError } = await supabase.storage
         .from(BUCKET)
         .download(priorPath);
@@ -333,7 +330,7 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     };
 
     const saved = await saveBillRead(profileId, { scan, suggestedProjectId: projectId });
-    return NextResponse.json(await billReadResponse(saved, pickedProjectId));
+    return NextResponse.json(await billReadResponse(saved, pickedProjectId, supabase));
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BillRead, BillScanResult } from "./types";
 
 // Callers obtain owner from getUser(), never from request input. The table
@@ -32,8 +33,9 @@ export async function saveBillRead(owner: string, result: BillRead): Promise<Bil
   return saved;
 }
 
-export async function billReadResponse(read: BillRead, projectId?: string | null): Promise<BillScanResult> {
-  const supabase = await createClient();
+export async function billReadResponse(read: BillRead, projectId?: string | null, client?: SupabaseClient): Promise<BillScanResult> {
+  // The MCP path has no browser session and passes the service client.
+  const supabase = client ?? await createClient();
   const id = projectId || read.suggestedProjectId;
   let job: BillScanResult["job"] = null;
   if (id) {
