@@ -42,12 +42,19 @@ export type InquiryState = Pick<Inquiry, "intake_status" | "status" | "due_date"
 export function intakeStatus(row: Pick<Inquiry, "intake_status" | "status">): IntakeStatus {
   return row.intake_status || (row.status === "done" ? "closed" : "new");
 }
+/** Waiting on the office: not handed off, and its follow-up Todo is not ticked off. */
 export function isPendingInquiry(row: Pick<Inquiry, "intake_status" | "status">): boolean {
-  return !isHandedOffStatus(intakeStatus(row));
+  return !isHandedOffStatus(intakeStatus(row)) && row.status !== "done";
 }
-/** Still in the pipeline: anything not won, closed or spam. */
-export function isOpenInquiry(row: Pick<Inquiry, "intake_status" | "status">): boolean {
-  return !["won", "closed", "spam"].includes(intakeStatus(row));
+/** The page's left-to-right workflow. Closed and Spam sit off the line. */
+export const WORKFLOW_STEPS = ["new", "contacted", "lead", "walkthrough", "estimating", "proposal_sent", "won"] as const;
+export type WorkflowStep = (typeof WORKFLOW_STEPS)[number];
+/** Where a stage sits on the workflow, or -1 for Closed and Spam. Qualified shares the Walkthrough step. */
+export function workflowStepOf(status: IntakeStatus): number {
+  return status === "qualified" ? WORKFLOW_STEPS.indexOf("walkthrough") : (WORKFLOW_STEPS as readonly string[]).indexOf(status);
+}
+export function isInWorkflow(row: Pick<Inquiry, "intake_status" | "status">): boolean {
+  return workflowStepOf(intakeStatus(row)) >= 0;
 }
 export function isOverdueInquiry(row: InquiryState, now = Date.now()): boolean {
   return isPendingInquiry(row) && !!row.due_date && Date.parse(row.due_date) < now &&
