@@ -8,6 +8,7 @@ import {
   createChangeOrderDraft,
   listChangeOrders,
   previewChangeOrderSend,
+  reconcileChangeOrderBudget,
   sendChangeOrderToClient,
   updateChangeOrderDraft,
   type ChangeOrderActor,
@@ -29,6 +30,9 @@ export const maxDuration = 60;
  *
  * Actions: list, create (draft only), update (unsigned only), preview_send
  * (the exact client email, nothing sent) and send (requires authorized=true).
+ * preview_budget_sync/reconcile_budget repair one derived budget line to
+ * signed terms; reconcile_budget requires exact preview fingerprints and
+ * authorized=true. Neither action edits the signed CO or financial postings.
  */
 const uuid = z.string().uuid();
 const dollars = z
@@ -70,6 +74,19 @@ const inputs = z.discriminatedUnion("action", [
     .strict(),
   z.object({ action: z.literal("preview_send"), change_order_id: uuid }).strict(),
   z.object({ action: z.literal("send"), change_order_id: uuid, authorized: z.literal(true) }).strict(),
+  z.object({ action: z.literal("preview_budget_sync"), project_id: uuid, change_order_id: uuid, line_id: uuid }).strict(),
+  z.object({
+    action: z.literal("reconcile_budget"),
+    project_id: uuid,
+    change_order_id: uuid,
+    line_id: uuid,
+    request_id: uuid,
+    expected_change_order_fingerprint: z.string().regex(/^[a-f0-9]{32}$/),
+    expected_line_fingerprint: z.string().regex(/^[a-f0-9]{32}$/),
+    reason: z.string().trim().min(20).max(2000),
+    evidence_refs: z.array(z.string().trim().min(5).max(1000)).min(1).max(20),
+    authorized: z.literal(true),
+  }).strict(),
 ]);
 
 async function resolveActor(
@@ -144,6 +161,10 @@ export async function POST(request: NextRequest) {
         break;
       case "send":
         result = await sendChangeOrderToClient(admin, actor, input.change_order_id, origin);
+        break;
+      case "preview_budget_sync":
+      case "reconcile_budget":
+        result = await reconcileChangeOrderBudget(admin, actor, input, input.action === "reconcile_budget");
         break;
     }
     return NextResponse.json(result);

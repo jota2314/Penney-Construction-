@@ -1828,6 +1828,7 @@ function PushCOToQBButton({ co, projectId }: { co: ChangeOrderRow; projectId: st
 function EditCOButton({ co }: { co: ChangeOrderRow }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState(co.title);
   const [description, setDescription] = useState(co.description ?? "");
   const [costImpact, setCostImpact] = useState(String(co.cost_impact));
@@ -1835,6 +1836,7 @@ function EditCOButton({ co }: { co: ChangeOrderRow }) {
   const router = useRouter();
 
   function handleOpen() {
+    setError(null);
     setTitle(co.title);
     setDescription(co.description ?? "");
     setCostImpact(String(co.cost_impact));
@@ -1845,23 +1847,43 @@ function EditCOButton({ co }: { co: ChangeOrderRow }) {
   async function handleSave() {
     if (!title.trim()) return;
     setSaving(true);
-    const supabase = (await import("@/lib/supabase/client")).createClient();
-    await supabase.from("change_orders").update({
-      title: title.trim(),
-      description: description.trim() || null,
-      cost_impact: parseMoney(costImpact) ?? 0,
-      price_impact: parseMoney(priceImpact) ?? 0,
-    }).eq("id", co.id);
-    setSaving(false);
-    setOpen(false);
-    router.refresh();
+    setError(null);
+    try {
+      // Use the same native workflow as MCP: unsigned changes update their
+      // tracking line, and signed terms are protected on the server.
+      const response = await fetch("/api/change-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          change_order_id: co.id,
+          title: title.trim(),
+          description: description.trim(),
+          cost_impact: parseMoney(costImpact) ?? 0,
+          price_impact: parseMoney(priceImpact) ?? 0,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.warning) {
+        setError(result.error || result.warning || "The change order could not be saved.");
+        return;
+      }
+      setOpen(false);
+      router.refresh();
+    } catch {
+      setError("The change order could not be saved. Reload it before trying again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <>
       <button
         onClick={handleOpen}
-        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors"
+        disabled={co.status === "approved" || !!co.client_signed_at || !!co.client_signature}
+        title={co.status === "approved" || co.client_signed_at || co.client_signature ? "Signed or approved terms are preserved. Use a new change order for added or credited scope." : undefined}
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50"
       >
         <Pencil className="h-3 w-3" /> Edit
       </button>
@@ -1869,6 +1891,7 @@ function EditCOButton({ co }: { co: ChangeOrderRow }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
           <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold">Edit CO #{co.change_order_number}</h3>
+            {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Title *</label>

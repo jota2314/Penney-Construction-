@@ -269,6 +269,42 @@ export interface UpdateChangeOrderInput {
   notes?: string;
 }
 
+export interface ReconcileChangeOrderBudgetInput {
+  project_id: string;
+  change_order_id: string;
+  line_id: string;
+  request_id?: string;
+  expected_change_order_fingerprint?: string;
+  expected_line_fingerprint?: string;
+  reason?: string;
+  evidence_refs?: string[];
+}
+
+/** Repair derived tracking data only. The signed CO itself is never edited. */
+export async function reconcileChangeOrderBudget(
+  admin: SupabaseClient,
+  actor: ChangeOrderActor,
+  input: ReconcileChangeOrderBudgetInput,
+  apply: boolean,
+) {
+  const { data, error } = await admin.rpc("reconcile_signed_change_order_budget", {
+    p_actor_id: actor.profileId,
+    p_project_id: input.project_id,
+    p_change_order_id: input.change_order_id,
+    p_line_id: input.line_id,
+    p_apply: apply,
+    p_request_id: input.request_id ?? null,
+    p_expected_change_order_fingerprint: input.expected_change_order_fingerprint ?? null,
+    p_expected_line_fingerprint: input.expected_line_fingerprint ?? null,
+    p_reason: input.reason ?? null,
+    p_evidence_refs: input.evidence_refs ?? null,
+  });
+  if (error) {
+    throw new ChangeOrderError(error.message, error.code === "42501" ? 403 : error.code === "40001" ? 409 : 400);
+  }
+  return data;
+}
+
 /** Edit a change order the client has not signed. Keeps the budget line in step. */
 export async function updateChangeOrderDraft(admin: SupabaseClient, input: UpdateChangeOrderInput, origin: string) {
   const co = await loadChangeOrder(admin, input.change_order_id);
@@ -289,13 +325,21 @@ export async function updateChangeOrderDraft(admin: SupabaseClient, input: Updat
   if (input.price_impact !== undefined) changes.price_impact = input.price_impact;
   if (input.notes !== undefined) changes.notes = input.notes || null;
 
-  const { data: updated, error } = await admin
+  // The client can sign while an office edit is open. Compare the exact
+  // version and unsigned markers in the UPDATE itself, not only above.
+  let update = admin
     .from("change_orders")
     .update(changes)
     .eq("id", co.id)
-    .select(CO_COLUMNS)
-    .single();
-  if (error || !updated) throw new ChangeOrderError(error?.message ?? "The change order could not be updated.", 500);
+    .eq("updated_at", co.updated_at)
+    .eq("status", co.status)
+    .is("client_signed_at", null);
+  update = co.client_signature === null
+    ? update.is("client_signature", null)
+    : update.eq("client_signature", co.client_signature);
+  const { data: updated, error } = await update.select(CO_COLUMNS).maybeSingle();
+  if (error) throw new ChangeOrderError(error.message, 500);
+  if (!updated) throw new ChangeOrderError("The change order changed or was signed while this edit was open. Reload it before trying again.", 409);
   const after = updated as ChangeOrderRow;
 
   // The budget line always mirrors the change order's current numbers.
