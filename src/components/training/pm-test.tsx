@@ -177,6 +177,27 @@ function HowToChangeOrder() {
           Do not tap <span className="font-semibold">Approve</span> yourself. The client approves by signing, and extra
           work does not start until it says Signed.
         </p>
+        <div className="flex flex-col gap-2 border-t pt-3">
+          <p className="font-semibold">Or ask Claude to do it</p>
+          <p>With the Penney connector on in your Claude, the same change order takes three messages.</p>
+          <ol className="flex list-decimal flex-col gap-2 pl-5">
+            <li>
+              <span className="font-semibold">Ask.</span> &ldquo;Write a change order on my Hall Bath TEST job for
+              [what changed]. Cost $[cost], price $[price].&rdquo;
+            </li>
+            <li>
+              <span className="font-semibold">Look.</span> Claude shows you the draft, then the exact email the client
+              will get. Nothing is sent yet.
+            </li>
+            <li>
+              <span className="font-semibold">Send.</span> Say &ldquo;send it&rdquo;. It goes from your email with the
+              PDF attached, and you sign it from your inbox the same way.
+            </li>
+          </ol>
+          <p className="text-muted-foreground">
+            If Claude says it has no change order tool, disconnect the Penney connector and connect it again.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );
