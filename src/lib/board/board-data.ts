@@ -7,6 +7,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { deriveCurrentScheduleActivity, deriveScheduleHealth, isClockInRow, recentWorkDates, type ScheduleHealthIssue } from "@/lib/schedule/health";
 import { isMasterPhase } from "@/lib/schedule/progress";
 import { withEffectiveScheduleDates } from "@/lib/schedule/cascade";
+import { isOverheadStep, isSiteWork } from "@/lib/board/step-kind";
 import { subDisplayName } from "@/lib/notifications/sub-field-notify";
 export { isClockInRow } from "@/lib/schedule/health";
 import {
@@ -215,11 +216,79 @@ export interface BoardCrew {
   isSub?: boolean;
 }
 
+/**
+ * A master step as the Update sheet shows it: one line a person answers
+ * (done, still going, not started) or leaves as planned.
+ */
+export interface BoardStep {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  /** Marking an inspection done records it as passed. */
+  isInspection: boolean;
+  /** Subs and crew on the step, by name. */
+  who: string[];
+}
+
+/**
+ * One line of a job's whole schedule, start to finish, for the full job
+ * schedule screen. Unlike a `BoardBar` it is not tied to the board's window.
+ */
+export interface BoardScheduleStep {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  color: string;
+  eventType: string | null;
+  isConfirmed: boolean;
+  /** Subs and crew on the step, by name. */
+  who: string[];
+  assignedEmployeeIds: string[];
+  assignedSubIds: string[];
+}
+
+/**
+ * The one status a job carries on the board.
+ *   ok      confirmed in the last week, nothing stale, work planned ahead
+ *   update  steps past their end date not marked done, or nobody confirmed lately
+ *   noplan  no master schedule, or nothing planned from today on
+ */
+export type BoardStatus = "ok" | "update" | "noplan";
+
+/** How long a "schedule confirmed" stamp counts. */
+export const CONFIRM_FRESH_DAYS = 7;
+
 export interface BoardJob {
   id: string;
   name: string;
   projectNumber: string;
   status: string;
+  /** The project manager, when one is assigned. */
+  pm: { id: string; name: string } | null;
+  boardStatus: BoardStatus;
+  /** Open master steps whose end date has passed, oldest first. */
+  staleSteps: BoardStep[];
+  /** Open master steps running now or starting in the next ten days. */
+  upcomingSteps: BoardStep[];
+  /** Trade work on site today (never a dumpster or an order), if any. */
+  workNow: { name: string; endDate: string } | null;
+  /** The next trade work or inspection to start, and who is on it. */
+  workNext: { name: string; startDate: string; who: string[] } | null;
+  /** Who last confirmed the schedule and when; null when nobody has. */
+  confirmed: { at: string; by: string; fresh: boolean } | null;
+  /** In construction on paper, but no recent work and nothing coming up. */
+  quiet: boolean;
+  /** Every master step is done; the job is waiting on closeout. */
+  readyToClose: boolean;
+  /**
+   * Every master step of the job in date order, however far back it started.
+   * Only filled for jobs on site or starting; empty for the rest.
+   */
+  schedule: BoardScheduleStep[];
   phase: string | null;
   city: string | null;
   /** Grid key into the forecast index. */
@@ -311,6 +380,9 @@ interface ProjectRow {
   estimated_start_date: string | null;
   estimated_end_date: string | null;
   actual_start_date: string | null;
+  assigned_pm: string | null;
+  schedule_confirmed_at: string | null;
+  schedule_confirmed_by: string | null;
 }
 
 interface PhaseRow {
@@ -449,7 +521,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     // One unbroken literal: supabase-js infers the row type by parsing this
     // string, and a concatenation widens it to `string`, which silently
     // degrades every field to an error type.
-    .select("id, name, project_number, status, phase, city, latitude, longitude, contract_value, estimated_value, estimated_start_date, estimated_end_date, actual_start_date")
+    .select("id, name, project_number, status, phase, city, latitude, longitude, contract_value, estimated_value, estimated_start_date, estimated_end_date, actual_start_date, assigned_pm, schedule_confirmed_at, schedule_confirmed_by")
     .neq("status", "cancelled")
     .eq("is_overhead", false)
     .order("created_at", { ascending: false });
@@ -612,8 +684,14 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
   // Author names for field logs come from profiles; one small extra read.
   // Sub posts have no author_id, and the null filter keeps them out of the
   // `.in()` (an `in.(null)` took /projects down: 3058dad).
+  // The same read carries each job's PM and whoever last confirmed its schedule.
   const authorIds = Array.from(
-    new Set(((logRows ?? []) as LogRow[]).map((l) => l.author_id).filter(Boolean) as string[]),
+    new Set(
+      [
+        ...((logRows ?? []) as LogRow[]).map((l) => l.author_id),
+        ...projects.flatMap((p) => [p.assigned_pm, p.schedule_confirmed_by]),
+      ].filter(Boolean) as string[],
+    ),
   );
   const authorName = new Map<string, string>();
   if (authorIds.length) {
@@ -950,11 +1028,117 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       null,
     );
 
+    // ── The one status, and the steps a person has to answer for ──
+    const toStep = (ph: PhaseRow): BoardStep => ({
+      id: ph.id,
+      name: ph.name,
+      startDate: ph.start_date,
+      endDate: ph.end_date || ph.start_date,
+      status: ph.status,
+      isInspection: ph.event_type === "inspection",
+      who: [
+        ...(ph.assigned_sub_ids ?? []).map((id) => subName.get(id)),
+        ...(ph.assigned_employee_ids ?? []).map((id) => employeeName.get(id)),
+      ].filter((n): n is string => !!n),
+    });
+    const staleIds = new Set(scheduleHealth.overduePhases.map((ph) => ph.id));
+    const staleSteps = phases
+      .filter((ph) => staleIds.has(ph.id))
+      .map(toStep)
+      .sort((a, b) => a.endDate.localeCompare(b.endDate) || a.name.localeCompare(b.name));
+    const soonStr = dateToStr(addDays(new Date(`${todayStr}T12:00:00`), 10));
+    const upcomingSteps = live
+      .filter(
+        (ph) =>
+          isMasterPhase(ph) &&
+          ph.status !== "completed" &&
+          ph.status !== "cancelled" &&
+          (ph.end_date || ph.start_date) >= todayStr &&
+          ph.start_date <= soonStr &&
+          !isOverheadStep(ph.name),
+      )
+      .map(toStep)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.name.localeCompare(b.name))
+      .slice(0, 12);
+
+    // What a person means by "what's on" — the dumpster is never the answer.
+    const siteWork = live.filter(
+      (ph) => isMasterPhase(ph) && ph.status !== "completed" && ph.status !== "cancelled" && ph.status !== "on_hold" && isSiteWork(ph.name),
+    );
+    const workNowPhase = siteWork
+      .filter((ph) => ph.start_date <= todayStr && (ph.end_date || ph.start_date) >= todayStr)
+      .sort(
+        (a, b) =>
+          Number(b.status === "in_progress") - Number(a.status === "in_progress") ||
+          (a.end_date || a.start_date).localeCompare(b.end_date || b.start_date),
+      )[0];
+    const workNextPhase = siteWork
+      .filter((ph) => ph.start_date > todayStr)
+      .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.name.localeCompare(b.name))[0];
+
+    // The whole job, not just the board's window, for the full schedule screen.
+    const schedule: BoardScheduleStep[] =
+      p.status === "in_progress" || p.status === "contracted"
+        ? live
+            .filter((ph) => isMasterPhase(ph) && ph.status !== "cancelled")
+            .map((ph) => ({
+              id: ph.id,
+              name: ph.name,
+              startDate: ph.start_date,
+              endDate: ph.end_date || ph.start_date,
+              status: ph.status,
+              color: ph.color || "#f59e0b",
+              eventType: ph.event_type,
+              isConfirmed: !!ph.is_confirmed,
+              who: toStep(ph).who,
+              assignedEmployeeIds: ph.assigned_employee_ids ?? [],
+              assignedSubIds: ph.assigned_sub_ids ?? [],
+            }))
+            .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate) || a.name.localeCompare(b.name))
+        : [];
+
+    const confirmedFresh =
+      !!p.schedule_confirmed_at &&
+      Date.now() - Date.parse(p.schedule_confirmed_at) < CONFIRM_FRESH_DAYS * 86400000;
+    const boardStatus: BoardStatus =
+      scheduleHealth.missingMaster || scheduleHealth.nothingAhead
+        ? "noplan"
+        : staleSteps.length > 0 || !confirmedFresh
+          ? "update"
+          : "ok";
+    const twoWeeksStr = dateToStr(addDays(new Date(`${todayStr}T12:00:00`), 14));
+    const recentWork = daysSinceLastLog !== null && daysSinceLastLog <= 10;
+    const nextStart = nextPhase ? nextPhase.start_date : null;
+    const somethingSoon = !!nowPhase || (!!nextStart && nextStart <= twoWeeksStr);
+    const quiet =
+      p.status === "in_progress" &&
+      ((!recentWork && !somethingSoon) || (scheduleHealth.masterCount === 0 && !p.assigned_pm));
+
     return {
       id: p.id,
       name: p.name,
       projectNumber: p.project_number,
       status: p.status,
+      pm: p.assigned_pm ? { id: p.assigned_pm, name: authorName.get(p.assigned_pm) || "PM" } : null,
+      boardStatus,
+      staleSteps,
+      upcomingSteps,
+      workNow: workNowPhase
+        ? { name: workNowPhase.name, endDate: workNowPhase.end_date || workNowPhase.start_date }
+        : null,
+      workNext: workNextPhase
+        ? { name: workNextPhase.name, startDate: workNextPhase.start_date, who: toStep(workNextPhase).who }
+        : null,
+      confirmed: p.schedule_confirmed_at
+        ? {
+            at: p.schedule_confirmed_at,
+            by: (p.schedule_confirmed_by && authorName.get(p.schedule_confirmed_by)) || "Someone",
+            fresh: confirmedFresh,
+          }
+        : null,
+      quiet,
+      readyToClose: scheduleHealth.readyToClose,
+      schedule,
       phase: p.phase,
       city: p.city,
       site,

@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  BadgeDollarSign,
   ChevronLeft,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
   GanttChartSquare,
+  Info,
+  List,
   ListPlus,
   Loader2,
   Monitor,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BoardBar, BoardData, BoardJob } from "@/lib/board/board-data";
+import { BoardJobSchedule } from "./board-job-schedule";
 import type { CrewBoardData } from "@/lib/board/crew-board-data";
 import { moveBoardPhases } from "@/lib/actions/board";
 import { ScheduleQuickAddSheet } from "@/components/schedule/schedule-quick-add-sheet";
@@ -29,6 +31,8 @@ import { BoardTimeline, shiftDate, type BarMove, type MoveOptions, type Timeline
 import { BoardTv } from "./board-tv";
 import { BoardCrew } from "./board-crew";
 import { BoardDrawer } from "./board-drawer";
+import { BoardList, firstName } from "./board-list";
+import { BoardUpdateSheet } from "./board-update-sheet";
 import { BoardPhasePanel } from "./board-phase-panel";
 import { SubsNeededChip } from "./subs-needed-sheet";
 import { SubsTodayStrip } from "./subs-today-strip";
@@ -36,7 +40,8 @@ import { SubsTodayStrip } from "./subs-today-strip";
 /**
  * The job board — the one schedule. (/schedule redirects here since 10/5.)
  *
- * JOBS  every job as a row; open one and it's that job's Gantt. Drag to move.
+ * JOBS  a card per job with one status and its next two weeks drawn (all
+ *       a phone gets), or the full Gantt: every step, drag to move.
  * CREW  people down the side, days across; drop a job on a day, drag across
  *       days to fill a week, two or three jobs a day when that's the day.
  * WALL  the TV in the shop.
@@ -58,9 +63,20 @@ const HEALTH_CACHE_TTL_MS = 30 * 60 * 1000;
 const MODE_KEY = "job-board-mode";
 const RANGE_KEY = "job-board-range";
 const EXPANDED_KEY = "job-board-expanded";
+const VIEW_KEY = "job-board-view";
+const PM_KEY = "job-board-pm";
 const TV_REFRESH_MS = 5 * 60 * 1000;
 
 type Mode = "jobs" | "crew" | "tv";
+/** Inside Jobs: a card per job, or the full Gantt. A phone only gets the cards. */
+type JobsView = "list" | "timeline";
+
+const NARROW_QUERY = "(max-width: 639px)";
+function subscribeNarrow(onChange: () => void) {
+  const mq = window.matchMedia(NARROW_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
 
 const RANGES = [
   { days: 14, label: "2 wks" },
@@ -101,9 +117,30 @@ function writeJson(key: string, value: unknown) {
   }
 }
 
-export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData }) {
+export function JobBoard({
+  data,
+  crew,
+  viewerId,
+}: {
+  data: BoardData;
+  crew: CrewBoardData;
+  /** The signed-in profile: a PM opens the board on their own jobs. */
+  viewerId?: string;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("jobs");
+  const [jobsView, setJobsView] = useState<JobsView>("list");
+  /** "all", "none" (no PM assigned) or a PM's profile id. */
+  const [pm, setPm] = useState<string>("all");
+  /** The job whose Update sheet is open. */
+  const [updating, setUpdating] = useState<string | null>(null);
+  /** The job whose whole schedule is on screen instead of the cards. */
+  const [focusJob, setFocusJob] = useState<string | null>(null);
+  const narrow = useSyncExternalStore(
+    subscribeNarrow,
+    () => window.matchMedia(NARROW_QUERY).matches,
+    () => false,
+  );
   const [visibleDays, setVisibleDays] = useState<number>(28);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -167,7 +204,37 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     const range = readJson<number>(RANGE_KEY, 28);
     if (range >= 7 && range <= 165) setVisibleDays(range);
     setExpanded(new Set(readJson<string[]>(EXPANDED_KEY, [])));
-  }, []);
+    let savedView: string | null = null;
+    let savedPm: string | null = null;
+    try {
+      savedView = localStorage.getItem(VIEW_KEY);
+      savedPm = localStorage.getItem(PM_KEY);
+    } catch {
+      // Restricted storage: the list and everyone's jobs are the defaults.
+    }
+    setJobsView(savedView === "timeline" ? "timeline" : "list");
+    const jobs = [...dataRef.current.onsite, ...dataRef.current.starting];
+    const mine = !!viewerId && jobs.some((j) => j.pm?.id === viewerId);
+    setPm(savedPm ?? (mine ? (viewerId as string) : "all"));
+  }, [viewerId]);
+
+  const changeJobsView = (next: JobsView) => {
+    setJobsView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // Private browsing — the preference just won't stick.
+    }
+  };
+
+  const changePm = (next: string) => {
+    setPm(next);
+    try {
+      localStorage.setItem(PM_KEY, next);
+    } catch {
+      // Private browsing — the preference just won't stick.
+    }
+  };
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -267,12 +334,76 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
   }, [notice]);
 
   const allBars = useMemo(() => [...view.onsite, ...view.starting].flatMap((j) => j.bars), [view]);
-  const openPhase = openPhaseId ? (allBars.find((b) => b.id === openPhaseId) ?? null) : null;
+  const focusedJob =
+    mode === "jobs" && focusJob ? ([...view.onsite, ...view.starting].find((j) => j.id === focusJob) ?? null) : null;
+  const openPhase = useMemo<BoardBar | null>(() => {
+    if (!openPhaseId) return null;
+    const bar = allBars.find((b) => b.id === openPhaseId);
+    if (bar) return bar;
+    // A step outside the board's window has no bar: stand one up from the
+    // job's whole schedule so its panel opens all the same.
+    const step = focusedJob?.schedule.find((s) => s.id === openPhaseId);
+    if (!step || !focusedJob) return null;
+    return {
+      id: step.id,
+      projectId: focusedJob.id,
+      name: step.name,
+      color: step.color,
+      status: step.status,
+      eventType: step.eventType,
+      startCol: 0,
+      endCol: 0,
+      clippedStart: true,
+      clippedEnd: true,
+      planned: null,
+      slipDays: null,
+      isConfirmed: step.isConfirmed,
+      isExterior: false,
+      risks: [],
+      crew: [],
+      subs: step.who,
+      startDate: step.startDate,
+      endDate: step.endDate,
+      assignedEmployeeIds: step.assignedEmployeeIds,
+      assignedSubIds: step.assignedSubIds,
+      projectName: focusedJob.name,
+      description: null,
+      notes: null,
+      phaseScope: "master",
+      kind: "plan",
+      memberIds: [step.id],
+      isMilestone: step.eventType === "inspection",
+    };
+  }, [openPhaseId, allBars, focusedJob]);
 
   // ── Filter ─────────────────────────────────────────────────────
 
+  // Who runs what, counted over the jobs the list shows as on site or starting.
+  const { pmOptions, noPmCount } = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string; count: number }>();
+    let none = 0;
+    for (const j of [...data.onsite, ...data.starting]) {
+      if (j.quiet) continue;
+      if (!j.pm) {
+        none++;
+        continue;
+      }
+      const row = byId.get(j.pm.id);
+      if (row) row.count++;
+      else byId.set(j.pm.id, { id: j.pm.id, name: j.pm.name, count: 1 });
+    }
+    return {
+      pmOptions: Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name)),
+      noPmCount: none,
+    };
+  }, [data.onsite, data.starting]);
+  // A saved pick that no longer has jobs falls back to everyone.
+  const pmFilter =
+    pm === "all" || (pm === "none" && noPmCount > 0) || pmOptions.some((o) => o.id === pm) ? pm : "all";
+
   const matches = useCallback(
     (j: BoardJob) => {
+      if (pmFilter !== "all" && (pmFilter === "none" ? !!j.pm : j.pm?.id !== pmFilter)) return false;
       const q = query.trim().toLowerCase();
       if (!q) return true;
       const hay = [
@@ -285,11 +416,13 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
         .toLowerCase();
       return hay.includes(q);
     },
-    [query],
+    [query, pmFilter],
   );
   const onsite = useMemo(() => view.onsite.filter(matches), [view.onsite, matches]);
   const starting = useMemo(() => view.starting.filter(matches), [view.starting, matches]);
   const pipeline = useMemo(() => view.pipeline.filter(matches), [view.pipeline, matches]);
+  const review = useMemo(() => view.review.filter(matches), [view.review, matches]);
+  const showTimeline = jobsView === "timeline" && !narrow;
 
   // ── Writes ─────────────────────────────────────────────────────
 
@@ -508,11 +641,11 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
 
   // Keyboard: Esc clears, ←/→ nudge the selection, T jumps to today.
   useEffect(() => {
-    if (mode !== "jobs") return;
+    if (mode !== "jobs" || !showTimeline || focusJob) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (openPhaseId || openProject || adding) return;
+      if (openPhaseId || openProject || adding || updating) return;
       if (e.key === "Escape" && selection.size) changeSelection(new Set());
       else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && selection.size) {
         e.preventDefault();
@@ -525,7 +658,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, selection, nudge, data.todayStr, openPhaseId, openProject, adding, changeSelection]);
+  }, [mode, showTimeline, focusJob, selection, nudge, data.todayStr, openPhaseId, openProject, adding, updating, changeSelection]);
 
   // ── AI health read ─────────────────────────────────────────────
 
@@ -573,11 +706,9 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     return () => clearInterval(id);
   }, [mode, router, loadHealth]);
 
-  const allJobs = [...data.onsite, ...data.starting, ...data.pipeline, ...data.review];
-  const scheduleReview = allJobs.filter((j) => j.scheduleIssues.length > 0 && matches(j));
-  const crewOut = allJobs.reduce((n, j) => n + j.crewToday.length, 0);
-  const needNext = allJobs.filter((j) => j.unscheduled || j.nothingAhead).length;
-  const late = allJobs.reduce((n, j) => n + j.overdueCount, 0);
+  const updatingJob = updating
+    ? ([...view.onsite, ...view.starting, ...view.review].find((j) => j.id === updating) ?? null)
+    : null;
   const allOpen = [...onsite, ...starting].every((j) => expanded.has(j.id));
   const customRange = !RANGES.some((r) => r.days === visibleDays);
 
@@ -589,10 +720,21 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     [data],
   );
 
+  const analyzeButton = (
+    <Button variant="outline" size="sm" className="h-8" onClick={() => void loadHealth(true)} disabled={healthLoading}>
+      {healthLoading ? (
+        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        <Sparkles className="mr-1 h-3.5 w-3.5" aria-hidden />
+      )}
+      {healthLoading ? "Reading jobs…" : health.size ? "Refresh AI read" : "Analyze jobs"}
+    </Button>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {/* ── Top bar ── */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* ── Top bar: where you are, whose jobs, and one way to add ── */}
+      <div className={cn("flex flex-wrap items-center gap-2", focusedJob && "hidden")}>
         <div className="flex rounded-md border border-border p-0.5">
           {(
             [
@@ -611,7 +753,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
                 mode === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <Icon className="h-3.5 w-3.5" aria-hidden />
+              <Icon className="hidden h-3.5 w-3.5 sm:block" aria-hidden />
               {label}
             </button>
           ))}
@@ -619,122 +761,158 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
 
         {mode === "jobs" && (
           <>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => controlRef.current?.page(-1)} aria-label="Earlier">
-                <ChevronLeft className="h-4 w-4" aria-hidden />
-              </Button>
-              <Button variant="outline" size="sm" className="h-8" onClick={() => controlRef.current?.scrollToDate(data.todayStr)}>
-                Today
-              </Button>
-              <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => controlRef.current?.page(1)} aria-label="Later">
-                <ChevronRight className="h-4 w-4" aria-hidden />
-              </Button>
-            </div>
-            <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="How much time to show">
-              {RANGES.map((r) => (
-                <button
-                  key={r.days}
-                  type="button"
-                  onClick={() => changeRange(r.days)}
-                  aria-pressed={visibleDays === r.days}
-                  className={cn(
-                    "rounded px-2 py-1 text-xs",
-                    visibleDays === r.days ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {r.label}
-                </button>
+            <select
+              aria-label="Show jobs for"
+              value={pmFilter}
+              onChange={(e) => changePm(e.target.value)}
+              className="h-8 max-w-[7.5rem] min-w-0 rounded-md border border-border bg-background px-2 text-xs font-medium sm:max-w-[10rem]"
+            >
+              <option value="all">All PMs</option>
+              {pmOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {firstName(o.name)} · {o.count}
+                </option>
               ))}
-              {customRange && <span className="rounded bg-muted px-2 py-1 text-xs font-medium">{visibleDays} days</span>}
-            </div>
-            <div className="relative">
+              {noPmCount > 0 && <option value="none">No PM · {noPmCount}</option>}
+            </select>
+            {!narrow && (
+              <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="How to show the jobs">
+                {(
+                  [
+                    { key: "list", label: "Cards", icon: List },
+                    { key: "timeline", label: "Gantt", icon: GanttChartSquare },
+                  ] as const
+                ).map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => changeJobsView(key)}
+                    aria-pressed={jobsView === key}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded px-2 py-1 text-xs",
+                      jobsView === key ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" aria-hidden />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="relative hidden lg:block">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
               <Input
                 aria-label="Find a job, step or person"
                 placeholder="Find job, step, person…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                className="h-8 w-52 pl-7 text-xs"
+                className="h-8 w-44 pl-7 text-xs lg:w-52"
               />
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs"
-              onClick={() => {
-                const ids = [...onsite, ...starting].map((j) => j.id);
-                const next = allOpen ? new Set<string>() : new Set(ids);
-                setExpanded(next);
-                writeJson(EXPANDED_KEY, Array.from(next));
-              }}
-            >
-              {allOpen ? <ChevronsDownUp className="mr-1 h-3.5 w-3.5" aria-hidden /> : <ChevronsUpDown className="mr-1 h-3.5 w-3.5" aria-hidden />}
-              {allOpen ? "Close all" : "Open all"}
-            </Button>
           </>
         )}
 
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           {saving > 0 && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Saving
             </span>
           )}
-          <span className="hidden text-xs text-muted-foreground xl:inline">
-            {data.onsite.length} jobs on site · {crewOut} on site today
-            {needNext > 0 && <span className="text-red-400"> · {needNext} need a remaining master plan</span>}
-            {late > 0 && <span className="text-amber-500"> · {late} late steps</span>}
-          </span>
-          {data.canSeeMoney && data.dueInWindow > 0 && (
-            <span
-              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-600/15 px-2 py-0.5 text-xs font-medium text-emerald-300"
-              title="Contract payments inside the board window not collected yet"
-            >
-              <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />${Math.round(data.dueInWindow).toLocaleString()} to collect
-            </span>
-          )}
-          {mode !== "tv" && <SubsNeededChip />}
+          {mode === "crew" && <SubsNeededChip />}
+          {mode === "tv" && analyzeButton}
           {mode === "jobs" && (
-            <Button size="sm" className="h-8" onClick={() => setAdding({ date: data.todayStr, n: Date.now() })}>
-              <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
-              Add step
-            </Button>
-          )}
-          {mode !== "crew" && (
-            <Button variant="outline" size="sm" className="h-8" onClick={() => void loadHealth(true)} disabled={healthLoading}>
-              {healthLoading ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <Sparkles className="mr-1 h-3.5 w-3.5" aria-hidden />
-              )}
-              {healthLoading ? "Reading jobs…" : health.size ? "Refresh AI read" : "Analyze jobs"}
+            <Button size="sm" className="h-8" aria-label="Add step" onClick={() => setAdding({ date: data.todayStr, n: Date.now() })}>
+              <Plus className="h-3.5 w-3.5 sm:mr-1" aria-hidden />
+              <span className="hidden sm:inline">Add step</span>
             </Button>
           )}
         </div>
       </div>
 
-      {mode !== "tv" && <SubsTodayStrip onOpenProject={setOpenProject} />}
-      {healthError && <p className="text-xs text-red-400">{healthError} — tap Refresh to retry.</p>}
-      {scheduleReview.length > 0 && (
-        <details className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2">
-          <summary className="cursor-pointer text-sm font-medium text-amber-700 dark:text-amber-400">Schedule needs review · {scheduleReview.length} job{scheduleReview.length === 1 ? "" : "s"}</summary>
-          <ul className="mt-2 max-h-52 space-y-2 overflow-y-auto text-xs">
-            {scheduleReview.map((job) => <li key={job.id}>
-              <a href={`/projects/${job.id}?tab=schedule`} className="font-medium underline underline-offset-2">{job.name}</a>
-              <span className="ml-1 text-muted-foreground">({job.status.replace(/_/g, " ")})</span>
-              <p>{job.scheduleIssues.map((issue) => issue.text).join(" · ")}</p>
-            </li>)}
-          </ul>
-        </details>
-      )}
-      {mode === "jobs" && (
-        <p className="hidden text-[11px] text-muted-foreground lg:block">
-          Drag a bar to move it · drag an end to stretch · shift-click to pick several · alt-drag moves a step and
-          everything after · double-click a row to add a step · ←/→ nudge what&apos;s picked · T for today
-        </p>
+      {/* ── Timeline tools: only when the timeline is what's on screen ── */}
+      {mode === "jobs" && showTimeline && !focusedJob && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => controlRef.current?.page(-1)} aria-label="Earlier">
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+            </Button>
+            <Button variant="outline" size="sm" className="h-8" onClick={() => controlRef.current?.scrollToDate(data.todayStr)}>
+              Today
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => controlRef.current?.page(1)} aria-label="Later">
+              <ChevronRight className="h-4 w-4" aria-hidden />
+            </Button>
+          </div>
+          <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="How much time to show">
+            {RANGES.map((r) => (
+              <button
+                key={r.days}
+                type="button"
+                onClick={() => changeRange(r.days)}
+                aria-pressed={visibleDays === r.days}
+                className={cn(
+                  "rounded px-2 py-1 text-xs",
+                  visibleDays === r.days ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {r.label}
+              </button>
+            ))}
+            {customRange && <span className="rounded bg-muted px-2 py-1 text-xs font-medium">{visibleDays} days</span>}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs"
+            onClick={() => {
+              const ids = [...onsite, ...starting].map((j) => j.id);
+              const next = allOpen ? new Set<string>() : new Set(ids);
+              setExpanded(next);
+              writeJson(EXPANDED_KEY, Array.from(next));
+            }}
+          >
+            {allOpen ? <ChevronsDownUp className="mr-1 h-3.5 w-3.5" aria-hidden /> : <ChevronsUpDown className="mr-1 h-3.5 w-3.5" aria-hidden />}
+            {allOpen ? "Close all" : "Open all"}
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <SubsNeededChip />
+            {analyzeButton}
+            <span
+              className="text-muted-foreground"
+              title="Drag a bar to move it. Drag an end to stretch it. Shift-click to pick several. Alt-drag moves a step and everything after. Double-click a row to add a step. Arrow keys nudge what is picked. T jumps to today."
+            >
+              <Info className="h-4 w-4" aria-label="Timeline tips" />
+            </span>
+          </div>
+        </div>
       )}
 
-      {mode === "jobs" ? (
+      {mode !== "tv" && !focusedJob && <SubsTodayStrip onOpenProject={setOpenProject} />}
+      {healthError && <p className="text-xs text-red-400">{healthError} — tap Refresh to retry.</p>}
+
+      {focusedJob ? (
+        <BoardJobSchedule
+          key={focusedJob.id}
+          job={focusedJob}
+          todayStr={data.todayStr}
+          onBack={() => setFocusJob(null)}
+          onOpenStep={(step) => setOpenPhaseId(step.id)}
+          onUpdate={() => setUpdating(focusedJob.id)}
+          onAddStep={() => setAdding({ projectId: focusedJob.id, date: data.todayStr, n: Date.now() })}
+          onOpenProject={() => setOpenProject(focusedJob.id)}
+        />
+      ) : mode === "jobs" && !showTimeline ? (
+        <BoardList
+          onsite={onsite}
+          starting={starting}
+          review={review}
+          todayStr={data.todayStr}
+          onOpenProject={setOpenProject}
+          onOpenPhase={(bar) => setOpenPhaseId(bar.id)}
+          onUpdate={(job) => setUpdating(job.id)}
+          onOpenSchedule={(job) => setFocusJob(job.id)}
+        />
+      ) : mode === "jobs" ? (
         <BoardTimeline
           data={view}
           onsite={onsite}
@@ -753,6 +931,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
           onMoveBars={dragMove}
           onAddStep={(projectId, date) => setAdding({ projectId, date, n: Date.now() })}
           onFitJob={fitJob}
+          onUpdateJob={(job) => setUpdating(job.id)}
           controlRef={controlRef}
         />
       ) : mode === "crew" ? (
@@ -762,7 +941,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
       )}
 
       {/* ── Selection bar ── */}
-      {mode === "jobs" && selection.size > 0 && (
+      {mode === "jobs" && showTimeline && !focusedJob && selection.size > 0 && (
         <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
           <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-popover px-3 py-2 text-sm shadow-xl">
             <span className="font-medium">{selection.size} picked</span>
@@ -842,6 +1021,24 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
         health={openProject ? health.get(openProject) : undefined}
         onClose={() => setOpenProject(null)}
       />
+
+      {updatingJob && (
+        <BoardUpdateSheet
+          key={updatingJob.id}
+          job={updatingJob}
+          todayStr={data.todayStr}
+          onClose={() => setUpdating(null)}
+          onSaved={(message) => {
+            setUpdating(null);
+            setNotice({ text: message, tone: "ok" });
+            router.refresh();
+          }}
+          onAddStep={(projectId) => {
+            setUpdating(null);
+            setAdding({ projectId, date: data.todayStr, n: Date.now() });
+          }}
+        />
+      )}
 
       {adding && (
         <ScheduleQuickAddSheet

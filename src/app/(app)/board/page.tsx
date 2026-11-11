@@ -36,7 +36,7 @@ export default async function BoardPage() {
     <>
       <Header title="Job Board" backHref="/command-center" />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
-        <JobBoard data={data} crew={crew} />
+        <JobBoard data={data} crew={crew} viewerId={user.profile?.id ?? user.id} />
       </div>
     </>
   );

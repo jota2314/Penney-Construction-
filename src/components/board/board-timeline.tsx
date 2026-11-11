@@ -6,11 +6,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   AlertTriangle,
   BadgeDollarSign,
-  CalendarOff,
   Check,
   ChevronDown,
   ChevronRight,
-  Clock,
   CloudRain,
   Flag,
   Maximize2,
@@ -22,6 +20,7 @@ import { cn } from "@/lib/utils";
 import type { BoardBar, BoardData, BoardDay, BoardJob, BoardPayment } from "@/lib/board/board-data";
 import { checkSequence, issuesByPhase, type SequenceIssue } from "@/lib/schedule/sequence-check";
 import type { ProjectHealth } from "./job-board";
+import { STATUS_DOT, STATUS_LABEL, STATUS_PILL } from "./board-list";
 
 /**
  * The Jobs view — every job as one tight row, every row a Gantt you can open.
@@ -115,6 +114,8 @@ interface Props {
   onMoveBars: (moves: BarMove[], opts?: MoveOptions) => void;
   onAddStep: (projectId: string, date: string) => void;
   onFitJob: (job: BoardJob) => void;
+  /** Opens the job's Update sheet (the status chip under its name). */
+  onUpdateJob: (job: BoardJob) => void;
   controlRef: React.MutableRefObject<TimelineControl | null>;
 }
 
@@ -214,6 +215,7 @@ export function BoardTimeline({
   onMoveBars,
   onAddStep,
   onFitJob,
+  onUpdateJob,
   controlRef,
 }: Props) {
   const { days } = data;
@@ -513,13 +515,10 @@ export function BoardTimeline({
 
   const renderJob = (job: BoardJob) => {
     const isOpen = expanded.has(job.id);
-    const jobIssues = job.bars.flatMap((b) => issues.get(b.id) ?? []);
-    const conflicts = jobIssues.filter((i) => i.severity === "conflict").length;
 
     if (!isOpen) {
       const packed = packBars(job.bars);
       const shown = packed.filter((p) => p.lane < COLLAPSED_LANES);
-      const hidden = packed.length - shown.length;
       const lanes = Math.max(1, Math.min(COLLAPSED_LANES, ...packed.map((p) => p.lane + 1)));
       const height = Math.max(MIN_ROW_H, BAND_H + 4 + lanes * LANE_H + 8);
       return (
@@ -529,11 +528,10 @@ export function BoardTimeline({
             health={health.get(job.id)}
             height={height}
             open={false}
-            hidden={hidden}
-            conflicts={conflicts}
             onToggle={() => onToggleExpand(job.id)}
             onOpen={() => onOpenProject(job.id)}
             onFit={() => onFitJob(job)}
+            onUpdate={() => onUpdateJob(job)}
           />
           <Track
             data={data}
@@ -574,11 +572,10 @@ export function BoardTimeline({
             health={health.get(job.id)}
             height={headH}
             open
-            hidden={0}
-            conflicts={conflicts}
             onToggle={() => onToggleExpand(job.id)}
             onOpen={() => onOpenProject(job.id)}
             onFit={() => onFitJob(job)}
+            onUpdate={() => onUpdateJob(job)}
           />
           <Track
             data={data}
@@ -990,33 +987,23 @@ function NameCell({
   health,
   height,
   open,
-  hidden,
-  conflicts,
   onToggle,
   onOpen,
   onFit,
+  onUpdate,
 }: {
   job: BoardJob;
   health: ProjectHealth | undefined;
   height: number;
   open: boolean;
-  hidden: number;
-  conflicts: number;
   onToggle: () => void;
   onOpen: () => void;
   onFit: () => void;
+  onUpdate: () => void;
 }) {
-  const dot =
-    job.scheduleIssues.some((issue) => issue.tone === "urgent") || health?.health === "red"
-      ? "bg-red-500"
-      : job.scheduleIssues.length > 0 || health?.health === "yellow"
-        ? "bg-amber-500"
-        : health?.health === "green"
-          ? "bg-green-500"
-          : "bg-muted-foreground/30";
-  const position = job.received !== null && job.spent !== null ? job.received - job.spent : null;
   const shortNo = job.projectNumber?.replace(/^PC-\d{4}-/, "") ?? "";
   const starting = job.status === "contracted";
+  const stale = job.staleSteps.length;
 
   return (
     <div
@@ -1037,7 +1024,7 @@ function NameCell({
         >
           {open ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
         </button>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[job.boardStatus])} aria-hidden />
         <button
           type="button"
           onClick={onOpen}
@@ -1046,15 +1033,6 @@ function NameCell({
           {job.name}
         </button>
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{shortNo}</span>
-        {position !== null && (job.received !== 0 || job.spent !== 0) && (
-          <span
-            className={cn("shrink-0 text-[10px] tabular-nums", position < 0 ? "font-medium text-red-400" : "text-green-500/80")}
-            title={`Client paid ${money(job.received)} · job spent ${money(job.spent)}${position < 0 ? " — Penney is funding this job" : ""}`}
-          >
-            {position < 0 ? "−" : "+"}
-            {money(position)}
-          </span>
-        )}
         <button
           type="button"
           onClick={onFit}
@@ -1088,83 +1066,28 @@ function NameCell({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-1 pl-6">
+      {/* One status. Tap it to update the job. */}
+      <div className="flex items-center gap-1.5 pl-6">
+        <button
+          type="button"
+          onClick={onUpdate}
+          title="Update this job's schedule"
+          className={cn("rounded px-1.5 text-[10px] font-medium leading-4 hover:brightness-110", STATUS_PILL[job.boardStatus])}
+        >
+          {STATUS_LABEL[job.boardStatus]}
+          {stale ? ` · ${stale}` : ""}
+        </button>
         {job.crewToday.length > 0 && (
-          <Chip tone="green" title={job.crewToday.map((c) => c.name).join(", ")}>
+          <span
+            className="inline-flex items-center gap-0.5 text-[10px] leading-4 text-green-500"
+            title={job.crewToday.map((c) => c.name).join(", ")}
+          >
             <Users className="h-2.5 w-2.5" aria-hidden />
             {job.crewToday.length} on site
-          </Chip>
-        )}
-        {job.unscheduled && (
-          <Chip tone="red" title="Daily assignments do not replace the project's master construction schedule">
-            <CalendarOff className="h-2.5 w-2.5" aria-hidden />
-            Master schedule missing
-          </Chip>
-        )}
-        {job.workStartedStatusMismatch && (
-          <Chip tone="red" title="Recent field work is recorded while the project is still marked as preconstruction. Review its status.">
-            <AlertTriangle className="h-2.5 w-2.5" aria-hidden />
-            Work recorded · review status
-          </Chip>
-        )}
-        {job.nothingAhead && (
-          <Chip tone="red" title="Unfinished master work remains but none is planned from today on — review the next step">
-            <CalendarOff className="h-2.5 w-2.5" aria-hidden />
-            No remaining plan
-          </Chip>
-        )}
-        {job.overdueCount > 0 && (
-          <Chip tone="amber" title="Steps whose end date passed and aren't marked done">
-            <Clock className="h-2.5 w-2.5" aria-hidden />
-            {job.overdueCount} late
-          </Chip>
-        )}
-        {conflicts > 0 && (
-          <Chip tone="red" title="Steps scheduled in an order that can't happen — open the job to see which">
-            <AlertTriangle className="h-2.5 w-2.5" aria-hidden />
-            {conflicts} out of order
-          </Chip>
-        )}
-        {job.unsignedCoCount > 0 && (
-          <Chip tone="red">
-            {job.unsignedCoCount} CO{job.unsignedCoCount > 1 ? "s" : ""} open
-          </Chip>
-        )}
-        {hidden > 0 && (
-          <button type="button" onClick={onToggle} className="rounded bg-muted px-1 text-[10px] text-muted-foreground hover:text-foreground">
-            +{hidden} more
-          </button>
-        )}
-        {starting && job.startsInDays === null && (
-          <Chip tone="red">
-            <CalendarOff className="h-2.5 w-2.5" aria-hidden />
-            No start date
-          </Chip>
+          </span>
         )}
       </div>
     </div>
-  );
-}
-
-function Chip({
-  tone,
-  title,
-  children,
-}: {
-  tone: "green" | "red" | "amber";
-  title?: string;
-  children: React.ReactNode;
-}) {
-  const cls =
-    tone === "green"
-      ? "bg-green-500/15 text-green-500"
-      : tone === "red"
-        ? "bg-red-500/15 text-red-400"
-        : "bg-amber-500/15 text-amber-500";
-  return (
-    <span title={title} className={`inline-flex items-center gap-0.5 rounded px-1 text-[10px] leading-4 ${cls}`}>
-      {children}
-    </span>
   );
 }
 

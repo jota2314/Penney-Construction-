@@ -30,12 +30,13 @@ const STALE_MS = 2 * 60 * 1000;
 const REFRESH_MS = 5 * 60 * 1000;
 const FIRST_ROWS = 6;
 
+/** One line until someone opens it: the board's top stays short. */
 function readOpen(): boolean {
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   try {
-    return localStorage.getItem(OPEN_KEY) !== "0";
+    return localStorage.getItem(OPEN_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 

@@ -61,7 +61,7 @@ export function isFirm(p: { is_confirmed: boolean | null; status: string | null 
   return !!p.is_confirmed || p.status === "in_progress" || p.status === "completed";
 }
 
-function canCarryFinishDelay(p: CascadeInput): boolean {
+export function canCarryFinishDelay(p: Pick<CascadeInput, "event_type" | "name">): boolean {
   if (["crew", "meeting", "walkthrough", "shop_meeting"].includes(p.event_type ?? "")) return false;
   // These run alongside the job. A dumpster staying longer must not move the
   // trades, and a delayed delivery needs a specific dependency, not every trade.
