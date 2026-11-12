@@ -5,6 +5,7 @@ import { ArrowUpRight, Camera, Check, ChevronRight, FileText } from "lucide-reac
 import { formatMoney } from "@/lib/money";
 import { scheduleProgress } from "@/lib/schedule/progress";
 import { deriveCurrentScheduleActivity } from "@/lib/schedule/health";
+import { isOverheadStep, isSiteWork } from "@/lib/board/step-kind";
 import type {
   PortalData,
   PortalDecision,
@@ -144,7 +145,17 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
 
   const { total, percent: pct, pendingClientReports } = scheduleProgress(data.schedule);
   const today = todayISO();
-  const activity = deriveCurrentScheduleActivity(data.schedule, today, data.project.status);
+  // The client never sees the rows that sit on site the whole job (dumpster,
+  // portable restroom, protection): not in Up next, not in the Schedule tab.
+  // Progress above still counts every master row, same as the office sees.
+  const clientSchedule = data.schedule.filter((p) => !isOverheadStep(p.name));
+  // Now and Up next are the work on site. Orders, payments and selection
+  // dates have their own cards; fall back to them only when no site work is
+  // left on the plan.
+  const siteActivity = deriveCurrentScheduleActivity(clientSchedule.filter((p) => isSiteWork(p.name)), today, data.project.status);
+  const activity = siteActivity.upcoming.length > 0
+    ? siteActivity
+    : deriveCurrentScheduleActivity(clientSchedule, today, data.project.status);
   const current = activity.current;
   const statusWord = STATUS_WORDS[data.project.status] ?? "In progress";
 
@@ -223,8 +234,8 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
       </nav>
 
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
-        {tab === "home" && <HomeTab data={data} go={go} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
-        {tab === "schedule" && <ScheduleTab phases={data.schedule} action={action} />}
+        {tab === "home" && <HomeTab data={data} schedule={clientSchedule} go={go} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
+        {tab === "schedule" && <ScheduleTab phases={clientSchedule} action={action} />}
         {tab === "selections" && (
           <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} action={action} />
         )}
@@ -276,7 +287,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 // ─────────────────────────────── Home
-function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab) => void; upcoming: PortalData["schedule"]; today: string }) {
+function HomeTab({ data, schedule, go, upcoming, today }: { data: PortalData; schedule: PortalData["schedule"]; go: (t: Tab) => void; upcoming: PortalData["schedule"]; today: string }) {
   const t = data.today_on_site;
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
   return (
@@ -353,10 +364,10 @@ function HomeTab({ data, go, upcoming, today }: { data: PortalData; go: (t: Tab)
       <section className="card p-4">
         <div className="flex items-center justify-between">
           <p className="label">Up next</p>
-          {data.schedule.length > 0 && <button onClick={() => go("schedule")} className="text-[14px] font-bold text-[var(--accent-dark)]">Full schedule</button>}
+          {schedule.length > 0 && <button onClick={() => go("schedule")} className="text-[14px] font-bold text-[var(--accent-dark)]">Full schedule</button>}
         </div>
         {upcoming.length === 0 ? (
-          <p className="mt-2 text-[15px] text-[var(--muted)]">{data.project.status === "completed" ? "Your project is complete." : data.schedule.length === 0 ? "Your schedule will appear here once your start date is set." : data.schedule.every(phaseDone) ? "All scheduled work is complete." : "The team is reviewing the next schedule update."}</p>
+          <p className="mt-2 text-[15px] text-[var(--muted)]">{data.project.status === "completed" ? "Your project is complete." : schedule.length === 0 ? "Your schedule will appear here once your start date is set." : schedule.every(phaseDone) ? "All scheduled work is complete." : "The team is reviewing the next schedule update."}</p>
         ) : (
           <ul className="mt-1 divide-y divide-[var(--line)]">
             {upcoming.map((p) => {

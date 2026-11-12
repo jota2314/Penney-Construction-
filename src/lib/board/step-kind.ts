@@ -6,7 +6,7 @@
 
 /** Runs alongside the whole job: never the answer to "what's on today". */
 const OVERHEAD =
-  /dumpster|porta|portable (toilet|restroom)|(site|floor|dust) protection|dust control|general conditions|supervision|daily cleanup|debris|parking rules/i;
+  /dumpster|porta|portable (toilet|restroom)|(site|floor|dust) protection|^protection\b|dust control|general conditions|supervision|daily cleanup|debris|parking rules/i;
 
 /** A date to hit, not work on site. */
 const ADMIN = /^(order|selection due|payment|delivery|milestone)\b/i;
