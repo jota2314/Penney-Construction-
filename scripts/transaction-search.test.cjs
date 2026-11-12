@@ -8,6 +8,17 @@ const root = path.resolve(__dirname, "..");
 const compile = (source) => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText;
+// Resolve the app's "@/…" import alias so modules that use it load here too.
+const Module = require("node:module");
+const resolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (request, ...rest) {
+  if (request.startsWith("@/")) {
+    const base = path.join(root, "src", request.slice(2));
+    const hit = [base + ".ts", base + ".tsx", path.join(base, "index.ts")].find((file) => fs.existsSync(file));
+    if (hit) return hit;
+  }
+  return resolveFilename.call(this, request, ...rest);
+};
 require.extensions[".ts"] = (module, filename) => module._compile(compile(fs.readFileSync(filename, "utf8")), filename);
 const { searchTransactions } = require("../src/lib/finance/transaction-search.ts");
 const { canSeeBoardMoney } = require("../src/lib/auth/role-access.ts");
