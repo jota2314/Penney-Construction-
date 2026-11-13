@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Camera, Check, ChevronRight, FileText } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ArrowUpRight, Camera, Check, ChevronRight, Eye, EyeOff, FileText } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import { scheduleProgress } from "@/lib/schedule/progress";
 import { deriveCurrentScheduleActivity } from "@/lib/schedule/health";
@@ -58,6 +58,23 @@ const TABS: [Tab, string][] = [
 // Always to the cent — these figures mirror the PDFs and invoices.
 const fmt = (v: number) => formatMoney(v, { cents: "always" });
 const parseDay = (d: string) => new Date(d + (d.length === 10 ? "T00:00:00" : ""));
+const HIDE_AMOUNTS_KEY = "portal-hide-amounts";
+const MASK = "$••••••";
+let hideAmountsMemory = false; // fallback when storage is blocked
+const hideAmountsListeners = new Set<() => void>();
+const readHideAmounts = () => {
+  try { return localStorage.getItem(HIDE_AMOUNTS_KEY) === "1"; } catch { return hideAmountsMemory; }
+};
+const writeHideAmounts = (hide: boolean) => {
+  hideAmountsMemory = hide;
+  try { localStorage.setItem(HIDE_AMOUNTS_KEY, hide ? "1" : "0"); } catch { /* storage blocked */ }
+  hideAmountsListeners.forEach((l) => l());
+};
+const subscribeHideAmounts = (l: () => void) => {
+  hideAmountsListeners.add(l);
+  return () => { hideAmountsListeners.delete(l); };
+};
+
 const fmtDate = (d: string | null) =>
   d ? parseDay(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "TBD";
 const fmtShort = (d: string | null) =>
@@ -122,6 +139,9 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
   const preview = data.mode === "preview";
   const [tab, setTab] = useState<Tab>("home");
   const [photoIndex, setPhotoIndex] = useState<number | null>(null);
+  // Eye toggle on Payments: masks every dollar amount, remembered on this device.
+  const hideAmounts = useSyncExternalStore(subscribeHideAmounts, readHideAmounts, () => false);
+  const toggleAmounts = () => writeHideAmounts(!hideAmounts);
   const action = useClientAction(token, preview, onReload);
 
   // Deep links: /portal/<token>#selections opens that tab.
@@ -234,13 +254,13 @@ export function ClientPortalView({ data, token, onReload }: ClientPortalViewProp
       </nav>
 
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
-        {tab === "home" && <HomeTab data={data} schedule={clientSchedule} go={go} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
+        {tab === "home" && <HomeTab data={data} schedule={clientSchedule} go={go} hideAmounts={hideAmounts} upcoming={activity.upcoming.slice(0, 3)} today={today} />}
         {tab === "schedule" && <ScheduleTab phases={clientSchedule} action={action} />}
         {tab === "selections" && (
           <SelectionsTab data={data} decisions={preview ? data.selections : visibleDecisions} token={token} onReload={onReload} action={action} />
         )}
         {tab === "documents" && <DocumentsTab docs={data.documents} />}
-        {tab === "payments" && <PaymentsTab data={data} mailto={mailto} />}
+        {tab === "payments" && <PaymentsTab data={data} mailto={mailto} hidden={hideAmounts} onToggle={toggleAmounts} />}
         {tab === "photos" && <PhotosTab photos={data.photos} onOpen={setPhotoIndex} />}
       </main>
 
@@ -287,7 +307,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 // ─────────────────────────────── Home
-function HomeTab({ data, schedule, go, upcoming, today }: { data: PortalData; schedule: PortalData["schedule"]; go: (t: Tab) => void; upcoming: PortalData["schedule"]; today: string }) {
+function HomeTab({ data, schedule, go, upcoming, today, hideAmounts }: { data: PortalData; schedule: PortalData["schedule"]; go: (t: Tab) => void; hideAmounts: boolean; upcoming: PortalData["schedule"]; today: string }) {
   const t = data.today_on_site;
   const showToday = !!t && (t.live_count > 0 || t.tasks.length > 0 || (t.tomorrow?.tasks.length ?? 0) > 0);
   return (
@@ -389,7 +409,7 @@ function HomeTab({ data, schedule, go, upcoming, today }: { data: PortalData; sc
       </section>
 
       <SelectionsCard data={data} onOpen={() => go("selections")} />
-      <PaymentsCard data={data} onOpen={() => go("payments")} />
+      <PaymentsCard data={data} onOpen={() => go("payments")} hidden={hideAmounts} />
 
       <div className="grid grid-cols-2 gap-3">
         <DocumentsTile docs={data.documents} onOpen={() => go("documents")} />
@@ -517,9 +537,10 @@ function SelectionsCard({ data, onOpen }: { data: PortalData; onOpen: () => void
   );
 }
 
-function PaymentsCard({ data, onOpen }: { data: PortalData; onOpen: () => void }) {
+function PaymentsCard({ data, onOpen, hidden }: { data: PortalData; onOpen: () => void; hidden: boolean }) {
   const f = data.financials;
   if (!f) return null;
+  const m = (v: number) => (hidden ? MASK : fmt(v));
   const total = f.adjusted_contract || f.contract_value;
   const paidPct = total > 0 ? Math.min(100, Math.round((f.total_payments_received / total) * 100)) : 0;
   return (
@@ -527,9 +548,9 @@ function PaymentsCard({ data, onOpen }: { data: PortalData; onOpen: () => void }
       <CardHead title="Payments" action="Details" />
       <span className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
         <span className="text-[22px] font-extrabold leading-tight">
-          {fmt(f.total_payments_received)} <span className="text-[14px] font-semibold text-[var(--muted)]">paid</span>
+          {m(f.total_payments_received)} <span className="text-[14px] font-semibold text-[var(--muted)]">paid</span>
         </span>
-        <span className="text-[14px] text-[var(--muted)]">of {fmt(total)}</span>
+        <span className="text-[14px] text-[var(--muted)]">of {m(total)}</span>
       </span>
       <span className="mt-2.5 block h-2 overflow-hidden rounded-full bg-[var(--line)]">
         <span className="block h-full rounded-full bg-[#2F6B4F]" style={{ width: `${paidPct}%` }} />
@@ -925,17 +946,30 @@ function DocumentsTab({ docs }: { docs: PortalDocument[] }) {
 }
 
 // ─────────────────────────────── Payments
-function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
+function PaymentsTab({ data, mailto, hidden, onToggle }: { data: PortalData; mailto: string; hidden: boolean; onToggle: () => void }) {
   const f = data.financials;
   if (!f) return <Empty>Payment details will appear here shortly.</Empty>;
+  const m = (v: number) => (hidden ? MASK : fmt(v));
   const paidPct = f.adjusted_contract > 0 ? Math.min(100, Math.round((f.total_payments_received / f.adjusted_contract) * 100)) : 0;
   return (
     <>
       <section className="card p-4">
-        <p className="label">Contract total</p>
-        <p className="mt-1 text-[30px] font-extrabold leading-none">{fmt(f.adjusted_contract || f.contract_value)}</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="label">Contract total</p>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-pressed={hidden}
+            aria-label={hidden ? "Show amounts" : "Hide amounts"}
+            title={hidden ? "Show amounts" : "Hide amounts"}
+            className="-my-2 -mr-2 flex h-11 w-11 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--line)]"
+          >
+            {hidden ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+        </div>
+        <p className="mt-1 text-[30px] font-extrabold leading-none">{m(f.adjusted_contract || f.contract_value)}</p>
         {f.change_order_revenue !== 0 && (
-          <p className="mt-1.5 text-[14px] text-[var(--muted)]">Includes {fmt(f.change_order_revenue)} in approved changes ({f.change_order_count})</p>
+          <p className="mt-1.5 text-[14px] text-[var(--muted)]">Includes {m(f.change_order_revenue)} in approved changes ({f.change_order_count})</p>
         )}
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--line)]">
           <div className="h-full rounded-full bg-[#2F6B4F]" style={{ width: `${paidPct}%` }} />
@@ -943,11 +977,11 @@ function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
         <div className="mt-3 flex justify-between">
           <div>
             <p className="label">Paid to date</p>
-            <p className="text-[18px] font-extrabold text-[#2F6B4F]">{fmt(f.total_payments_received)}</p>
+            <p className="text-[18px] font-extrabold text-[#2F6B4F]">{m(f.total_payments_received)}</p>
           </div>
           <div className="text-right">
             <p className="label">Balance</p>
-            <p className="text-[18px] font-extrabold">{fmt(f.outstanding_receivable)}</p>
+            <p className="text-[18px] font-extrabold">{m(f.outstanding_receivable)}</p>
           </div>
         </div>
       </section>
@@ -963,7 +997,7 @@ function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
                     <span className="block text-[16px] font-bold">Invoice {inv.invoice_number}{inv.title ? ` · ${inv.title}` : ""}</span>
                     <span className="block text-[13px] text-[var(--muted)]">{fmtDate(inv.date)} · Open PDF</span>
                   </span>
-                  <span className="shrink-0 text-[16px] font-extrabold">{fmt(inv.amount)}</span>
+                  <span className="shrink-0 text-[16px] font-extrabold">{m(inv.amount)}</span>
                 </a>
               </li>
             ))}
@@ -981,7 +1015,7 @@ function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
                   <span className="block text-[16px] font-semibold capitalize">{p.description || p.payment_type}</span>
                   <span className="block text-[13px] text-[var(--muted)]">{fmtDate(p.received_date)}{p.invoice_sent_number ? ` · Invoice ${p.invoice_sent_number}` : ""}</span>
                 </span>
-                <span className="shrink-0 text-[16px] font-extrabold text-[#2F6B4F]">{fmt(p.amount)}</span>
+                <span className="shrink-0 text-[16px] font-extrabold text-[#2F6B4F]">{m(p.amount)}</span>
               </li>
             ))}
           </ul>
@@ -999,7 +1033,7 @@ function PaymentsTab({ data, mailto }: { data: PortalData; mailto: string }) {
                   <span className="block text-[13px] text-[var(--muted)]">{co.signed || co.status === "approved" ? "Approved" : "Awaiting your signature"}</span>
                   {co.url && <a href={co.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-[14px] font-bold text-[var(--accent-dark)]">{co.signed ? "View" : "Review and sign"} →</a>}
                 </span>
-                <span className="shrink-0 text-[16px] font-extrabold">{co.price_impact >= 0 ? "+" : "−"}{fmt(Math.abs(co.price_impact))}</span>
+                <span className="shrink-0 text-[16px] font-extrabold">{hidden ? MASK : `${co.price_impact >= 0 ? "+" : "−"}${m(Math.abs(co.price_impact))}`}</span>
               </li>
             ))}
           </ul>
