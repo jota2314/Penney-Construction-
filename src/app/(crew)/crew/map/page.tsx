@@ -36,7 +36,7 @@ export default async function CrewMapPage() {
           <p className="text-sm text-muted-foreground">No active jobsites to map right now.</p>
         </div>
       ) : (
-        <MapView pins={pins} missingProjectCount={missingCoordsCount} height="clamp(320px, 58vh, 620px)" />
+        <MapView pins={pins} missingProjectCount={missingCoordsCount} height="clamp(320px, 58vh, 620px)" routeOnTap />
       )}
     </div>
   );

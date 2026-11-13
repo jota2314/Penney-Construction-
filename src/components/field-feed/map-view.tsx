@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { v } from "./tokens";
 import { backfillProjectCoordinates } from "@/lib/actions/geocode";
 import { getLiveCrewPositions, type LiveCrewPosition } from "@/lib/actions/live-map";
@@ -42,6 +43,34 @@ function fmtDuration(sec: number): string {
   const m = Math.round((sec % 3600) / 60);
   if (h === 0) return `${m}m`;
   return `${h}h ${m}m`;
+}
+
+/** Someone on the clock, for the roster under the map. */
+export type ClockedInRow = {
+  /** daily_logs.id — the same id the live crew positions carry. */
+  id: string;
+  name: string;
+  projectName: string | null;
+  /** Labor cost so far, already formatted. Omitted for viewers who can't see pay. */
+  amount?: string;
+};
+
+/** Zoom at which every pin gets its label; below it only the busy ones do. */
+const LABEL_ZOOM = 12;
+
+/**
+ * Pin label: the job name without its trailing street address
+ * ("Rand Kitchen & Bath — 7 Hamilton St" → "Rand Kitchen & Bath"). The full
+ * name and address are on the card that opens when the pin is tapped.
+ */
+function shortLabel(name: string): string {
+  const head = name.replace(/\s+[—–-]\s+\d.*$/, "").trim() || name;
+  return head.length > 28 ? `${head.slice(0, 27).trimEnd()}…` : head;
+}
+
+/** Jobs at the same address share a key (4 decimals is about 10 m). */
+function spotKey(pin: { lat: number; lng: number }): string {
+  return `${pin.lat.toFixed(4)},${pin.lng.toFixed(4)}`;
 }
 
 type RouteEndpoint =
@@ -150,6 +179,9 @@ export function MapView({
   missingProjectCount = 0,
   height = 380,
   liveCrew = false,
+  routeOnTap = false,
+  jobLinks = false,
+  clockedIn,
 }: {
   pins: MapPin[];
   missingProjectCount?: number;
@@ -157,11 +189,23 @@ export function MapView({
   height?: number | string;
   /** Plot clocked-in crew at their real GPS position, polled while mounted. */
   liveCrew?: boolean;
+  /** Tapping a pin also adds it to the route (the runner's map). */
+  routeOnTap?: boolean;
+  /** Show an "Open job" link on the pin card (office pages only). */
+  jobLinks?: boolean;
+  /**
+   * Everyone on the clock. Adds each person's cost to the roster and lists
+   * the people whose phone has sent no location, who can't be plotted.
+   */
+  clockedIn?: ClockedInRow[];
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const markersRef = useRef<Map<string, { marker: any; pin: any }>>(new Map());
+  const markersRef = useRef<
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Map<string, { marker: any; pin: any; label: HTMLElement; name: string }>
+  >(new Map());
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const crewMarkersRef = useRef<Map<string, any>>(new Map());
   const [crew, setCrew] = useState<LiveCrewPosition[]>([]);
@@ -191,8 +235,68 @@ export function MapView({
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY;
 
+  // The Google map is rebuilt only when a pin is added, removed, moved or
+  // renamed. Pages that refresh their data hand over a new array every time;
+  // that must not throw away the zoom and the route the user is looking at.
+  const pinsKey = useMemo(
+    () => pins.map((p) => `${p.project_id}:${p.lat}:${p.lng}:${p.project_name}`).join("|"),
+    [pins],
+  );
+  const pinsRef = useRef(pins);
+  // What paintPins needs from the latest render, readable from map listeners.
+  const viewRef = useRef({
+    selectedIds,
+    focusedId,
+    crewCounts: new Map<string, number>(),
+  });
+
+  /** Colour, size and label of every job pin, for the current zoom and state. */
+  const paintPins = useCallback(() => {
+    const zoom = mapRef.current?.getZoom() ?? 0;
+    const view = viewRef.current;
+    markersRef.current.forEach(({ marker, pin, label, name }, projectId) => {
+      const isSelected = view.selectedIds.has(projectId);
+      const isFocused = view.focusedId === projectId;
+      const count = view.crewCounts.get(projectId) ?? 0;
+      pin.background = isSelected ? "#10b981" : "#D97706";
+      pin.borderColor = isSelected ? "#06291f" : "#1a0f00";
+      pin.glyphColor = isSelected ? "#06291f" : "#1a0f00";
+      pin.scale = isFocused ? 1.3 : 1.0;
+      marker.zIndex = isFocused ? 300 : count > 0 ? 200 : isSelected ? 150 : 100;
+      label.textContent = count > 0 ? `${name} · ${count} crew` : name;
+      label.style.border =
+        count > 0
+          ? "1px solid rgba(16,185,129,0.65)"
+          : "1px solid rgba(217,119,6,0.5)";
+      // Zoomed out, 30 labels pile into one unreadable block. Show only the
+      // sites with crew on them plus whatever the user picked.
+      label.style.display =
+        zoom >= LABEL_ZOOM || count > 0 || isSelected || isFocused ? "block" : "none";
+    });
+  }, []);
+
+  const toggleStop = useCallback((projectId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+    // Changing the stops invalidates the previously-built route
+    setRouteResult(null);
+    if (rendererRef.current) {
+      rendererRef.current.setMap(null);
+      rendererRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    pinsRef.current = pins;
+  }, [pins]);
+
   useEffect(() => {
     if (!ref.current || !apiKey) return;
+    const pins = pinsRef.current;
     let cancelled = false;
     let watchdog: ReturnType<typeof setTimeout> | null = null;
 
@@ -240,6 +344,9 @@ export function MapView({
           });
           mapRef.current = mapInstance;
           setMapReady((n) => n + 1);
+          mapInstance.addListener("zoom_changed", paintPins);
+          // Tapping empty map closes the pin card.
+          mapInstance.addListener("click", () => setFocusedId(null));
 
           if (pins.length > 1) {
             const bounds = new google.maps.LatLngBounds();
@@ -263,11 +370,7 @@ export function MapView({
             scale: 1.0,
           });
 
-          const liveCount = pin.liveCrew?.length ?? 0;
           const labelEl = document.createElement("div");
-          labelEl.textContent = liveCount > 0
-            ? `${pin.project_name} · ${liveCount} on site`
-            : pin.project_name;
           labelEl.style.cssText = [
             "position:absolute",
             "left:100%",
@@ -276,9 +379,6 @@ export function MapView({
             "margin-left:6px",
             "padding:3px 7px",
             "background:rgba(22,20,15,0.92)",
-            liveCount > 0
-              ? "border:1px solid rgba(16,185,129,0.65)"
-              : "border:1px solid rgba(217,119,6,0.5)",
             "border-radius:5px",
             "color:#F5F1EA",
             "font-family:var(--font-geist-sans),-apple-system,sans-serif",
@@ -292,31 +392,38 @@ export function MapView({
             "pointer-events:none",
           ].join(";");
 
-          pinGlyph.element.style.position = "relative";
-          pinGlyph.element.appendChild(labelEl);
+          // Google's pin is now a web component (<gmp-pin>) with a shadow
+          // root, so a label appended inside it is never drawn. The label
+          // lives beside the pin in a wrapper of our own instead.
+          const wrap = document.createElement("div");
+          wrap.style.cssText = "position:relative;display:flex";
+          // Newer Maps versions: the PinElement is the node itself and
+          // `.element` is deprecated. Older ones only have `.element`.
+          const pinNode: Node =
+            (pinGlyph as unknown) instanceof Node
+              ? (pinGlyph as unknown as Node)
+              : pinGlyph.element;
+          wrap.appendChild(pinNode);
+          wrap.appendChild(labelEl);
 
           const m = new AdvancedMarkerElement({
             position: { lat: pin.lat, lng: pin.lng },
             map: mapInstance,
-            title: `${pin.project_name} — tap to add to route`,
-            content: pinGlyph.element,
+            title: pin.project_name,
+            content: wrap,
           });
           m.addListener("click", () => {
-            setSelectedIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(pin.project_id)) next.delete(pin.project_id);
-              else next.add(pin.project_id);
-              return next;
-            });
-            // Tapping a pin invalidates the previously-built route
-            setRouteResult(null);
-            if (rendererRef.current) {
-              rendererRef.current.setMap(null);
-              rendererRef.current = null;
-            }
+            setFocusedId(pin.project_id);
+            if (routeOnTap) toggleStop(pin.project_id);
           });
-          markersRef.current.set(pin.project_id, { marker: m, pin: pinGlyph });
+          markersRef.current.set(pin.project_id, {
+            marker: m,
+            pin: pinGlyph,
+            label: labelEl,
+            name: shortLabel(pin.project_name),
+          });
           }
+          paintPins();
         };
 
         let mapInstance = buildMap();
@@ -365,17 +472,16 @@ export function MapView({
       }
       mapRef.current = null;
     };
-  }, [apiKey, pins]);
+  }, [apiKey, pinsKey, routeOnTap, paintPins, toggleStop]);
 
-  // Recolor pins as selection changes (selected = green, unselected = amber)
+  // Repaint pins when the selection, the open card or the crew counts change
+  // (selected = green, crew on the clock = green-edged label).
   useEffect(() => {
-    markersRef.current.forEach(({ pin }, projectId) => {
-      const isSelected = selectedIds.has(projectId);
-      pin.background = isSelected ? "#10b981" : "#D97706";
-      pin.borderColor = isSelected ? "#06291f" : "#1a0f00";
-      pin.glyphColor = isSelected ? "#06291f" : "#1a0f00";
-    });
-  }, [selectedIds]);
+    const crewCounts = new Map<string, number>();
+    for (const p of pins) crewCounts.set(p.project_id, p.liveCrew?.length ?? 0);
+    viewRef.current = { selectedIds, focusedId, crewCounts };
+    paintPins();
+  }, [pins, selectedIds, focusedId, mapReady, paintPins]);
 
   // Poll live crew positions — phones ping while a shift is open, so a map
   // left up on a desk should keep up rather than freeze at load time.
@@ -730,6 +836,16 @@ export function MapView({
 
   const selectedPins = pins.filter((p) => selectedIds.has(p.project_id));
   const offSiteCount = crew.filter((c) => c.on_site === false).length;
+  const focusedPin = focusedId ? pins.find((p) => p.project_id === focusedId) ?? null : null;
+  // Other jobs at the same address sit under this pin and can't be tapped.
+  const samePlace = focusedPin
+    ? pins.filter((p) => p.project_id !== focusedPin.project_id && spotKey(p) === spotKey(focusedPin))
+    : [];
+  const amountById = new Map((clockedIn ?? []).map((r) => [r.id, r.amount]));
+  const plottedIds = new Set(crew.map((c) => c.daily_log_id));
+  // On the clock, but the phone has sent no location to plot.
+  const unplotted = crewLoaded ? (clockedIn ?? []).filter((r) => !plottedIds.has(r.id)) : [];
+  const onClockCount = crew.length + unplotted.length;
 
   const fitToCrew = () => {
     if (!mapRef.current || crew.length === 0) return;
@@ -743,6 +859,21 @@ export function MapView({
     mapRef.current.fitBounds(bounds, 80);
   };
 
+  const fitToJobs = () => {
+    if (!mapRef.current || pins.length === 0) return;
+    if (pins.length === 1) {
+      mapRef.current.panTo({ lat: pins[0].lat, lng: pins[0].lng });
+      mapRef.current.setZoom(12);
+      return;
+    }
+    const bounds = new google.maps.LatLngBounds();
+    pins.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+    mapRef.current.fitBounds(bounds, 60);
+  };
+
+  const toolBtn = "px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]";
+  const plainBtn = { background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` };
+
   return (
     <div className="flex flex-col gap-2">
       {missingProjectCount > 0 && (
@@ -751,7 +882,10 @@ export function MapView({
           style={{ background: "rgba(217, 119, 6, 0.08)", border: "1px solid rgba(217, 119, 6, 0.25)", color: "#fbbf24" }}
         >
           <span>
-            <span className="font-semibold">{missingProjectCount}</span> {missingProjectCount === 1 ? "jobsite is" : "jobsites are"} missing coordinates and won&apos;t show on the map.
+            <span className="font-semibold">{missingProjectCount}</span>
+            {missingProjectCount === 1
+              ? " jobsite is missing coordinates and won't show on the map."
+              : " jobsites are missing coordinates and won't show on the map."}
           </span>
           <button
             onClick={runBackfill}
@@ -764,11 +898,12 @@ export function MapView({
         </div>
       )}
 
-      {liveCrew && (
-        <div className="flex items-center gap-2 flex-wrap">
+      {/* One toolbar: crew layer, zoom shortcuts, my location */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {liveCrew && (
           <button
             onClick={() => setShowCrew((s) => !s)}
-            className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]"
+            className={toolBtn}
             style={{
               background: showCrew ? "rgba(16, 185, 129, 0.16)" : v("bg-2"),
               color: showCrew ? "#34d399" : v("muted"),
@@ -780,38 +915,25 @@ export function MapView({
               <path d="M2.5 16c0-2.8 2.24-4.5 5-4.5s5 1.7 5 4.5" />
               <path d="M13.5 4.2a2.75 2.75 0 010 4.6M15 11.8c1.6.6 2.5 2 2.5 4.2" />
             </svg>
-            {showCrew ? `Crew on now · ${crew.length}` : "Crew hidden"}
+            {showCrew ? `Crew on map · ${crew.length}` : "Crew hidden"}
           </button>
+        )}
 
-          {showCrew && crew.length > 0 && (
-            <button
-              onClick={fitToCrew}
-              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition active:scale-[0.98]"
-              style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
-            >
-              Zoom to crew
-            </button>
-          )}
+        {liveCrew && showCrew && crew.length > 0 && (
+          <button onClick={fitToCrew} className={toolBtn} style={plainBtn}>
+            Zoom to crew
+          </button>
+        )}
 
-          {showCrew && offSiteCount > 0 && (
-            <span
-              className="px-2 py-1 rounded-md text-[11px] font-semibold"
-              style={{
-                background: "rgba(245, 158, 11, 0.15)",
-                color: "#fbbf24",
-                border: "1px solid rgba(245, 158, 11, 0.4)",
-              }}
-            >
-              {offSiteCount} off site
-            </span>
-          )}
-        </div>
-      )}
+        {pins.length > 0 && (
+          <button onClick={fitToJobs} className={toolBtn} style={plainBtn}>
+            All jobs
+          </button>
+        )}
 
-      <div className="flex items-center gap-2">
         <button
           onClick={() => setTracking((t) => !t)}
-          className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]"
+          className={toolBtn}
           style={{
             background: tracking ? "rgba(59, 130, 246, 0.18)" : v("bg-2"),
             color: tracking ? "#60a5fa" : v("ink"),
@@ -825,20 +947,29 @@ export function MapView({
               boxShadow: tracking ? "0 0 8px #3b82f6" : "none",
             }}
           />
-          {tracking ? (myPosition ? "Tracking · live" : "Locating…") : "Show me on map"}
+          {tracking ? (myPosition ? "Tracking · live" : "Locating…") : "Show me"}
         </button>
         {tracking && myPosition && (
-          <button
-            onClick={recenterOnMe}
-            className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]"
-            style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
-          >
+          <button onClick={recenterOnMe} className={toolBtn} style={plainBtn}>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-3.5 h-3.5">
               <circle cx="10" cy="10" r="3" />
               <path d="M10 1v3M10 16v3M1 10h3M16 10h3" />
             </svg>
             Center on me
           </button>
+        )}
+
+        {liveCrew && showCrew && offSiteCount > 0 && (
+          <span
+            className="px-2 py-1 rounded-md text-[11px] font-semibold"
+            style={{
+              background: "rgba(245, 158, 11, 0.15)",
+              color: "#fbbf24",
+              border: "1px solid rgba(245, 158, 11, 0.4)",
+            }}
+          >
+            {offSiteCount} off site
+          </span>
         )}
         {trackErr && (
           <span className="text-[11px]" style={{ color: "#fca5a5" }}>{trackErr}</span>
@@ -851,79 +982,86 @@ export function MapView({
         style={{ height, background: v("bg-2"), border: `1px solid ${v("line")}` }}
       />
 
-      <div
-        className="rounded-lg px-3 py-2 text-[12px]"
-        style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
-      >
-        Tap pins to add stops. Build Route picks the smartest order.
-      </div>
+      {error && (
+        <div className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "rgba(239, 68, 68, 0.14)", color: "#fca5a5", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+          {error}
+        </div>
+      )}
 
-      {/* Who's on the clock, and whether they're actually where they claim */}
-      {liveCrew && showCrew && (
-        <div className="rounded-xl overflow-hidden" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
-          <div
-            className="px-3 py-2 text-[10px] font-semibold uppercase"
-            style={{ color: v("quiet"), letterSpacing: "0.18em", borderBottom: `1px solid ${v("line-soft")}` }}
-          >
-            On the clock now
-          </div>
-          {crew.length === 0 ? (
-            <div className="px-3 py-4 text-[12px]" style={{ color: v("muted") }}>
-              {crewLoaded ? "Nobody is clocked in right now." : "Loading crew…"}
+      {/* Pin card: what this job is, who is there, and what you can do */}
+      {focusedPin && (
+        <div
+          className="rounded-xl p-3 flex flex-col gap-2.5"
+          style={{ background: v("card"), border: "1px solid rgba(217, 119, 6, 0.40)" }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>
+                {focusedPin.project_name}
+              </div>
+              <div className="text-[12px] mt-0.5" style={{ color: v("muted") }}>
+                {[focusedPin.project_number, focusedPin.address].filter(Boolean).join(" · ")}
+              </div>
             </div>
-          ) : (
-            <div className="flex flex-col">
-              {crew.map((c) => {
-                const state = siteState(c);
-                const { initials } = nameParts(c.name);
-                return (
-                  <button
-                    key={c.daily_log_id}
-                    type="button"
-                    onClick={() => {
-                      if (!mapRef.current) return;
-                      mapRef.current.panTo({ lat: c.lat, lng: c.lng });
-                      mapRef.current.setZoom(16);
-                    }}
-                    className="px-3 py-2 flex items-center gap-2.5 text-left transition active:scale-[0.99]"
-                    style={{ borderTop: `1px solid ${v("line-soft")}` }}
-                  >
-                    <span
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
-                      style={{
-                        background: crewColor(c.profile_id),
-                        border: `2px solid ${SITE_COLOR[state]}`,
-                      }}
-                    >
-                      {initials}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
-                        {c.name}
-                      </div>
-                      <div className="text-[11px] truncate" style={{ color: v("muted") }}>
-                        {c.project_name ?? "No jobsite on the log"} · {timeAgo(c.captured_at)}
-                        {!c.is_ping && " (clock-in fix)"}
-                      </div>
-                    </div>
-                    <span
-                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                      style={{
-                        background: `${SITE_COLOR[state]}26`,
-                        color: state === "on" ? "#34d399" : state === "off" ? "#fbbf24" : v("muted"),
-                      }}
-                    >
-                      {state === "off"
-                        ? c.distance_m != null
-                          ? formatDistance(c.distance_m)
-                          : "Off site"
-                        : state === "on"
-                          ? "On site"
-                          : "No jobsite"}
-                    </span>
-                  </button>
-                );
-              })}
+            <button
+              onClick={() => setFocusedId(null)}
+              aria-label="Close"
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[15px]"
+              style={{ background: v("bg-2"), color: v("muted"), border: `1px solid ${v("line")}` }}
+            >
+              ×
+            </button>
+          </div>
+
+          {(focusedPin.liveCrew?.length ?? 0) > 0 && (
+            <div className="text-[12px]" style={{ color: "#34d399" }}>
+              On the clock here: {focusedPin.liveCrew!.join(", ")}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => toggleStop(focusedPin.project_id)}
+              className={toolBtn}
+              style={
+                selectedIds.has(focusedPin.project_id)
+                  ? { background: "rgba(16, 185, 129, 0.16)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.45)" }
+                  : { background: v("accent"), color: "#1a0f00", border: "1px solid transparent" }
+              }
+            >
+              {selectedIds.has(focusedPin.project_id) ? "In route · remove" : "Add to route"}
+            </button>
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&destination=${focusedPin.lat},${focusedPin.lng}&travelmode=driving`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={toolBtn}
+              style={plainBtn}
+            >
+              Directions
+            </a>
+            {jobLinks && (
+              <Link href={`/projects/${focusedPin.project_id}`} className={toolBtn} style={plainBtn}>
+                Open job
+              </Link>
+            )}
+          </div>
+
+          {samePlace.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px]" style={{ color: v("muted") }}>
+                Same address:
+              </span>
+              {samePlace.map((p) => (
+                <button
+                  key={p.project_id}
+                  onClick={() => setFocusedId(p.project_id)}
+                  className="px-2 py-0.5 rounded text-[11px] font-medium"
+                  style={plainBtn}
+                >
+                  {p.project_name}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -1111,9 +1249,126 @@ export function MapView({
         </div>
       )}
 
-      {error && (
-        <div className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "rgba(239, 68, 68, 0.14)", color: "#fca5a5", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
-          {error}
+      {!focusedPin && selectedPins.length === 0 && !routeResult && pins.length > 0 && (
+        <div className="px-1 text-[12px]" style={{ color: v("muted") }}>
+          {routeOnTap
+            ? "Tap pins to add stops. Build Route picks the smartest order."
+            : "Tap a pin for the job, directions, or to add it to a route."}
+        </div>
+      )}
+
+      {/* Who's on the clock, and whether they're actually where they claim */}
+      {liveCrew && (
+        <div className="rounded-xl overflow-hidden" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+          <div
+            className="px-3 py-2 text-[10px] font-semibold uppercase"
+            style={{ color: v("quiet"), letterSpacing: "0.18em", borderBottom: `1px solid ${v("line-soft")}` }}
+          >
+            On the clock now{onClockCount > 0 ? ` · ${onClockCount}` : ""}
+          </div>
+          {onClockCount === 0 ? (
+            <div className="px-3 py-4 text-[12px]" style={{ color: v("muted") }}>
+              {crewLoaded ? "Nobody is clocked in right now." : "Loading crew…"}
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {crew.map((c) => {
+                const state = siteState(c);
+                const { initials } = nameParts(c.name);
+                return (
+                  <button
+                    key={c.daily_log_id}
+                    type="button"
+                    onClick={() => {
+                      if (!mapRef.current) return;
+                      mapRef.current.panTo({ lat: c.lat, lng: c.lng });
+                      mapRef.current.setZoom(16);
+                    }}
+                    className="px-3 py-2 flex items-center gap-2.5 text-left transition active:scale-[0.99]"
+                    style={{ borderTop: `1px solid ${v("line-soft")}` }}
+                  >
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                      style={{
+                        background: crewColor(c.profile_id),
+                        border: `2px solid ${SITE_COLOR[state]}`,
+                      }}
+                    >
+                      {initials}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
+                        {c.name}
+                      </div>
+                      <div className="text-[11px] truncate" style={{ color: v("muted") }}>
+                        {c.project_name ?? "No jobsite on the log"} · {timeAgo(c.captured_at)}
+                        {!c.is_ping && " (clock-in fix)"}
+                      </div>
+                    </div>
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                      style={{
+                        background: `${SITE_COLOR[state]}26`,
+                        color: state === "on" ? "#34d399" : state === "off" ? "#fbbf24" : v("muted"),
+                      }}
+                    >
+                      {state === "off"
+                        ? c.distance_m != null
+                          ? formatDistance(c.distance_m)
+                          : "Off site"
+                        : state === "on"
+                          ? "On site"
+                          : "No jobsite"}
+                    </span>
+                    {amountById.get(c.daily_log_id) && (
+                      <span
+                        className="text-[12px] font-mono font-semibold flex-shrink-0 text-right"
+                        style={{ color: v("ink"), minWidth: 62 }}
+                      >
+                        {amountById.get(c.daily_log_id)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+              {unplotted.map((r) => (
+                <div
+                  key={r.id}
+                  className="px-3 py-2 flex items-center gap-2.5"
+                  style={{ borderTop: `1px solid ${v("line-soft")}` }}
+                >
+                  <span
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                    style={{ background: v("card"), color: v("muted"), border: `2px solid ${SITE_COLOR.unknown}` }}
+                  >
+                    {nameParts(r.name).initials}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
+                      {r.name}
+                    </div>
+                    <div className="text-[11px] truncate" style={{ color: v("muted") }}>
+                      {r.projectName ?? "No jobsite on the log"}
+                    </div>
+                  </div>
+                  <span
+                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                    style={{ background: `${SITE_COLOR.unknown}26`, color: v("muted") }}
+                  >
+                    No location
+                  </span>
+                  {r.amount && (
+                    <span
+                      className="text-[12px] font-mono font-semibold flex-shrink-0 text-right"
+                      style={{ color: v("ink"), minWidth: 62 }}
+                    >
+                      {r.amount}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
