@@ -330,7 +330,7 @@ export default async function ProjectDetailPage({
     currentEstimateId
       ? supabase
           .from("estimate_line_items")
-          .select("id, description, trade, sort_order, change_order_id")
+          .select("id, description, trade, sort_order, change_order_id, is_allowance")
           .eq("estimate_id", currentEstimateId)
           .not("is_section_header", "is", true)
           .order("sort_order", { ascending: true })
@@ -340,9 +340,12 @@ export default async function ProjectDetailPage({
               description: li.description,
               trade: li.trade ?? null,
               change_order_id: li.change_order_id ?? null,
+              is_allowance: Boolean(li.is_allowance),
             })),
           )
-      : Promise.resolve([] as { id: string; description: string; trade: string | null }[]),
+      : Promise.resolve(
+          [] as { id: string; description: string; trade: string | null; is_allowance?: boolean }[],
+        ),
 
     // Primary customer falls back to projects.customer_id when the project
     // has no join-table rows (covers anything the backfill missed).
@@ -383,6 +386,16 @@ export default async function ProjectDetailPage({
   ]);
 
   const customer = linkedCustomers[0] ?? fallbackCustomer;
+
+  // The budget view has no allowance column, so tag its rows from the
+  // estimate lines: the lifecycle panel marks which prices are allowances.
+  const allowanceLineIds = new Set(
+    estimateLineItems.filter((li) => li.is_allowance).map((li) => li.id),
+  );
+  const budgetWithAllowances = (budgetVsActual ?? []).map((row) => ({
+    ...row,
+    is_allowance: allowanceLineIds.has(row.line_item_id),
+  }));
 
   // Resolve team member names
   const pmName =
@@ -578,7 +591,7 @@ export default async function ProjectDetailPage({
           paymentsReceived={paymentsReceived ?? []}
           changeOrders={changeOrders ?? []}
           clientInvoices={clientInvoices ?? []}
-          budgetVsActual={budgetVsActual ?? []}
+          budgetVsActual={budgetWithAllowances}
           paymentMilestones={paymentMilestones ?? []}
           financials={projectFinancials}
           projectFiles={allFiles}

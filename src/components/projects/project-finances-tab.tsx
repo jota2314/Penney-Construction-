@@ -171,6 +171,8 @@ interface BudgetVsActualRow {
   section?: string | null;
   /** Set when the line came in on a change order rather than the contract. */
   change_order_id?: string | null;
+  /** The client's price on this line is an allowance, not a fixed price. */
+  is_allowance?: boolean;
 }
 
 interface SchedulePhaseRow {
@@ -1186,6 +1188,14 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       >
                         <Lock className="h-2.5 w-2.5" />
                         CLOSED
+                      </span>
+                    )}
+                    {line.is_allowance && (
+                      <span
+                        className="inline-flex shrink-0 items-center rounded-full border border-orange-500/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-500"
+                        title="Allowance: the client pays what the selection actually costs"
+                      >
+                        Allowance
                       </span>
                     )}
                     {line.trade && (
