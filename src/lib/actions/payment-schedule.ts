@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createClientInvoice } from "@/lib/actions/invoices";
+import { resolveContractTotal } from "@/lib/contracts/contract-lock";
 import { PAYMENT_PRESETS } from "@/lib/constants/payment-schedule";
 
 export interface PaymentMilestoneInput {
@@ -169,13 +170,10 @@ export async function invoiceMilestone(projectId: string, milestoneId: string) {
       .single();
     let basis = Number(project?.contract_value ?? 0);
     if (!basis) {
-      const { data: est } = await supabase
-        .from("estimates")
-        .select("total_price")
-        .eq("project_id", projectId)
-        .order("version", { ascending: false })
-        .limit(1);
-      basis = Number(est?.[0]?.total_price ?? 0) || Number(project?.estimated_value ?? 0);
+      // The contract price itself, not "the newest estimate": a later option
+      // must not set the dollar amount of a contract milestone.
+      const { total } = await resolveContractTotal(supabase, projectId);
+      basis = total || Number(project?.estimated_value ?? 0);
     }
     if (!basis) return { error: "No contract value or estimate to compute the milestone amount from" };
     amount = Math.round(((basis * Number(milestone.percent ?? 0)) / 100) * 100) / 100;

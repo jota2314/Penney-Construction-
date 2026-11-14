@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ensureJobPaymentSchedule } from "@/lib/contracts/contract-lock";
+import { ensureJobPaymentSchedule, pickContractEstimate } from "@/lib/contracts/contract-lock";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
@@ -154,7 +154,7 @@ export async function GET(request: NextRequest) {
 
     const { data: project } = await supabase
       .from("projects")
-      .select("id, name, project_number, address, city, state, zip, estimated_start_date, estimated_end_date, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, contract_additional_terms, customers(first_name, last_name, address, city, state, zip, phone)")
+      .select("id, name, project_number, address, city, state, zip, estimated_start_date, estimated_end_date, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_sent_to_client_at, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, contract_additional_terms, customers(first_name, last_name, address, city, state, zip, phone)")
       .eq("id", projectId)
       .single();
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -183,17 +183,17 @@ export async function GET(request: NextRequest) {
       estimateId = project.contract_estimate_id as string;
     }
     if (!estimateId) {
-      const { data: estimates } = await supabase
-        .from("estimates")
-        .select("id")
-        .eq("project_id", projectId)
-        // NOT restricted to approved/draft: by contract time the estimate is
-        // normally "sent" or "accepted", and filtering those out made the
-        // route 404 on exactly the jobs most likely to need a contract.
-        .not("status", "in", "(rejected,superseded)")
-        .order("version", { ascending: false })
-        .limit(1);
-      estimateId = estimates?.[0]?.id ?? null;
+      // Same pick as resolveContractTotal, so the signing page total and
+      // Exhibit A always come from one estimate. NOT restricted to
+      // approved/draft: by contract time the estimate is normally "sent" or
+      // "accepted", and filtering those out made the route 404 on exactly
+      // the jobs most likely to need a contract.
+      const picked = await pickContractEstimate(
+        supabase,
+        projectId,
+        project.contract_sent_to_client_at ? ((project.contract_estimate_id as string | null) ?? null) : null,
+      );
+      estimateId = picked?.id ?? null;
     } else {
       const { data: check } = await supabase
         .from("estimates")

@@ -11,6 +11,41 @@ export type DB = SupabaseClient<any, any, any>;
 export const cents = (v: number) => Math.round(v * 100) / 100;
 
 /**
+ * Which estimate is the contract, before the lock.
+ *
+ * Normally the highest LIVE version (superseded and rejected never count), so
+ * a re-sent revision carries the newest numbers. But once a contract has been
+ * sent, the stamped contract_estimate_id holds against later OPTIONS: an
+ * add-on option or a Phase 2 budget saved as a newer version is not the
+ * contract. That gap showed the client a Phase 2 price (Breen) and an add-on
+ * option price (Dougherty) as the contract on 11/14/26. A newer NON-option
+ * revision still wins, which is how a corrected contract gets re-sent.
+ */
+export async function pickContractEstimate(
+  supabase: DB,
+  projectId: string,
+  stampedId?: string | null,
+): Promise<{ id: string; total_price: number | null } | null> {
+  const { data: live } = await supabase
+    .from("estimates")
+    .select("id, total_price, version, is_option")
+    .eq("project_id", projectId)
+    .not("status", "in", "(superseded,rejected)")
+    .order("version", { ascending: false });
+  const rows = live ?? [];
+  if (rows.length === 0) return null;
+  const stamped = stampedId ? rows.find((r) => r.id === stampedId) : undefined;
+  if (stamped) {
+    const newerRevision = rows.find(
+      (r) => Number(r.version) > Number(stamped.version) && r.is_option !== true,
+    );
+    const pick = newerRevision ?? stamped;
+    return { id: pick.id as string, total_price: pick.total_price as number | null };
+  }
+  return { id: rows[0].id as string, total_price: rows[0].total_price as number | null };
+}
+
+/**
  * The contract price, resolved the same way /api/generate-contract resolves it
  * so the PDF, the tile, and the DB never disagree.
  *
@@ -24,7 +59,7 @@ export async function resolveContractTotal(
 ): Promise<{ total: number; locked: boolean; estimateId?: string }> {
   const { data: project } = await supabase
     .from("projects")
-    .select("contract_value, estimated_value, contract_locked_amount, contract_locked_at, contract_estimate_id")
+    .select("contract_value, estimated_value, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_sent_to_client_at")
     .eq("id", projectId)
     .single();
 
@@ -40,14 +75,13 @@ export async function resolveContractTotal(
   // revisions can no longer hijack it. Deliberately not the stamped
   // contract_estimate_id here: before the lock Jorge is still iterating, and
   // a re-send should carry the newest revision (which re-stamps the pointer).
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id, total_price")
-    .eq("project_id", projectId)
-    .not("status", "in", "(superseded,rejected)")
-    .order("version", { ascending: false })
-    .limit(1);
-  const estimate = estimates?.[0];
+  // pickContractEstimate keeps a later option from hijacking a SENT contract.
+  // Before anything is sent the stamp is not binding.
+  const estimate = await pickContractEstimate(
+    supabase,
+    projectId,
+    project?.contract_sent_to_client_at ? ((project.contract_estimate_id as string | null) ?? null) : null,
+  );
 
   if (estimate?.id) {
     // Sum the lines the client actually sees, exactly like the contract PDF.
