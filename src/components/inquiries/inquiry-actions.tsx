@@ -12,6 +12,7 @@ import { INTAKE_LABELS, INTAKE_STATUSES, isHandedOffStatus, inquiryDueDay, inqui
 
 type Action = "email" | "follow-up" | "delete";
 const fieldClass = "mt-1.5 min-h-10 w-full rounded-md border bg-background px-3 text-sm disabled:opacity-60";
+const PHONE_BUTTON = "min-h-10 min-w-0 flex-1 px-2 has-[>svg]:px-2 sm:flex-none sm:px-4 sm:has-[>svg]:px-3";
 
 export function inquiryPhoneLink(phone: string): string | null {
   const number = phone.trim().replace(/[^\d+]/g, "");
@@ -37,11 +38,12 @@ export function InquiryActions({ inquiry, assignees, senderName, readOnly, onMes
     router.refresh();
   }
   return <>
-    <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" className="min-h-10" disabled={readOnly || !email || emailBlocked} title={emailBlocked ? "Check the pending email in history before sending another." : !email ? "No email address was provided." : undefined} onClick={() => setAction("email")}><Mail aria-hidden="true" />Email client</Button>
-      {phoneLink && <Button className="min-h-10" variant="outline" asChild><a href={phoneLink}><Phone aria-hidden="true" />Call</a></Button>}
-      {!detail && <Button type="button" className="min-h-10" variant="outline" disabled={readOnly} onClick={() => setAction("follow-up")}><CalendarClock aria-hidden="true" />Follow-up</Button>}
-      <Button type="button" className="min-h-10 text-muted-foreground hover:text-destructive" variant="ghost" disabled={readOnly || emailBlocked} onClick={() => setAction("delete")}><Trash2 aria-hidden="true" />Delete</Button>
+    {/* Phone: one row of equal buttons with short labels, and Delete as an icon. Wider screens keep the full labels. */}
+    <div className="flex items-center gap-1.5 sm:flex-wrap sm:gap-2">
+      <Button type="button" className={PHONE_BUTTON} disabled={readOnly || !email || emailBlocked} title={emailBlocked ? "Check the pending email in history before sending another." : !email ? "No email address was provided." : undefined} onClick={() => setAction("email")}><Mail className="hidden sm:block" aria-hidden="true" />Email<span className="hidden sm:inline"> client</span></Button>
+      {phoneLink && <Button className={PHONE_BUTTON} variant="outline" asChild><a href={phoneLink}><Phone className="hidden sm:block" aria-hidden="true" />Call</a></Button>}
+      {!detail && <Button type="button" className={PHONE_BUTTON} variant="outline" disabled={readOnly} onClick={() => setAction("follow-up")}><CalendarClock className="hidden sm:block" aria-hidden="true" />Follow-up</Button>}
+      <Button type="button" className="min-h-10 shrink-0 text-muted-foreground hover:text-destructive" variant="ghost" disabled={readOnly || emailBlocked} onClick={() => setAction("delete")}><Trash2 aria-hidden="true" /><span className="sr-only sm:not-sr-only">Delete</span></Button>
     </div>
     {action === "email" && <InquiryEmailDialog inquiry={inquiry} senderName={senderName} onClose={() => setAction(null)} onComplete={complete} />}
     {action === "follow-up" && <InquiryFollowUpDialog inquiry={inquiry} assignees={assignees} onClose={() => setAction(null)} onComplete={complete} />}

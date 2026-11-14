@@ -25,6 +25,11 @@ export const WEBSITE_INQUIRY_EMAILS: readonly string[] = [
 export function canManageWebsiteInquiries(email: string | null | undefined): boolean {
   return !!email && WEBSITE_INQUIRY_EMAILS.includes(email.trim().toLowerCase());
 }
+/** Walkthroughs are booked on Ryan's calendar, so only his own Google sign-in can connect it. */
+export const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+export function isRyan(email: string | null | undefined): boolean {
+  return !!email && email.trim().toLowerCase() === RYAN_EMAIL;
+}
 export type Inquiry = {
   id: string; contact_name: string; description: string; created_at: string; updated_at: string;
   assignee: string | null; due_date: string | null; status: string; snooze_until: string | null;
@@ -81,6 +86,43 @@ export function inquiryText(row: Inquiry, key: string): string {
   if (key === "projectType") return heading?.[1]?.toLowerCase() || "";
   if (key === "town") return heading?.[2] || "";
   return "";
+}
+export type InquirySource = { label: string; ai: boolean };
+const AI_SOURCES: readonly [string, string][] = [["chatgpt", "ChatGPT"], ["openai", "ChatGPT"], ["perplexity", "Perplexity"],
+  ["claude", "Claude"], ["anthropic", "Claude"], ["gemini", "Gemini"], ["copilot", "Copilot"]];
+const TOLD_SOURCES: Record<string, string> = {
+  "Referral from a friend or past client": "Referral", "Saw a job sign or truck": "Job sign or truck",
+  "Google Maps": "Google Maps", "Facebook / Instagram": "Facebook / Instagram",
+};
+const SITE_SOURCES: readonly [string, string][] = [["google", "Google"], ["bing", "Bing"], ["duckduckgo", "DuckDuckGo"],
+  ["yahoo", "Yahoo"], ["facebook", "Facebook"], ["instagram", "Instagram"], ["yelp", "Yelp"], ["houzz", "Houzz"],
+  ["planandprice", "Property check"]];
+/**
+ * Where the lead came from, in a word for the card. An AI assistant the visit
+ * arrived from wins (its links carry utm_source, with no referrer). Then what
+ * the homeowner told us, then the site that sent them. Null when unknown.
+ */
+export function inquirySource(row: Pick<Inquiry, "website_inquiry">): InquirySource | null {
+  const source = row.website_inquiry?.source;
+  const read = (key: string) => {
+    const value = source && typeof source === "object" ? (source as Record<string, unknown>)[key] : null;
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+  };
+  const arrived = `${read("utmSource")} ${read("referrer")}`;
+  const ai = AI_SOURCES.find(([key]) => arrived.includes(key));
+  if (ai) return { label: ai[1], ai: true };
+  const heard = row.website_inquiry?.heardAbout;
+  const told = typeof heard === "string" ? heard.trim() : "";
+  if (/chatgpt|ai assistant/i.test(told)) return { label: "AI assistant", ai: true };
+  if (TOLD_SOURCES[told]) return { label: TOLD_SOURCES[told], ai: false };
+  const site = SITE_SOURCES.find(([key]) => arrived.includes(key));
+  if (site) return { label: site[1], ai: false };
+  return told === "Google search" ? { label: "Google", ai: false } : null;
+}
+/** A short Eastern-time day for cards, e.g. "Nov 12". */
+export function inquiryDayLabel(value: string | null): string {
+  if (!value || !Number.isFinite(Date.parse(value))) return "Not set";
+  return new Date(value).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
 }
 export function inquiryDateLabel(value: string | null): string {
   if (!value) return "Not set";

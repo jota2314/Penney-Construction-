@@ -81,6 +81,49 @@ export async function reconnectGoogle() {
   if (data.url) redirect(data.url);
 }
 
+const RYAN_CALENDAR_EMAIL = "rpenney@penneyconstructioninc.com";
+const INQUIRIES_PATH = "/command-center/inquiries";
+
+/**
+ * "Connect Google Calendar" on Website inquiries. The same Google consent as
+ * Reconnect Google, with Ryan's account preselected, and it comes back to the
+ * inquiries page, which re-checks his calendar and says what happened.
+ * Walkthrough times are read from Ryan's saved connection only, so this runs
+ * only for Ryan signed in as himself; anyone else is sent back with a note.
+ */
+export async function connectRyanCalendar() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user?.email?.trim().toLowerCase() !== RYAN_CALENDAR_EMAIL) redirect(`${INQUIRIES_PATH}?calendar=ryan-only`);
+  const origin = await getOrigin();
+  const jar = await cookies();
+  jar.set(AUTH_RETURN_PATH_COOKIE, `${INQUIRIES_PATH}?calendar=check`, {
+    httpOnly: true,
+    secure: origin.startsWith("https://"),
+    sameSite: "lax",
+    path: AUTH_RETURN_COOKIE_PATH,
+    maxAge: 600,
+  });
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${origin}/auth/callback`,
+      scopes: GOOGLE_SCOPES,
+      queryParams: {
+        access_type: "offline",
+        prompt: "consent",
+        login_hint: RYAN_CALENDAR_EMAIL,
+        // Permissions Ryan already granted stay granted if he taps Continue.
+        include_granted_scopes: "true",
+      },
+    },
+  });
+
+  if (error || !data.url) redirect(`${INQUIRIES_PATH}?calendar=start-failed`);
+  redirect(data.url);
+}
+
 export async function signOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();

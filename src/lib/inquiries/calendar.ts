@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { etDate } from "@/lib/sub-portal/et-day";
+import { etDate, todayET } from "@/lib/sub-portal/et-day";
 import {
   availabilityRange, validAvailabilityDay, validWalkthroughSlot, walkthroughSlots,
   WALKTHROUGH_BUFFER_MINUTES, WALKTHROUGH_DURATION_MINUTES, WALKTHROUGH_TIME_ZONE,
@@ -230,6 +230,44 @@ export async function getRyanAvailability(fromDay: string): Promise<RyanAvailabi
     return { ...base, connected: false, message: error instanceof CalendarBookingError ? error.message : UNAVAILABLE,
       diagnostic: error instanceof CalendarBookingError && error.diagnostic ? error.diagnostic : { stage: "availability", reason: "unknown" } };
   }
+}
+
+/**
+ * What the office should do about Ryan's calendar, for the Website inquiries banner.
+ * reconnect: no saved connection, or Google revoked it. permissions: the Calendar
+ * boxes were not ticked on Google's screen. wrong_account: another Google account
+ * was connected. setup: the app's own Google settings (Jorge). calendars: one of
+ * Ryan's selected calendars. other: unexplained, worth one more try.
+ */
+export type CalendarFix = "reconnect" | "permissions" | "wrong_account" | "setup" | "calendars" | "other";
+export type RyanCalendarConnection =
+  | { state: "connected" }
+  /** A slow or busy service. It clears on its own, so the page says nothing. */
+  | { state: "unknown" }
+  | { state: "disconnected"; fix: CalendarFix };
+
+const PASSING_REASONS: readonly CalendarDiagnosticReason[] = ["timeout", "network_error", "rateLimitExceeded", "userRateLimitExceeded",
+  "dailyLimitExceeded", "quotaExceeded", "RATE_LIMIT_EXCEEDED", "temporarily_unavailable", "server_error", "internalError", "database_error"];
+
+export function calendarFixFor(diagnostic: CalendarAvailabilityDiagnostic | undefined): CalendarFix | null {
+  const stage = diagnostic?.stage, reason = diagnostic?.reason;
+  if (!reason || reason === "ok" || PASSING_REASONS.includes(reason)) return null;
+  if (reason === "missing_refresh_token" || reason === "invalid_grant") return "reconnect";
+  if (reason === "account_mismatch") return "wrong_account";
+  if (stage === "configuration" || ["invalid_client", "unauthorized_client", "accessNotConfigured", "SERVICE_DISABLED", "missing_client_credentials"].includes(reason)) return "setup";
+  if (reason === "too_many_calendars" || (stage === "free_busy" && ["notFound", "forbidden", "groupTooBig", "tooManyCalendarsRequested"].includes(reason))) return "calendars";
+  if (["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "invalid_scope", "forbidden", "access_denied"].includes(reason)) return "permissions";
+  return "other";
+}
+
+/** The same end-to-end check the public website runs, reduced to what to do next. Never throws. */
+export async function getRyanCalendarConnection(): Promise<RyanCalendarConnection> {
+  try {
+    const availability = await getRyanAvailability(todayET());
+    if (availability.connected) return { state: "connected" };
+    const fix = calendarFixFor(availability.diagnostic);
+    return fix ? { state: "disconnected", fix } : { state: "unknown" };
+  } catch { return { state: "unknown" }; }
 }
 
 export function walkthroughEventId(bookingId: string): string {
