@@ -30,6 +30,7 @@ export const JOB_ACCOUNT_RULES: Array<[RegExp, string]> = [
   [/dumpster|waste|disposal|dump fee|porta|toilet|protection|cleanup|clean-up/i, "Other Construction Costs"],
   [/tool|equipment rental|rental/i, "Tools and Small Equipment"],
   [/fuel|gas station/i, "Fuel Expense"],
+  [/computer|laptop|printer|monitor|ipad|tablet|office suppl/i, "Office Expense"],
   [/./, "Construction Materials Costs"],
 ];
 
@@ -66,7 +67,7 @@ export function isTradeSub(
     vendorType === "subcontractor" &&
     !!trade &&
     INSTALLING_TRADES.test(trade) &&
-    !isMaterialSupplier(vendorName) &&
+    !isKnownNonSubVendor(vendorName) &&
     // Crew wages filed under the company's own name are never a sub bill.
     !/in.?house|penney construction/i.test(vendorName ?? "")
   );
@@ -88,6 +89,66 @@ export const MATERIAL_SUPPLIER_VENDORS =
 /** True when the vendor is a material dealer, so a "subcontractor" type on the row is wrong. */
 export function isMaterialSupplier(vendorName: string | null | undefined): boolean {
   return !!vendorName && MATERIAL_SUPPLIER_VENDORS.test(vendorName);
+}
+
+// Office / electronics retailers. A laptop, printer, or box of paper is
+// Office Expense whether it was booked to Overhead or (by mistake) to a job —
+// these stores never sell anything that goes INTO a house.
+export const OFFICE_VENDORS =
+  /best\s*buy|staples|office\s*depot|office\s*max|micro\s*center|newegg|b\s*&\s*h\s*photo|\buline\b|fedex\s*office|ups\s*store|apple\s*(store|\.com|inc)|^apple$|^dell(\s|$)|dell\s*(technologies|inc|\.com)/i;
+
+// Tool houses. Tools and Small Equipment on every line, job or overhead.
+export const TOOL_VENDORS =
+  /harbor\s*freight|northern\s*tool|grainger|fastenal|acme\s*tools?|tool\s*nut|milwaukee\s*(tool|electric)|\bdewalt\b|\bmakita\b|festool|tractor\s*supply/i;
+
+// SaaS and AI subscriptions as they appear on the card statement
+// ("ANTHROPIC* CLAUDE SUB", "OPENAI *CHATGPT", "GOOGLE *WORKSPACE",
+// "INTUIT * CheckS"). Software & Subscriptions — without this they fell
+// through to Office Expense because the description never says "software".
+export const SOFTWARE_VENDORS =
+  /anthropic|\bclaude\b|openai|chatgpt|google\s*\*?\s*workspace|\bmicrosoft\b|\bintuit\b|quickbooks|\bvercel\b|\badobe\b|dropbox|zoom\.us|zoom\s*video|^zoom$|\bcanva\b|godaddy|supabase|github|\bslack\b|\bnotion\b|buildertrend|procore|companycam/i;
+
+// General retailers that sell a bit of everything — job hardware one week, a
+// coffee maker the next. Typed as a supplier (never a sub), but the ACCOUNT
+// comes from the description: Materials on a job, Office on Overhead.
+export const GENERAL_RETAILERS =
+  /\bamazon\b|\bamzn\b|walmart|wal-mart|^target$|target\.com|^target\s*(store|corp|#|\d)|costco|bj.?s\s*wholesale|sam.?s\s*club/i;
+
+export type VendorKind = "materials" | "office" | "tools" | "software" | "retail";
+
+/**
+ * WHO the vendor is, from the name alone. Null when the name isn't one the
+ * books recognize — then vendor_type and the description have to decide.
+ * Order matters only where a name could match two lists; materials wins so a
+ * "Milwaukee Tool" line at a lumberyard still reads as a yard bill.
+ */
+export function knownVendorKind(vendorName: string | null | undefined): VendorKind | null {
+  if (!vendorName) return null;
+  if (isMaterialSupplier(vendorName)) return "materials";
+  if (TOOL_VENDORS.test(vendorName)) return "tools";
+  if (OFFICE_VENDORS.test(vendorName)) return "office";
+  if (SOFTWARE_VENDORS.test(vendorName)) return "software";
+  if (GENERAL_RETAILERS.test(vendorName)) return "retail";
+  return null;
+}
+
+/** True when the name says this vendor sells goods or services, not labor — never a sub. */
+export function isKnownNonSubVendor(vendorName: string | null | undefined): boolean {
+  return knownVendorKind(vendorName) !== null;
+}
+
+/** The QBO account a known vendor's bills always book to; null when the description decides. */
+export function accountForVendorKind(kind: VendorKind | null): string | null {
+  switch (kind) {
+    case "tools":
+      return "Tools and Small Equipment";
+    case "office":
+      return "Office Expense";
+    case "software":
+      return "Software & Subscriptions";
+    default:
+      return null;
+  }
 }
 
 // Gas stations and fuel brands seen in the real books (BJ'S FUEL, ExxonMobil,
@@ -129,7 +190,17 @@ export function resolveVendorType(
   given?: string | null,
 ): string {
   if (given && given !== "subcontractor") return given;
-  return isMaterialSupplier(vendorName) ? "supplier" : given || "subcontractor";
+  switch (knownVendorKind(vendorName)) {
+    case "materials":
+    case "office":
+    case "tools":
+    case "retail":
+      return "supplier";
+    case "software":
+      return "vendor";
+    default:
+      return given || "subcontractor";
+  }
 }
 
 export function accountNameFor(
@@ -155,8 +226,13 @@ export function accountNameFor(
       if (pattern.test(haystack)) return account;
     }
   }
-  // A material dealer is never a sub, even when the row is typed as one.
-  if (!isOverhead && vendorType === "subcontractor" && !isMaterialSupplier(vendorName)) {
+  // A tool house, office store, or software vendor books to its own account
+  // no matter which project the row sits on or what the description says —
+  // a Best Buy laptop on a job is still Office Expense, not Materials.
+  const kindAccount = accountForVendorKind(knownVendorKind(vendorName));
+  if (kindAccount) return kindAccount;
+  // A material dealer or retailer is never a sub, even when the row is typed as one.
+  if (!isOverhead && vendorType === "subcontractor" && !isKnownNonSubVendor(vendorName)) {
     return "Subcontractors Expense";
   }
   for (const [pattern, account] of rules) {
