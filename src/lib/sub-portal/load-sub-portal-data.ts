@@ -1088,7 +1088,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
       .in("category", SUB_FILE_CATEGORIES)
       .order("created_at", { ascending: false }),
     supabase.from("project_dismissed_files").select("file_key").eq("project_id", projectId),
-    supabase.from("project_file_overrides").select("file_key, category, display_name").eq("project_id", projectId),
+    supabase.from("project_file_overrides").select("file_key, category, display_name, superseded_at").eq("project_id", projectId),
     // His trades on the job's current estimate: scope text only; the function returns no prices.
     supabase.rpc("sub_portal_trade_scope", { p_sub_id: subId, p_project_ids: [projectId] }),
     supabase
@@ -1154,7 +1154,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
   const files = fieldVisibleFiles(
     (filesRes.data ?? []) as FileRow[],
     ((dismissedRes.data ?? []) as { file_key: string }[]).map((d) => d.file_key),
-    (overridesRes.data ?? []) as { file_key: string; category: string | null; display_name: string | null }[],
+    (overridesRes.data ?? []) as { file_key: string; category: string | null; display_name: string | null; superseded_at: string | null }[],
   ).filter((f) => !!f.storage_path && SUB_FILE_CATEGORIES.includes(f.category ?? ""));
 
   // ── quotes and bids (his own prices)

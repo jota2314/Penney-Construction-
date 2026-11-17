@@ -221,6 +221,9 @@ export async function restoreProjectFile(projectId: string, fileKey: string) {
 export type ProjectFileOverride = {
   category: string | null;
   display_name: string | null;
+  /** Set when the office marked this file "Old set": the crew, subs and the
+   * site QR page stop seeing it; the office Files tab keeps it. */
+  superseded_at?: string | null;
 };
 
 /**
@@ -233,7 +236,7 @@ export type ProjectFileOverride = {
 export async function setProjectFileOverride(
   projectId: string,
   fileKey: string,
-  patch: { category?: string; displayName?: string | null },
+  patch: { category?: string; displayName?: string | null; oldSet?: boolean },
 ) {
   if (!projectIdSchema.safeParse(projectId).success || fileKey.length === 0 || fileKey.length > 1_000) {
     return { error: "Invalid file" };
@@ -275,6 +278,8 @@ export async function setProjectFileOverride(
         file_key: fileKey,
         category,
         display_name,
+        // Only sent when toggled, so a move or rename never clears "Old set".
+        ...(patch.oldSet !== undefined ? { superseded_at: patch.oldSet ? new Date().toISOString() : null } : {}),
         updated_by: user.id,
         updated_at: new Date().toISOString(),
       },
@@ -295,7 +300,7 @@ export async function getProjectFileOverrides(
   const supabase = await createClient();
   const { data } = await supabase
     .from("project_file_overrides")
-    .select("file_key, category, display_name")
+    .select("file_key, category, display_name, superseded_at")
     .eq("project_id", projectId);
 
   const overrides: Record<string, ProjectFileOverride> = {};
@@ -303,6 +308,7 @@ export async function getProjectFileOverrides(
     overrides[row.file_key as string] = {
       category: (row.category as string | null) ?? null,
       display_name: (row.display_name as string | null) ?? null,
+      superseded_at: (row.superseded_at as string | null) ?? null,
     };
   }
   return overrides;
@@ -472,7 +478,7 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
       .eq("project_id", projectId)
       .order("created_at", { ascending: false }),
     supabase.from("project_dismissed_files").select("file_key").eq("project_id", projectId),
-    supabase.from("project_file_overrides").select("file_key, category, display_name").eq("project_id", projectId),
+    supabase.from("project_file_overrides").select("file_key, category, display_name, superseded_at").eq("project_id", projectId),
   ]);
 
   if (!project || (isField && isInternalJob(project))) return [];

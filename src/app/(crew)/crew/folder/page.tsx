@@ -28,7 +28,7 @@ export default async function CrewFolderPage() {
   const today = todayInBoston();
   const since = twoWeeksAgoIso();
 
-  const [{ data: jobs }, clockedIn, { data: recentShifts }, { data: employee }, { data: files }, { data: dismissed }] =
+  const [{ data: jobs }, clockedIn, { data: recentShifts }, { data: employee }, { data: files }, { data: dismissed }, { data: oldSets }] =
     await Promise.all([
       supabase
         .from("projects")
@@ -52,6 +52,8 @@ export default async function CrewFolderPage() {
         .in("category", [...CREW_DOC_CATEGORIES])
         .limit(3000),
       supabase.from("project_dismissed_files").select("project_id, file_key").limit(3000),
+      // Files the office marked "Old set" don't count either.
+      supabase.from("project_file_overrides").select("project_id, file_key").not("superseded_at", "is", null).limit(3000),
     ]);
 
   // Today's scheduled task on each job for THIS worker (assigned_employee_ids).
@@ -73,7 +75,7 @@ export default async function CrewFolderPage() {
   const todayTask = new Map<string, string>();
   for (const p of todayPhases) if (!todayTask.has(p.project_id)) todayTask.set(p.project_id, p.name);
   // Count only what the crew can actually open (see getCrewJobDocuments).
-  const hidden = new Set((dismissed ?? []).map((d) => `${d.project_id}:${d.file_key}`));
+  const hidden = new Set([...(dismissed ?? []), ...(oldSets ?? [])].map((d) => `${d.project_id}:${d.file_key}`));
   const visibleByJob = new Map<string, NonNullable<typeof files>>();
   for (const f of files ?? []) {
     if (!f.project_id || !isCrewVisibleFile(f)) continue;

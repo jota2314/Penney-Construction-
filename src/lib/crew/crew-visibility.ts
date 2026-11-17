@@ -126,7 +126,8 @@ export function latestRevisionsOnly<T extends { filename: string | null; categor
  * hidden, a move or rename there is what the field sees, money and paperwork
  * never come through (judged on the stored name and the rename), and only the
  * latest revision of each drawing set is left. `filename` comes back as the
- * name the office gave it. Revision sets are per job, so never pass rows from
+ * name the office gave it. Files the office marked "Old set" drop out too.
+ * Revision sets are per job, so never pass rows from
  * more than one project at once.
  */
 export function fieldVisibleFiles<
@@ -134,10 +135,13 @@ export function fieldVisibleFiles<
 >(
   rows: T[],
   dismissedKeys: Iterable<string>,
-  overrides: { file_key: string; category: string | null; display_name: string | null }[],
+  overrides: { file_key: string; category: string | null; display_name: string | null; superseded_at?: string | null }[],
 ): T[] {
   const hidden = new Set(dismissedKeys);
   const overrideByKey = new Map(overrides.map((o) => [o.file_key, o]));
+  // Jorge (11/17): the office marks an older set "Old set" on the Files tab and
+  // the field stops seeing it, even when the names don't share an R-number.
+  for (const o of overrides) if (o.superseded_at) hidden.add(o.file_key);
   const visible = rows
     .map((f) => {
       const key = fileKey(f.filename, f.size);

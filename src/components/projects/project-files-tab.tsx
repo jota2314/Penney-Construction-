@@ -34,6 +34,7 @@ import {
   X,
   Pencil,
   Check,
+  Archive,
 } from "lucide-react";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { ImageViewer } from "@/components/ui/image-viewer";
@@ -159,17 +160,24 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const [overrides, setOverrides] = useState<Record<string, ProjectFileOverride>>(fileOverrides);
   /** Card currently in rename mode: its canonical key + the draft name. */
   const [renaming, setRenaming] = useState<{ key: string; value: string } | null>(null);
+  /** File keys of drawings just uploaded, so the tab can offer to mark the
+   * sets they replace as "Old set" in one tap. */
+  const [newDrawingKeys, setNewDrawingKeys] = useState<string[] | null>(null);
   // Field photos arrive unsigned from the project page; sign them once this
   // tab is open rather than blocking the page load on 200+ Storage calls.
   const signedLogs = useSignedLogPhotos(dailyLogs);
 
   // ── Move / rename overrides (shared team-wide via project_file_overrides) ──
-  function applyOverride(fileKey: string, patch: { category?: string; displayName?: string | null }) {
+  function applyOverride(fileKey: string, patch: { category?: string; displayName?: string | null; oldSet?: boolean }) {
     setOverrides(prev => ({
       ...prev,
       [fileKey]: {
         category: patch.category !== undefined ? patch.category : prev[fileKey]?.category ?? null,
         display_name: patch.displayName !== undefined ? (patch.displayName?.trim() || null) : prev[fileKey]?.display_name ?? null,
+        superseded_at:
+          patch.oldSet !== undefined
+            ? (patch.oldSet ? new Date().toISOString() : null)
+            : prev[fileKey]?.superseded_at ?? null,
       },
     }));
     startTransition(async () => {
@@ -214,7 +222,11 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
 
       // Refresh the uploaded list once, after the batch.
       if (succeeded.length > 0) {
-        setUploadedFiles(await getProjectFiles(projectId));
+        const before = new Set(uploadedFiles.map((f) => f.id));
+        const refreshed = await getProjectFiles(projectId);
+        setUploadedFiles(refreshed);
+        const added = refreshed.filter((f) => !before.has(f.id) && f.category === "construction_drawings");
+        setNewDrawingKeys(added.length > 0 ? added.map((f) => canonicalKey(f.filename, f.size)) : null);
       }
 
       if (failed.length > 0) {
@@ -552,6 +564,17 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const visibleJobPhotos = query ? [] : jobPhotos;
   const jobPhotoUrls = visibleJobPhotos.map((p) => p.url);
 
+  // After new drawings go up: every other drawing still showing to the field.
+  const olderDrawingKeys = newDrawingKeys
+    ? (grouped.get("construction_drawings") ?? [])
+        .map((item) => canonicalKey(item.data.filename, item.data.size))
+        .filter((key) => !newDrawingKeys.includes(key) && !overrides[key]?.superseded_at)
+    : [];
+  function markOlderDrawingsOld() {
+    for (const key of olderDrawingKeys) applyOverride(key, { oldSet: true });
+    setNewDrawingKeys(null);
+  }
+
   const totalFiles = Array.from(grouped.values()).reduce((sum, g) => sum + g.length, 0);
   const shownFiles = Array.from(visible.values()).reduce((sum, g) => sum + g.length, 0);
 
@@ -572,6 +595,27 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         ? {}
         : (Object.fromEntries(activeSections.map((s) => [s, true])) as Partial<Record<SectionKey, boolean>>),
     );
+
+  // Jorge (11/17): the field must only see the latest drawings. "Old set" keeps
+  // the file here but hides it from the crew folder, sub portal and site QR.
+  const FIELD_DOC_SECTIONS = new Set<string>(["construction_drawings", "permits", "specs"]);
+  function renderOldSetToggle(section: string, filename: string, size: number) {
+    if (!FIELD_DOC_SECTIONS.has(section)) return null;
+    const key = canonicalKey(filename, size);
+    const old = Boolean(overrides[key]?.superseded_at);
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        className={`text-[10px] h-7 ${old ? "border-amber-500/40 bg-amber-500/10 text-amber-500 hover:text-amber-400" : ""}`}
+        title={old ? "Hidden from the crew and subs. Click to show it again." : "Hide from the crew and subs: a newer set replaces this one"}
+        onClick={() => applyOverride(key, { oldSet: !old })}
+        disabled={isPending}
+      >
+        <Archive className="h-3 w-3 mr-1" /> {old ? "Old set" : "Mark old"}
+      </Button>
+    );
+  }
 
   // Plain render function (not a nested component) so the rename input keeps
   // focus across parent re-renders while typing.
@@ -602,7 +646,10 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     }
     return (
       <div className="flex min-w-0 items-center gap-1.5">
-        <p className="min-w-0 truncate text-sm font-medium" title={name !== filename ? `Original file: ${filename}` : undefined}>
+        <p
+          className={`min-w-0 truncate text-sm font-medium ${overrides[key]?.superseded_at ? "text-muted-foreground line-through decoration-muted-foreground/40" : ""}`}
+          title={name !== filename ? `Original file: ${filename}` : undefined}
+        >
           {name}
         </p>
         <button
@@ -680,6 +727,21 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         >
           <span className="min-w-0 break-words">{uploadStatus.message}</span>
           <button onClick={() => setUploadStatus(null)} className="shrink-0 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
+
+      {olderDrawingKeys.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+          <span className="min-w-0 flex-1">
+            New drawings uploaded. Does this replace the older set? The crew and subs will only see the new one.
+          </span>
+          <Button size="sm" className="h-7 text-[10px]" onClick={markOlderDrawingsOld} disabled={isPending}>
+            <Archive className="h-3 w-3 mr-1" />
+            Mark {olderDrawingKeys.length} older drawing{olderDrawingKeys.length > 1 ? "s" : ""} old
+          </Button>
+          <button type="button" onClick={() => setNewDrawingKeys(null)} className="opacity-70 hover:opacity-100">
+            Keep all
+          </button>
         </div>
       )}
 
@@ -826,7 +888,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                        <div className="flex gap-1.5">
+                        <div className="flex flex-wrap gap-1.5">
                           {file.storage_path && (isPdf || isImage) && (
                             <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handlePreviewEmail(file)}>
                               <Eye className="h-3 w-3 mr-1" /> Preview
@@ -842,6 +904,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                               {extracting === file.storage_path ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />} OCR
                             </Button>
                           )}
+                          {renderOldSetToggle(cat, file.filename, file.size)}
                           <Select value={cat} onValueChange={(v) => handleRecategorizeEmail(file, v)}>
                             <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
                               <ArrowRightLeft className="h-3 w-3" />
@@ -893,7 +956,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                        <div className="flex gap-1.5">
+                        <div className="flex flex-wrap gap-1.5">
                           {(isPdf || isImage) && (
                             <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handlePreviewUploaded(file)}>
                               <Eye className="h-3 w-3 mr-1" /> Preview
@@ -902,6 +965,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                           <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handleDownloadUploaded(file)}>
                             <Download className="h-3 w-3 mr-1" /> Download
                           </Button>
+                          {renderOldSetToggle(cat, file.filename, file.size)}
                           <Select value={cat} onValueChange={(v) => handleRecategorizeUploaded(file, v as ProjectFileCategory)}>
                             <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
                               <ArrowRightLeft className="h-3 w-3" />

@@ -95,8 +95,8 @@ async function loadEligible(code: string, admin: SupabaseClient) {
       .eq("project_id", project.id).order("id").range(offset, offset + PAGE_SIZE - 1)),
     readAll<{ file_key: string }>((offset) => admin.from("project_dismissed_files")
       .select("file_key", { count: "exact" }).eq("project_id", project.id).order("file_key").range(offset, offset + PAGE_SIZE - 1)),
-    readAll<{ file_key: string; category: string | null; display_name: string | null }>((offset) => admin.from("project_file_overrides")
-      .select("file_key, category, display_name", { count: "exact" }).eq("project_id", project.id).order("file_key").range(offset, offset + PAGE_SIZE - 1)),
+    readAll<{ file_key: string; category: string | null; display_name: string | null; superseded_at: string | null }>((offset) => admin.from("project_file_overrides")
+      .select("file_key, category, display_name, superseded_at", { count: "exact" }).eq("project_id", project.id).order("file_key").range(offset, offset + PAGE_SIZE - 1)),
   ]);
   const originals = new Map(rows.map((file) => [file.id, file]));
   const files = fieldVisibleFiles(rows, dismissed.map((row) => row.file_key), overrides).filter((file) => {

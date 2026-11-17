@@ -54,7 +54,7 @@ async function loadJobAttachments(
       .eq("project_id", projectId)
       .order("created_at", { ascending: false }),
     admin.from("project_dismissed_files").select("file_key").eq("project_id", projectId),
-    admin.from("project_file_overrides").select("file_key, category, display_name").eq("project_id", projectId),
+    admin.from("project_file_overrides").select("file_key, category, display_name, superseded_at").eq("project_id", projectId),
   ]);
 
   const rank = (category: string | null) => {
