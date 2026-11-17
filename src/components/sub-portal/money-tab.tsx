@@ -75,6 +75,7 @@ export function MoneyTab({
 
   return (
     <>
+      <h1 className="text-[28px] font-extrabold leading-tight tracking-tight">Your billing</h1>
       <MoneySummary
         label="Your work on open jobs"
         amount={summary.agreed_open_jobs}
@@ -138,7 +139,7 @@ export function MoneyTab({
           <ul className="card divide-y divide-[var(--line)] overflow-hidden">
             {byJob.map((j) => (
               <li key={j.project_id}>
-                <JobMoneyRow job={j} onOpen={() => onOpenJob(j.project_id, { view: "info" })} />
+                <JobMoneyRow job={j} onOpen={() => onOpenJob(j.project_id, { view: "paperwork" })} />
               </li>
             ))}
           </ul>

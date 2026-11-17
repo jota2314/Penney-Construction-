@@ -73,6 +73,35 @@ function findElement(element, type) {
   assert.equal((await invalid.getTeamSiteJob("TOO-LONG-INVALID-CODE")).kind, "unavailable");
   assert.equal(invalid.calls.length, 0);
 
+  // The authenticated folder checks project access before requesting exactly that
+  // job's current metadata. Failed hide/override reads never reach the signer.
+  const query = { select() { return this; }, eq() { return this; }, async maybeSingle() { return { data: crewProject }; } };
+  const db = { from(table) { assert.equal(table, "projects"); return query; } };
+  let crewProject = project, metadataFails = false;
+  const loadedIds = [], signed = [];
+  const { getCrewJobDocuments } = load("src/lib/actions/project-files.ts", {
+    "@/lib/auth/get-user": { getUser: async () => field },
+    "@/lib/auth/project-document-access": {},
+    "@/lib/supabase/server": { createClient: async () => db },
+    "@/lib/crew/crew-visibility": visibility,
+    "@/lib/crew/field-project-files": { loadFieldProjectFiles: async (client, id) => {
+      assert.equal(client, db); loadedIds.push(id);
+      if (metadataFails) throw new Error("unavailable");
+      return [{ id: "drawing", filename: "Current set-R2.pdf", category: "plans", storage_path: "current.pdf" }];
+    } },
+    "@/lib/storage/signed-url-cache": { cachedSignedUrls: async (client, bucket, paths) => {
+      assert.equal(client, db); assert.equal(bucket, "project-files"); signed.push(...paths);
+      return { data: paths.map(path => ({ path, signedUrl: "https://example.test/current" })) };
+    } },
+  });
+  assert.deepEqual((await getCrewJobDocuments(project.id)).map(f => f.filename), ["Current set-R2.pdf"]);
+  metadataFails = true;
+  await assert.rejects(getCrewJobDocuments(project.id));
+  crewProject = { ...project, is_overhead: true };
+  assert.deepEqual(await getCrewJobDocuments(project.id), []);
+  assert.deepEqual(loadedIds, [project.id, project.id]);
+  assert.deepEqual(signed, ["current.pdf"]);
+
   for (const role of ["field", "owner", "precon_manager", "project_manager", "office_admin"]) {
     const check = teamLoader({ profile: { role } });
     const result = await check.getTeamSiteJob("abcdefgh");

@@ -46,6 +46,7 @@ import { ProjectFormDialog } from "./project-form-dialog";
 import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { ProjectEmailsTab } from "./project-emails-tab";
 import { ProjectSubsTab, type SubDirectoryEntry } from "./project-subs-tab";
+import type { PortalAssignment } from "./portal-assignments";
 import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
@@ -175,6 +176,7 @@ interface ProjectDetailTabsProps {
   canAssignManager: boolean;
   tradeBudgets?: ProjectTradeBudget[];
   subDirectory?: SubDirectoryEntry[];
+  portalAssignments: PortalAssignment[];
   /** Contract signing + lock state, resolved server-side (role check included). */
   contract?: ContractState;
   /** Takeoff coverage counts for the Overview documents row. */
@@ -225,6 +227,7 @@ export function ProjectDetailTabs({
   canAssignManager,
   tradeBudgets = [],
   subDirectory = [],
+  portalAssignments,
   contract,
   takeoff,
   siteQr,
@@ -642,6 +645,7 @@ export function ProjectDetailTabs({
             budgetLines={budgetVsActual.map((b) => ({ trade: b.trade, budgeted_cost: b.budgeted_cost }))}
             tradeBudgets={tradeBudgets}
             subDirectory={subDirectory}
+            portalAssignments={portalAssignments}
             invoices={invoices}
           />
         </TabsContent>

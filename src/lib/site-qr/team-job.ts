@@ -44,7 +44,6 @@ export async function getTeamSiteJob(code: string): Promise<
       latitude: project.latitude ?? null,
       longitude: project.longitude ?? null,
       scope_of_work: project.scope_of_work ?? null,
-      doc_count: 0,
       last_worked_at: null,
       today_task: null,
       clocked_in: false,

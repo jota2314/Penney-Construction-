@@ -67,8 +67,9 @@ function harness(options = {}) {
 }
 
 let current = harness();
+const fieldFiles = load("src/lib/crew/field-project-files.ts", { "@/lib/crew/crew-visibility": visibility });
 const service = load("src/lib/site-qr/guest-documents.ts", {
-  "@/lib/crew/crew-visibility": visibility,
+  "@/lib/crew/field-project-files": fieldFiles,
   "@/lib/sub-portal/site-code": site,
   "@/lib/supabase/admin": { createAdminClient: () => current.admin },
 });
@@ -81,7 +82,7 @@ async function main() {
   const moved = file(5, { filename: "Valve cut sheet.pdf", category: "other", storage_bucket: "email-attachments" });
   current = harness({ pageCap: 2, files: [
     file(1), hidden, renamedFinancial, innocentRenamed, moved,
-    file(6, { filename: "Plan-R1.pdf" }), file(7, { filename: "Plan-R2.pdf" }),
+    file(6, { filename: "Plan-R1.pdf", category: "plans" }), file(7, { filename: "Plan-R2.pdf" }),
     file(8, { project_id: OTHER }),
     ...["Design-Presentation-R2.pdf", "DesignPackage.pdf", "Fixture-Selections-R3.pdf", "Finish Selections.pdf", "FixtureFinishSelections.pdf", "Selections-Sheet.pdf", "Plumbing-$500.pdf", "Valve-USD250.pdf", "Equipment-1,250.00.pdf"].map((filename, index) => file(20 + index, { filename, category: "specs" })),
     file(30, { filename: "Manufacturer fixture specifications.pdf", category: "specs" }),

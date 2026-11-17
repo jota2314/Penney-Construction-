@@ -46,13 +46,21 @@ export function JobDocsSheet({
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loading, startLoad] = useTransition();
   const [loaded, setLoaded] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
+    let active = true;
     startLoad(async () => {
-      const rows = await getCrewJobDocuments(projectId);
-      setDocs(rows);
-      setLoaded(true);
+      try {
+        const rows = await getCrewJobDocuments(projectId);
+        if (active) { setDocs(rows); setUnavailable(false); }
+      } catch {
+        if (active) { setDocs([]); setUnavailable(true); }
+      } finally {
+        if (active) setLoaded(true);
+      }
     });
+    return () => { active = false; };
   }, [projectId]);
 
   const groups = CATEGORY_ORDER.map((cat) => ({
@@ -91,6 +99,8 @@ export function JobDocsSheet({
         <div className="flex-1 overflow-auto px-3 py-3 flex flex-col gap-3">
           {loading || !loaded ? (
             <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>Loading documents…</div>
+          ) : unavailable ? (
+            <p role="status" className="px-2 py-8 text-center text-[13px]">Current documents could not load. Reopen the folder to try again.</p>
           ) : groups.length === 0 ? (
             <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>
               No drawings or documents on this job yet.

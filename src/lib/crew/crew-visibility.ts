@@ -106,7 +106,8 @@ export function drawingRevision(filename: string | null): { series: string; revi
 export function latestRevisionsOnly<T extends { filename: string | null; category?: string | null }>(
   files: T[],
 ): T[] {
-  const seriesKey = (f: T, series: string) => `${f.category ?? ""}|${series}`;
+  // Older uploads call the Drawings category "plans". A set can span both labels.
+  const seriesKey = (f: T, series: string) => `${f.category === "plans" ? "construction_drawings" : (f.category ?? "")}|${series}`;
   const top = new Map<string, number>();
   for (const f of files) {
     const rev = drawingRevision(f.filename);

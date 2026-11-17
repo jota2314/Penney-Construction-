@@ -53,6 +53,7 @@ export function SubPortalApp() {
         if (res.status === 401) {
           // Nobody signed in: hold what's on the phone for whoever signs in next.
           setSubOutboxOwner(null);
+          setData(null);
           const here = `${window.location.pathname}${window.location.search}`;
           router.replace(here.startsWith("/sub/portal?") ? `/sub?next=${encodeURIComponent(here)}` : "/sub");
           return;
@@ -104,7 +105,7 @@ export function SubPortalApp() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  if (data) return <SubPortalView data={data} onReload={reload} />;
+  if (data) return <SubPortalView key={data.sub.sub_id} data={data} onReload={reload} refreshError={error} />;
 
   return (
     <PortalTheme variant="field">

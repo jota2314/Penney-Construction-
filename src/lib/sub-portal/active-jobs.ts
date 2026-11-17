@@ -37,6 +37,7 @@ export interface SubJobProject {
   id: string;
   name: string;
   project_number: string;
+  project_type: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
@@ -46,7 +47,7 @@ export interface SubJobProject {
   is_overhead: boolean | null;
 }
 
-export const SUB_JOB_PROJECT_COLUMNS = "id, name, project_number, address, city, state, zip, status, assigned_pm, is_overhead";
+export const SUB_JOB_PROJECT_COLUMNS = "id, name, project_number, project_type, address, city, state, zip, status, assigned_pm, is_overhead";
 
 /** His assigned schedule_phases rows (never `notes`). */
 export interface SubPhaseRow {

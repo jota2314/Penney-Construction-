@@ -2,13 +2,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getMyClockedInJob } from "@/lib/actions/daily-logs";
 import { CrewJobFolder, type FolderJob } from "@/components/crew/crew-job-folder";
-import {
-  CREW_DOC_CATEGORIES,
-  fileKey,
-  isCrewVisibleFile,
-  isInternalJob,
-  latestRevisionsOnly,
-} from "@/lib/crew/crew-visibility";
+import { isInternalJob } from "@/lib/crew/crew-visibility";
 
 function todayInBoston(): string {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }))
@@ -28,7 +22,7 @@ export default async function CrewFolderPage() {
   const today = todayInBoston();
   const since = twoWeeksAgoIso();
 
-  const [{ data: jobs }, clockedIn, { data: recentShifts }, { data: employee }, { data: files }, { data: dismissed }, { data: oldSets }] =
+  const [{ data: jobs }, clockedIn, { data: recentShifts }, { data: employee }] =
     await Promise.all([
       supabase
         .from("projects")
@@ -46,14 +40,6 @@ export default async function CrewFolderPage() {
         .order("started_at", { ascending: false })
         .limit(300),
       supabase.from("employees").select("id").eq("profile_id", userId).maybeSingle(),
-      supabase
-        .from("project_files")
-        .select("project_id, category, filename, mime_type, size")
-        .in("category", [...CREW_DOC_CATEGORIES])
-        .limit(3000),
-      supabase.from("project_dismissed_files").select("project_id, file_key").limit(3000),
-      // Files the office marked "Old set" don't count either.
-      supabase.from("project_file_overrides").select("project_id, file_key").not("superseded_at", "is", null).limit(3000),
     ]);
 
   // Today's scheduled task on each job for THIS worker (assigned_employee_ids).
@@ -74,19 +60,6 @@ export default async function CrewFolderPage() {
   }
   const todayTask = new Map<string, string>();
   for (const p of todayPhases) if (!todayTask.has(p.project_id)) todayTask.set(p.project_id, p.name);
-  // Count only what the crew can actually open (see getCrewJobDocuments).
-  const hidden = new Set([...(dismissed ?? []), ...(oldSets ?? [])].map((d) => `${d.project_id}:${d.file_key}`));
-  const visibleByJob = new Map<string, NonNullable<typeof files>>();
-  for (const f of files ?? []) {
-    if (!f.project_id || !isCrewVisibleFile(f)) continue;
-    if (hidden.has(`${f.project_id}:${fileKey(f.filename, f.size)}`)) continue;
-    visibleByJob.set(f.project_id, [...(visibleByJob.get(f.project_id) ?? []), f]);
-  }
-  const docCount = new Map<string, number>();
-  for (const [projectId, list] of visibleByJob) {
-    docCount.set(projectId, latestRevisionsOnly(list).length);
-  }
-
   // Office and warehouse jobs exist for clocking time, not jobsites — the crew
   // still clocks into Shop, but none of them belong in the folder.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,7 +74,6 @@ export default async function CrewFolderPage() {
     latitude: j.latitude ?? null,
     longitude: j.longitude ?? null,
     scope_of_work: j.scope_of_work ?? null,
-    doc_count: docCount.get(j.id) ?? 0,
     last_worked_at: lastWorked.get(j.id) ?? null,
     today_task: todayTask.get(j.id) ?? null,
     clocked_in: clockedIn?.id === j.id,

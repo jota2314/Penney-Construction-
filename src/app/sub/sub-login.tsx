@@ -155,7 +155,7 @@ export function SubLogin({ loomUrl }: { loomUrl: string | null }) {
               className={`${INPUT} tracking-[0.4em]`}
             />
             <p className="mt-1.5 text-[15px] text-[var(--muted)]">
-              4 digits from the office. Tap Show to check what you typed.
+              Enter the 4–6 digit PIN from the office.
             </p>
           </div>
 

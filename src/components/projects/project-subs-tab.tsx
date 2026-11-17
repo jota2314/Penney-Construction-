@@ -61,6 +61,7 @@ import { QuoteSplitDialog } from "./quote-split-dialog";
 import { QuoteScanDialog } from "./quote-scan-dialog";
 import { QuoteCoverageView } from "@/components/estimates/quote-coverage-view";
 import { ProjectWorkOrders } from "./work-order-sheet";
+import { PortalAssignments, type PortalAssignment } from "./portal-assignments";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ interface ProjectSubsTabProps {
   budgetLines: { trade: string | null; budgeted_cost: number }[];
   tradeBudgets: ProjectTradeBudget[];
   subDirectory: SubDirectoryEntry[];
+  portalAssignments: PortalAssignment[];
   invoices: Invoice[];
 }
 
@@ -128,6 +130,7 @@ export function ProjectSubsTab({
   budgetLines,
   tradeBudgets: initialTradeBudgets,
   subDirectory,
+  portalAssignments,
   invoices: initialInvoices,
 }: ProjectSubsTabProps) {
   const [quotes, setQuotes] = useState(initialQuotes);
@@ -1125,6 +1128,7 @@ export function ProjectSubsTab({
 
       {/* Work orders: drafted from awards here, signed by Ryan, signed by the sub in his portal */}
       <ProjectWorkOrders projectId={projectId} subDirectory={subDirectory} requestDraft={workOrderRequest} />
+      <PortalAssignments projectId={projectId} assignments={portalAssignments} />
 
       {/* Quotes that still need a trade */}
       {noTradeQuotes.length > 0 && (

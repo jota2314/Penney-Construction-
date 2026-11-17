@@ -2,15 +2,12 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fieldVisibleFiles } from "@/lib/crew/crew-visibility";
+import { loadFieldProjectFiles } from "@/lib/crew/field-project-files";
 import { isSiteOpen } from "@/lib/sub-portal/site-code";
 
 const SITE_CODE = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PAGE_SIZE = 1000;
-const MAX_METADATA_ROWS = 50_000;
 const SIGNED_DOCUMENT_SECONDS = 5 * 60;
-const BUCKETS = new Set(["project-files", "email-attachments"]);
 const DOC_CATEGORIES = new Set(["construction_drawings", "plans", "specs"]);
 const IMAGE_EXT = /\.(?:jpe?g|png|webp|avif|gif|bmp|tiff?|heic|heif)$/i;
 const IMAGE_MIME = /^image\/(?:jpeg|png|webp|avif|gif|bmp|tiff|heic|heif)$/i;
@@ -33,25 +30,6 @@ export type GuestJobDocuments = {
 };
 
 type Project = { id: string; name: string; project_number: string; city: string | null; status: string; is_overhead: boolean | null };
-type FileRow = {
-  id: string; project_id: string; filename: string | null; category: string | null;
-  size: number | null; mime_type: string | null; storage_path: string | null; storage_bucket: string | null;
-};
-type QueryResult<T> = { data: T[] | null; error: { message: string } | null; count: number | null };
-
-/** Metadata must be complete: a truncated hide/revision list could expose a file. */
-async function readAll<T>(query: (offset: number) => PromiseLike<QueryResult<T>>): Promise<T[]> {
-  const rows: T[] = [];
-  while (rows.length < MAX_METADATA_ROWS) {
-    const page = await query(rows.length);
-    if (page.error || !page.data || page.count === null) throw unavailable();
-    rows.push(...page.data);
-    if (rows.length >= page.count) return rows;
-    if (!page.data.length) throw unavailable();
-  }
-  throw unavailable();
-}
-
 function unavailable() {
   return new GuestDocumentsError("Job documents couldn't load. Please try again.");
 }
@@ -70,9 +48,8 @@ function safeDocumentName(name: string | null): name is string {
   return !!name?.trim() && !PRICE_NAME.test(name) && !isClientPackage(name);
 }
 
-function supportedFile(file: FileRow): boolean {
-  const name = file.filename ?? "";
-  const mime = file.mime_type?.split(";")[0].trim().toLowerCase();
+function supportedFile(name: string, mimeType: string | null): boolean {
+  const mime = mimeType?.split(";")[0].trim().toLowerCase();
   const generic = !mime || mime === "application/octet-stream";
   return /\.pdf$/i.test(name) ? generic || mime === "application/pdf" : IMAGE_EXT.test(name) && (generic || IMAGE_MIME.test(mime ?? ""));
 }
@@ -87,28 +64,12 @@ async function loadEligible(code: string, admin: SupabaseClient) {
   const project = data as Project | null;
   if (!project || !isSiteOpen(project)) throw missing();
 
-  // Do not prefilter categories: office overrides may move a drawing, and the
-  // complete job list is needed to suppress superseded revisions on every open.
-  const [rows, dismissed, overrides] = await Promise.all([
-    readAll<FileRow>((offset) => admin.from("project_files")
-      .select("id, project_id, filename, category, mime_type, size, storage_path, storage_bucket", { count: "exact" })
-      .eq("project_id", project.id).order("id").range(offset, offset + PAGE_SIZE - 1)),
-    readAll<{ file_key: string }>((offset) => admin.from("project_dismissed_files")
-      .select("file_key", { count: "exact" }).eq("project_id", project.id).order("file_key").range(offset, offset + PAGE_SIZE - 1)),
-    readAll<{ file_key: string; category: string | null; display_name: string | null; superseded_at: string | null }>((offset) => admin.from("project_file_overrides")
-      .select("file_key, category, display_name, superseded_at", { count: "exact" }).eq("project_id", project.id).order("file_key").range(offset, offset + PAGE_SIZE - 1)),
-  ]);
-  const originals = new Map(rows.map((file) => [file.id, file]));
-  const files = fieldVisibleFiles(rows, dismissed.map((row) => row.file_key), overrides).filter((file) => {
-    const original = originals.get(file.id)!;
-    return file.project_id === project.id && DOC_CATEGORIES.has(file.category ?? "") &&
-      safeDocumentName(original.filename) && safeDocumentName(file.filename) &&
-      supportedFile(original) && supportedFile(file) &&
-      BUCKETS.has(file.storage_bucket ?? "project-files") &&
-      !!file.storage_path && file.storage_path.length <= 1000 &&
-      !/[\\\x00-\x1f]/.test(file.storage_path) &&
-      !file.storage_path.startsWith("/") && !file.storage_path.split("/").some((part) => part === ".." || part === ".");
-  });
+  const visible = await loadFieldProjectFiles(admin, project.id);
+  const files = visible.filter((file) =>
+    DOC_CATEGORIES.has(file.category ?? "") &&
+    safeDocumentName(file.original_filename) && safeDocumentName(file.filename) &&
+    supportedFile(file.original_filename, file.mime_type) && supportedFile(file.filename, file.mime_type),
+  );
   return { project, files };
 }
 

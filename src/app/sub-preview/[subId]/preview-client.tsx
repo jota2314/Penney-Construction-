@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PortalTheme } from "@/components/portal-kit";
 import { SubPortalView } from "@/components/sub-portal/sub-portal-view";
 import type { SubHomePayload } from "@/lib/sub-portal/payload";
@@ -14,23 +14,33 @@ import type { SubHomePayload } from "@/lib/sub-portal/payload";
 export function SubPreviewClient({ subId }: { subId: string }) {
   const [data, setData] = useState<SubHomePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const request = useRef(0);
 
   const load = useCallback(() => {
-    fetch(`/api/sub-portal/preview-data?subId=${encodeURIComponent(subId)}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: SubHomePayload | { error?: string }) => {
-        if ("error" in d && d.error) {
-          setError(d.error);
-        } else {
-          setError(null);
-          setData(d as SubHomePayload);
-        }
-      })
-      .catch(() => setError("Couldn't load the preview. Check your connection and refresh."));
+    const sequence = ++request.current;
+    return fetch(`/api/sub-portal/preview-data?subId=${encodeURIComponent(subId)}`, { cache: "no-store" }).then(async (res) => {
+      const body = await res.json().catch(() => null);
+      if (sequence !== request.current) return;
+      if (!res.ok) {
+        if ([401, 403, 404].includes(res.status)) setData(null);
+        setError(body?.error || "Couldn’t load the preview. Try again.");
+        return;
+      }
+      if (body?.mode !== "preview" || body?.sub?.sub_id !== subId) {
+        setData(null);
+        setError("Couldn’t verify this company’s preview. Try again.");
+        return;
+      }
+      setError(null);
+      setData(body);
+    }).catch(() => {
+      if (sequence === request.current) setError("Couldn’t load the preview. Check your connection and try again.");
+    });
   }, [subId]);
 
   useEffect(() => {
-    load();
+    void load();
+    return () => { request.current += 1; };
   }, [load]);
 
   if (!data) {
@@ -38,7 +48,10 @@ export function SubPreviewClient({ subId }: { subId: string }) {
       <PortalTheme variant="field">
         <div className="flex min-h-screen items-center justify-center p-8 text-center text-[16px] font-semibold">
           {error ? (
-            <p style={{ color: "var(--accent-dark)" }}>{error}</p>
+            <div>
+              <p role="alert" style={{ color: "var(--accent-dark)" }}>{error}</p>
+              <button type="button" className="btn btn-ghost mt-3" onClick={() => void load()}>Try again</button>
+            </div>
           ) : (
             <p style={{ color: "var(--muted)" }}>Loading preview…</p>
           )}
@@ -46,5 +59,5 @@ export function SubPreviewClient({ subId }: { subId: string }) {
       </PortalTheme>
     );
   }
-  return <SubPortalView data={data} onReload={load} />;
+  return <SubPortalView data={data} onReload={load} refreshError={error} />;
 }

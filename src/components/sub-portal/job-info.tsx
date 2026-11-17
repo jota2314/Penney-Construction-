@@ -1,30 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Empty, MoneySummary, TimelineList, TimelineRow, type TimelineChip } from "@/components/portal-kit";
+import { Empty, MoneySummary } from "@/components/portal-kit";
 import { roundCents } from "@/lib/money";
 import { fmtDate, fmtMoney, fmtShort } from "@/lib/portal-kit/format";
 import { SUB_QUOTE_STAGE_LABEL } from "@/lib/sub-portal/statuses";
 import type {
   SubAgreedAmount,
   SubAgreementSummary,
-  SubDatePhase,
   SubInvoiceGroup,
   SubJobPayload,
   SubQuote,
-  SubSelection,
 } from "@/lib/sub-portal/payload";
 import { SendInvoiceSheet } from "./send-invoice-sheet";
 import { SignSheet } from "./sign-sheet";
 
-/**
- * A job's Job info tab (plan §2.3 S3): his work order(s) with Review & sign,
- * what was agreed, the scope for his trade, his dates (read-only; he answers
- * them on the Dates tab), his quotes, the homeowner's selections, and his
- * billing on this job. All of it is his own: the server never sends client
- * prices, allowances or other subs' numbers. Money is always to the cent.
- */
-
+/** The company's work orders, quotes and billing for this job. */
 const SECTION_TITLE = "px-1 pb-2 pt-1 text-[18px] font-extrabold";
 
 function Pill({ label, color }: { label: string; color: string }) {
@@ -43,7 +34,7 @@ const GREY = "#5F6763";
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ") : s);
 
-export function JobInfo({
+export function JobPaperwork({
   data,
   preview,
   agreementsEnabled,
@@ -90,39 +81,6 @@ export function JobInfo({
 
       <AgreedLine agreed={data.agreed} />
 
-      <section>
-        <h3 className={SECTION_TITLE}>Scope for your trade</h3>
-        {data.scope.length === 0 ? (
-          <Empty>No scope written up for your trade yet. Call Penney with questions.</Empty>
-        ) : (
-          <ul className="card divide-y divide-[var(--line)]">
-            {data.scope.map((s, i) => (
-              <li key={`${s.trade}-${i}`} className="p-4">
-                <p className="label">{cap(s.trade)}</p>
-                <p className="text-[17px] font-bold leading-snug">{s.description}</p>
-                {s.scope && <p className="mt-1 whitespace-pre-line text-[16px] text-[var(--muted)]">{s.scope}</p>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section>
-        <h3 className={SECTION_TITLE}>Your dates on this job</h3>
-        {data.dates.length === 0 ? (
-          <Empty>No dates for you on this job yet.</Empty>
-        ) : (
-          <>
-            <TimelineList>
-              {data.dates.map((p) => (
-                <DateRow key={p.id} phase={p} />
-              ))}
-            </TimelineList>
-            <p className="mt-2 px-1 text-[15px] text-[var(--muted)]">Confirm or change dates on the Dates tab.</p>
-          </>
-        )}
-      </section>
-
       {data.quotes.length > 0 && (
         <section>
           <h3 className={SECTION_TITLE}>Your prices on this job</h3>
@@ -133,19 +91,6 @@ export function JobInfo({
           </ul>
         </section>
       )}
-
-      <section>
-        <h3 className={SECTION_TITLE}>Fixtures & selections</h3>
-        {data.selections.length === 0 ? (
-          <Empty>No selections posted for this job yet.</Empty>
-        ) : (
-          <ul className="card divide-y divide-[var(--line)]">
-            {data.selections.map((s) => (
-              <SelectionRow key={s.id} selection={s} />
-            ))}
-          </ul>
-        )}
-      </section>
 
       {data.billing && (
         <section>
@@ -302,33 +247,6 @@ function AgreedLine({ agreed }: { agreed: SubAgreedAmount }) {
 
 // ───────────────────────────────────────── dates, quotes, selections
 
-function dateChip(p: SubDatePhase): TimelineChip {
-  if (p.status === "completed") return "done";
-  if (p.sub_response === "declined") return "declined";
-  if (p.needs_answer) return "answer";
-  if (p.status === "in_progress") return "now";
-  return p.firm ? "confirmed" : "penciled";
-}
-
-function DateRow({ phase: p }: { phase: SubDatePhase }) {
-  return (
-    <TimelineRow
-      name={p.name}
-      description={p.description}
-      shape={p.event_type === "inspection" ? "diamond" : "dot"}
-      chip={dateChip(p)}
-      filled={p.status === "completed" || p.status === "in_progress"}
-      highlight={p.status === "in_progress"}
-      muted={p.bucket === "past"}
-      start={p.start_date}
-      end={p.end_date}
-      firm={p.firm}
-    >
-      {p.sub_response_note && <p className="mt-1 text-[15px] text-[var(--muted)]">You said: {p.sub_response_note}</p>}
-    </TimelineRow>
-  );
-}
-
 const STAGE_COLOR: Record<SubQuote["stage"], string> = {
   awarded: GREEN,
   under_review: INK,
@@ -349,36 +267,12 @@ function QuoteRow({ quote: q }: { quote: SubQuote }) {
         <Pill label={SUB_QUOTE_STAGE_LABEL[q.stage]} color={STAGE_COLOR[q.stage]} />
       </div>
       {q.amount != null && <p className="mt-2 text-[17px] font-extrabold">{fmtMoney(q.amount)}</p>}
-      {q.scope && <p className="clamp3 mt-1 whitespace-pre-line text-[15px] text-[var(--muted)]">{q.scope}</p>}
+      {q.scope && <p className="mt-1 whitespace-pre-line text-[15px] text-[var(--muted)]">{q.scope}</p>}
       {q.pdf_url && (
         <a href={q.pdf_url} target="_blank" rel="noreferrer" className="btn btn-ghost mt-3">
           Open your PDF ›
         </a>
       )}
-    </li>
-  );
-}
-
-const SELECTION_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "Not picked yet", color: GREY },
-  selected: { label: "Picked", color: GREEN },
-  ordered: { label: "Ordered", color: INK },
-  delivered: { label: "Delivered", color: GREEN },
-  installed: { label: "Installed", color: GREEN },
-};
-
-function SelectionRow({ selection: s }: { selection: SubSelection }) {
-  const pill = SELECTION_STATUS[s.status] ?? { label: cap(s.status || "pending"), color: GREY };
-  return (
-    <li className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="label">{s.category}</p>
-          <p className="text-[17px] font-bold leading-snug">{s.selected_value || s.description || "To be picked"}</p>
-          {s.selected_value && s.description && <p className="text-[15px] text-[var(--muted)]">{s.description}</p>}
-        </div>
-        <Pill label={pill.label} color={pill.color} />
-      </div>
     </li>
   );
 }

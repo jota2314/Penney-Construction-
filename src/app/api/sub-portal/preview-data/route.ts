@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth/get-user";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadSubHome, loadSubJob } from "@/lib/sub-portal/load-sub-portal-data";
+import { loadSubHome, loadSubJob, loadSubJobPosts } from "@/lib/sub-portal/load-sub-portal-data";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -31,7 +31,8 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const job = (params.get("job") || "").trim();
   if (job) {
-    const result = await loadSubJob({ subId, projectId: job, mode: "preview", cursor: params.get("cursor"), supabase });
+    const load = params.get("part") === "posts" ? loadSubJobPosts : loadSubJob;
+    const result = await load({ subId, projectId: job, mode: "preview", cursor: params.get("cursor"), supabase });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json(result.data, { headers: { "Cache-Control": "no-store" } });
   }

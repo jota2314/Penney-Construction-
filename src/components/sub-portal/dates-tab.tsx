@@ -46,6 +46,7 @@ const DATE_INPUT = `${INPUT} min-w-0 appearance-none text-left [&::-webkit-date-
 
 export function DatesTab({
   dates,
+  onOpenJob,
   today,
   preview,
   officePhone,
@@ -54,6 +55,7 @@ export function DatesTab({
   onFocused,
 }: {
   dates: SubDatesPayload;
+  onOpenJob: (projectId: string) => void;
   /** The server's ET day. */
   today: DayString;
   preview: boolean;
@@ -90,8 +92,10 @@ export function DatesTab({
     void rowAction.run(key, body, { success, onSuccess: () => onReload() });
   };
 
+  const activeJobIds = new Set(dates.can_propose_on.map((j) => j.project_id));
   const rowProps = (p: SubDatePhase) => ({
     p,
+    onOpenJob: activeJobIds.has(p.project_id) ? () => onOpenJob(p.project_id) : undefined,
     today,
     action: rowAction,
     showNotice: noticeAt === p.id,
@@ -109,6 +113,7 @@ export function DatesTab({
 
   return (
     <>
+      <h1 className="text-[28px] font-extrabold leading-tight tracking-tight">Your schedule</h1>
       {noticeAt === "top" && <PortalNotice notice={rowAction.notice} onDismiss={rowAction.clearNotice} />}
       {!adding && <PortalNotice notice={sheetAction.notice} onDismiss={sheetAction.clearNotice} />}
 
@@ -132,7 +137,7 @@ export function DatesTab({
       )}
 
       {dates.phases.length === 0 && (
-        <Empty>Nothing on your schedule yet. Add your own dates, or Penney adds you when your next work is booked.</Empty>
+        <Empty>{dates.can_propose_on.length ? "No work dates yet. Add your dates or check back when Penney schedules your work." : "No work dates yet. Scheduled work will appear here once Penney assigns you to a job."}</Empty>
       )}
 
       {BUCKETS.map(({ key, label }) => {
@@ -196,6 +201,7 @@ export function DatesTab({
 /** The chip on a phase: what state it's in, from his side. */
 function chipFor(p: SubDatePhase, now: boolean): TimelineChip {
   if (p.status === "completed") return "done";
+  if (p.status === "on_hold") return { label: "On hold", color: "#7A5A1E" };
   if (p.needs_answer) return "answer";
   if (p.sub_response === "declined" && !p.mine) return "declined";
   if (!p.firm) return "penciled";
@@ -207,6 +213,7 @@ function chipFor(p: SubDatePhase, now: boolean): TimelineChip {
 /** One phase on the timeline, with Confirm / Can't make it only when Penney is waiting on him. */
 function PhaseRow({
   p,
+  onOpenJob,
   today,
   action,
   showNotice,
@@ -215,6 +222,7 @@ function PhaseRow({
   onCancel,
 }: {
   p: SubDatePhase;
+  onOpenJob?: () => void;
   today: DayString;
   action: PortalAction;
   showNotice: boolean;
@@ -227,7 +235,7 @@ function PhaseRow({
   const [askCancel, setAskCancel] = useState(false);
 
   const done = p.status === "completed";
-  const now = !done && p.bucket !== "past" && (p.status === "in_progress" || coversDay(p.start_date, p.end_date, today));
+  const now = !done && p.status !== "on_hold" && p.bucket !== "past" && (p.status === "in_progress" || coversDay(p.start_date, p.end_date, today));
   const canAnswer = p.needs_answer && !done;
   const canCancel = p.mine && !done && p.bucket !== "past";
   const off = !action.enabled || action.busy;
@@ -316,7 +324,12 @@ function PhaseRow({
       {/* Anchor for "Answer" on Today, which scrolls here. */}
       <span id={`phase-${p.id}`} />
       {!p.firm && !done && <p className="mt-1 text-[15px] font-semibold">Penciled in · Penney will confirm</p>}
-      {p.description && <p className="clamp3 mt-1 text-[15px] text-[var(--muted)]">{p.description}</p>}
+      {p.description && <p className="mt-1 whitespace-pre-line break-words text-[15px] text-[var(--muted)]">{p.description}</p>}
+      {onOpenJob && (
+        <button type="button" onClick={onOpenJob} aria-label={`Open job brief for ${p.project_name}`} className="inline-flex min-h-11 items-center pr-3 text-[15px] font-bold text-[var(--accent-dark)] underline underline-offset-4">
+          Open job brief
+        </button>
+      )}
       {answer && (
         <p className="mt-1 text-[15px] font-semibold">
           {answer}

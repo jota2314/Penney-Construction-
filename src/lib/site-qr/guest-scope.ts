@@ -12,7 +12,7 @@ export type GuestJobScope = {
   unavailableReason: string | null;
 };
 
-type ScopeProject = {
+export type ScopeProject = {
   id: string; name: string; project_number: string | null; city: string | null;
   status: string; is_overhead: boolean | null; contract_estimate_id: string | null;
   contract_client_signed_at: string | null; contract_locked_at: string | null;
@@ -157,6 +157,11 @@ export async function loadGuestJobScope(admin: SupabaseClient, rawCode: string):
   const project = data as ScopeProject | null;
   if (!project || !isSiteOpen({ ...project, project_number: project.project_number || "" })) return null;
 
+  return loadApprovedFieldScope(admin, project);
+}
+
+/** Caller has verified the current site code or the sub's active job membership. */
+export async function loadApprovedFieldScope(admin: SupabaseClient, project: ScopeProject): Promise<GuestJobScope> {
   let estimate: ScopeEstimate | null = null;
   if (project.contract_estimate_id) {
     const { data: candidate, error: pointerError } = await admin.from("estimates").select(ESTIMATE_FIELDS)

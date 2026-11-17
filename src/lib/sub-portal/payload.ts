@@ -21,6 +21,7 @@
 // Type-only, so this file still has no runtime code. statuses.ts owns these
 // unions; they're re-exported so the UI needs one import.
 import type { SubAgreementStatus, SubQuoteStage, SubTemplateStatus, SubVisitSource } from "./statuses";
+import type { GuestJobScope } from "@/lib/site-qr/guest-scope";
 export type { SubAgreementStatus, SubQuoteStage, SubTemplateStatus, SubVisitSource };
 
 /** "YYYY-MM-DD", an America/New_York calendar day. */
@@ -111,6 +112,7 @@ export interface SubJobRow {
   project_id: string;
   name: string;
   project_number: string;
+  project_type: string | null;
   /** City only ("Peabody"); null when unknown. */
   town: string | null;
   /** One-line street address, "12 Elm St, Peabody, MA". */
@@ -417,6 +419,7 @@ export interface SubJobHeader {
   project_id: string;
   name: string;
   project_number: string;
+  project_type: string | null;
   address: string;
   town: string | null;
   status: string;
@@ -573,6 +576,12 @@ export interface SubJobPayload {
   can_post: boolean;
   posts: SubPostsPage;
   files: SubDocumentGroup[];
+  /** True when the complete set of current documents could not be verified or opened. */
+  files_unavailable: boolean;
+  /** The field scope on this company's active job assignment. */
+  assignment_summary: string | null;
+  /** Published, price-free project scope. Billing history alone does not grant this overview. */
+  approved_scope: Omit<GuestJobScope, "project"> | null;
   scope: SubScopeLine[];
   inspections: SubInspection[];
   selections: SubSelection[];

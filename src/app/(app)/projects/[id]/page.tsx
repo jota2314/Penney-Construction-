@@ -100,13 +100,12 @@ export default async function ProjectDetailPage({
       .order("start_date"),
     supabase
       .from("project_subcontractors")
-      .select("*, subcontractor:subcontractors(company_name)")
+      .select("id, subcontractor_id, status, contract_amount, scope_summary, created_at, updated_at, subcontractor:subcontractors(company_name)")
       .eq("project_id", id)
       // A QR check-in's 'visit_only' link isn't an award; the feed below says "assigned".
       // (status is NOT NULL, default 'active', so neq drops no legacy rows.)
       .neq("status", "visit_only")
-      .order("created_at", { ascending: false })
-      .limit(10),
+      .order("created_at", { ascending: false }),
     supabase
       .from("inbox_emails")
       .select("id, gmail_message_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, attachments")
@@ -455,7 +454,7 @@ export default async function ProjectDetailPage({
     });
   }
 
-  for (const ps of projectSubs ?? []) {
+  for (const ps of (projectSubs ?? []).slice(0, 10)) {
     const sub = Array.isArray(ps.subcontractor)
       ? ps.subcontractor[0]
       : ps.subcontractor;
@@ -569,6 +568,13 @@ export default async function ProjectDetailPage({
     }
   }
   const allFiles = Array.from(fileByKey.values());
+  const portalAssignments = canManageDocuments && isSiteOpen(project)
+    ? (projectSubs ?? []).flatMap(row => {
+        const company = (Array.isArray(row.subcontractor) ? row.subcontractor[0] : row.subcontractor)?.company_name;
+        if (row.status !== "active" || !company) return [];
+        return [{ id: row.id, company, scope: row.scope_summary, updatedAt: row.updated_at }];
+      }).sort((a, b) => a.company.localeCompare(b.company))
+    : [];
 
   return (
     <>
@@ -614,6 +620,7 @@ export default async function ProjectDetailPage({
           canAssignManager={canAssignProjectManager(user.profile?.role)}
           tradeBudgets={tradeBudgets ?? []}
           subDirectory={subDirectory ?? []}
+          portalAssignments={portalAssignments}
           contract={contractState}
           takeoff={takeoffSummary}
           siteQr={siteQr}

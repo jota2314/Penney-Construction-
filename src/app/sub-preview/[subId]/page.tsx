@@ -26,5 +26,5 @@ export default async function SubPreviewPage({ params }: { params: Promise<{ sub
   if (!user) redirect("/login");
   if (!user.profile || user.profile.role === "field") redirect("/crew");
   const { subId } = await params;
-  return <SubPreviewClient subId={subId} />;
+  return <SubPreviewClient key={subId} subId={subId} />;
 }

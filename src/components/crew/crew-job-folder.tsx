@@ -40,8 +40,6 @@ export type FolderJob = {
   latitude: number | null;
   longitude: number | null;
   scope_of_work: string | null;
-  /** Drawings, plans, permits, specs on file. */
-  doc_count: number;
   /** Last time THIS worker clocked in here (ISO), within the last two weeks. */
   last_worked_at: string | null;
   /** A task on the schedule today with this worker on it. */
@@ -233,12 +231,6 @@ export function CrewJobFolder({
                 {onSite ? "Here" : formatDistance(dist)}
               </span>
             ) : null}
-            {j.doc_count > 0 && (
-              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                <FileText className="h-3 w-3" />
-                {j.doc_count}
-              </span>
-            )}
           </div>
           <ChevronRight className="h-4 w-4 text-muted-foreground/50 flex-shrink-0" />
         </button>
@@ -335,6 +327,7 @@ function JobDetail({ job, onBack, siteMode }: { job: FolderJob; onBack: () => vo
   const [composeOpen, setComposeOpen] = useState(false);
   const [logRefresh, setLogRefresh] = useState(0);
   const [docs, setDocs] = useState<CrewDoc[] | null>(null);
+  const [docsUnavailable, setDocsUnavailable] = useState(false);
   const [photos, setPhotos] = useState<CrewJobPhoto[] | null>(null);
   const [logs, setLogs] = useState<FeedDailyLog[] | null>(null);
   const [logLimit, setLogLimit] = useState(LOG_PAGE);
@@ -362,8 +355,12 @@ function JobDetail({ job, onBack, siteMode }: { job: FolderJob; onBack: () => vo
   useEffect(() => {
     let cancelled = false;
     getCrewJobDocuments(job.id)
-      .catch(() => [] as CrewDoc[])
-      .then((rows) => !cancelled && setDocs(rows));
+      .then((rows) => {
+        if (!cancelled) { setDocs(rows); setDocsUnavailable(false); }
+      })
+      .catch(() => {
+        if (!cancelled) { setDocs([]); setDocsUnavailable(true); }
+      });
     getCrewJobPhotos(job.id)
       .catch(() => [] as CrewJobPhoto[])
       .then((rows) => !cancelled && setPhotos(rows));
@@ -464,7 +461,9 @@ function JobDetail({ job, onBack, siteMode }: { job: FolderJob; onBack: () => vo
       </div>
 
       {tab === "info" && <InfoTab job={job} />}
-      {tab === "drawings" && <DrawingsTab docs={docs ? drawings : null} />}
+      {tab === "drawings" && (docsUnavailable
+        ? <p role="status" className="py-3 text-sm text-muted-foreground">Current drawings could not load. Reopen the job to try again.</p>
+        : <DrawingsTab docs={docs ? drawings : null} />)}
       {tab === "photos" && <PhotosTab photos={photos} filePhotos={docs ? filePhotos : null} jobName={job.name} />}
       {tab === "logs" && (
         <LogsTab

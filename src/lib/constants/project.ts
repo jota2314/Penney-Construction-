@@ -31,6 +31,12 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   other: "Other",
 };
 
+/** A known type that gives the field crew meaningful context about the build. */
+export function projectTypeLabel(type: string | null | undefined): string | null {
+  if (!type || type === "other" || !Object.hasOwn(PROJECT_TYPE_LABELS, type)) return null;
+  return PROJECT_TYPE_LABELS[type as ProjectType];
+}
+
 export const ALL_STATUSES: ProjectStatus[] = [
   "lead",
   "estimating",

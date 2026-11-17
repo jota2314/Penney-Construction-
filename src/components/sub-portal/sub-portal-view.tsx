@@ -14,7 +14,8 @@ import {
 } from "@/components/portal-kit";
 import { telHref } from "@/lib/portal-kit/format";
 import type { SubHomePayload, SubNeededItem } from "@/lib/sub-portal/payload";
-import { JobScreen, type JobView } from "./job-screen";
+import { JOB_ID_RE, jobLink, parseJobLink, type JobView } from "@/lib/sub-portal/job-link";
+import { JobScreen } from "./job-screen";
 import { setSubOutboxOwner, useSubOutbox } from "./post-outbox";
 import { SendInvoiceSheet } from "./send-invoice-sheet";
 import { SignSheet } from "./sign-sheet";
@@ -42,7 +43,7 @@ import { MoneyTab } from "./money-tab";
 const TAB_KEYS = ["today", "dates", "money"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
-/** How a job opens: with the composer focused, or on a segment other than Log. */
+/** Jobs open on their brief. A photo action focuses the field log. */
 export interface OpenJobOptions {
   compose?: boolean;
   view?: JobView;
@@ -57,28 +58,15 @@ interface OpenJob {
 // Marks the history entries this screen pushed, so closing a job it opened
 // steps back instead of stacking another entry.
 const JOB_STATE_KEY = "pcSubJob";
-const JOB_ID_RE = /^[0-9a-f-]{36}$/i;
 
 /** ?job= (and &compose=1) from the address bar, or null. */
 function readJobQuery(): OpenJob | null {
   if (typeof window === "undefined") return null;
   try {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("job");
-    if (!id || !JOB_ID_RE.test(id)) return null;
-    return { id, compose: params.get("compose") === "1", view: "log" };
+    return parseJobLink(new URLSearchParams(window.location.search));
   } catch {
     return null;
   }
-}
-
-/** This page's URL with ?job= set (or cleared) and &compose dropped; the hash and other params stay. */
-function jobUrl(jobId: string | null): string {
-  const url = new URL(window.location.href);
-  if (jobId) url.searchParams.set("job", jobId);
-  else url.searchParams.delete("job");
-  url.searchParams.delete("compose");
-  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 /** The job this screen pushed the current history entry for, if it did. */
@@ -97,11 +85,12 @@ function pushedJobId(): string | null {
  * only our marker: Next.js copies its own router state in and keeps its
  * idea of the URL in step, which it skips when given its own state object.
  */
-function writeJobUrl(mode: "push" | "replace", jobId: string | null, marker: string | null) {
+function writeJobUrl(mode: "push" | "replace", jobId: string | null, marker: string | null, view: JobView = "info") {
   try {
     const state = marker ? { [JOB_STATE_KEY]: marker } : {};
-    if (mode === "push") history.pushState(state, "", jobUrl(jobId));
-    else history.replaceState(state, "", jobUrl(jobId));
+    const url = jobLink(window.location.href, jobId, view);
+    if (mode === "push") history.pushState(state, "", url);
+    else history.replaceState(state, "", url);
   } catch {
     /* some in-app browsers refuse it; "‹ Your jobs" still closes the job */
   }
@@ -123,11 +112,13 @@ function neededForFlags(data: SubHomePayload): SubNeededItem[] {
 export function SubPortalView({
   data,
   onReload,
+  refreshError = null,
   initialJobId = null,
   initialCompose = false,
 }: {
   data: SubHomePayload;
   onReload: () => void;
+  refreshError?: string | null;
   initialJobId?: string | null;
   initialCompose?: boolean;
 }) {
@@ -143,10 +134,11 @@ export function SubPortalView({
 
   const [openJob, setOpenJob] = useState<OpenJob | null>(() =>
     initialJobId && JOB_ID_RE.test(initialJobId)
-      ? { id: initialJobId, compose: initialCompose, view: "log" }
+      ? { id: initialJobId, compose: initialCompose, view: initialCompose ? "log" : "info" }
       : readJobQuery(),
   );
   const [focusPhaseId, setFocusPhaseId] = useState<string | null>(null);
+  const [jobSearch, setJobSearch] = useState("");
   const [signId, setSignId] = useState<string | null>(null);
   const [invoiceFor, setInvoiceFor] = useState<{ projectId: string | null } | null>(null);
   const [notice, setNotice] = useState<PortalNoticeValue | null>(null);
@@ -189,9 +181,9 @@ export function SubPortalView({
   // Once, on arrival: put the open job in the address bar (when it came in
   // as a prop) and drop &compose=1, so a refresh shows the job without
   // jumping into the composer again.
-  const firstJobId = useRef(openJob?.id ?? null);
+  const firstJob = useRef(openJob);
   useEffect(() => {
-    writeJobUrl("replace", firstJobId.current, pushedJobId());
+    writeJobUrl("replace", firstJob.current?.id ?? null, pushedJobId(), firstJob.current?.view);
   }, []);
 
   // The phone's back button: follow ?job= in the address bar.
@@ -206,16 +198,17 @@ export function SubPortalView({
 
   // Closing a job puts the list back where he was. The job screen does its
   // own scrolling on open (to the top, or to the composer from a QR).
-  const listScroll = useRef(0);
+  const listScroll = useRef<number | null>(0);
   const openId = openJob?.id ?? null;
   useEffect(() => {
-    if (!openId) window.scrollTo(0, listScroll.current);
+    if (!openId && listScroll.current !== null) window.scrollTo(0, listScroll.current);
   }, [openId]);
 
   const openJobScreen = useCallback((projectId: string, opts: OpenJobOptions = {}) => {
     listScroll.current = window.scrollY;
-    writeJobUrl("push", projectId, projectId);
-    setOpenJob({ id: projectId, compose: !!opts.compose, view: opts.view ?? "log" });
+    const view = opts.compose ? "log" : opts.view ?? "info";
+    writeJobUrl("push", projectId, projectId, view);
+    setOpenJob({ id: projectId, compose: !!opts.compose, view });
   }, []);
 
   // "‹ Your jobs": step back over the entry we pushed, so the phone's back
@@ -230,10 +223,16 @@ export function SubPortalView({
   // A Needed "Answer" row: Dates, scrolled to that phase.
   const answerDates = useCallback(
     (phaseId: string) => {
+      if (openJob) {
+        // Let Dates focus the requested phase instead of restoring the job-list scroll.
+        listScroll.current = null;
+        writeJobUrl("replace", null, null);
+        setOpenJob(null);
+      }
       setFocusPhaseId(phaseId);
       go("dates");
     },
-    [go],
+    [go, openJob],
   );
 
   async function signOut() {
@@ -247,9 +246,14 @@ export function SubPortalView({
     // under whoever signs in next. His entries stay on the phone for him.
     setSubOutboxOwner(null);
     try {
-      await fetch("/api/sub-portal/login", { method: "DELETE", credentials: "same-origin" });
+      const res = await fetch("/api/sub-portal/login", { method: "DELETE", credentials: "same-origin" });
+      if (!res.ok) throw new Error("Sign-out failed");
     } catch {
-      /* the cookie may still be set; the login page is the right place either way */
+      setSigningOut(false);
+      setNotice({ tone: "error", text: "Couldn’t confirm sign-out. Check your connection and tap Sign out again." });
+      onReload();
+      window.scrollTo({ top: 0 });
+      return;
     }
     router.replace("/sub");
   }
@@ -275,11 +279,14 @@ export function SubPortalView({
           previewSubId={preview ? data.sub.sub_id : null}
           compose={openJob.compose}
           initialView={openJob.view}
+          onViewChange={(view) => writeJobUrl("replace", openJob.id, pushedJobId(), view)}
+          onAnswerDates={answerDates}
           onBack={closeJob}
           onChanged={onReload}
           jobsForInvoice={flags.bills_enabled ? invoiceJobs : undefined}
           billsEnabled={flags.bills_enabled}
           agreementsEnabled={flags.agreements_enabled}
+          showMoney={showMoney}
           officePhone={flags.office_phone}
         />
       ) : (
@@ -296,10 +303,18 @@ export function SubPortalView({
             ]}
           />
           <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
+            {refreshError && (
+              <div role="status" className="card flex flex-wrap items-center justify-between gap-3 p-4">
+                <p className="min-w-0 flex-1 basis-48 text-[15px] font-semibold">Showing your last loaded job list. {refreshError}</p>
+                <button type="button" onClick={onReload} className="btn btn-ghost">Refresh</button>
+              </div>
+            )}
             <PortalNotice notice={notice} onDismiss={() => setNotice(null)} />
             {tab === "today" && (
               <TodayTab
                 data={data}
+                search={jobSearch}
+                onSearch={setJobSearch}
                 needed={needed}
                 preview={preview}
                 canFixBill={canSendInvoice}
@@ -312,6 +327,7 @@ export function SubPortalView({
             {tab === "dates" && (
               <DatesTab
                 dates={data.dates}
+                onOpenJob={openJobScreen}
                 today={data.today}
                 preview={preview}
                 officePhone={flags.office_phone}

@@ -6,7 +6,8 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
-import { fieldVisibleFiles, isInternalJob } from "@/lib/crew/crew-visibility";
+import { loadFieldProjectFiles } from "@/lib/crew/field-project-files";
+import { isInternalJob } from "@/lib/crew/crew-visibility";
 
 const projectIdSchema = z.string().uuid();
 const uploadCategorySchema = z.enum([
@@ -470,22 +471,13 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   const supabase = await createClient();
 
-  const [{ data: project }, { data: rows }, { data: dismissed }, { data: overrides }] = await Promise.all([
-    supabase.from("projects").select("name, project_number, is_overhead").eq("id", projectId).maybeSingle(),
-    supabase
-      .from("project_files")
-      .select("id, filename, category, mime_type, size, storage_path, storage_bucket, created_at")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: false }),
-    supabase.from("project_dismissed_files").select("file_key").eq("project_id", projectId),
-    supabase.from("project_file_overrides").select("file_key, category, display_name, superseded_at").eq("project_id", projectId),
-  ]);
-
+  const { data: project, error } = await supabase.from("projects")
+    .select("name, project_number, is_overhead").eq("id", projectId).maybeSingle();
+  if (error) throw new Error("Job documents could not load.");
   if (!project || (isField && isInternalJob(project))) return [];
 
-  // Honor the office Files tab (removals, moves, renames), drop money and
-  // paperwork, and keep only the latest revision of each drawing set.
-  const data = fieldVisibleFiles(rows ?? [], (dismissed ?? []).map((d) => d.file_key), overrides ?? []);
+  const data = (await loadFieldProjectFiles(supabase, projectId))
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
 
   if (data.length === 0) return [];
 
@@ -510,8 +502,8 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   return data.map((f) => ({
     id: f.id,
-    filename: f.filename,
-    category: f.category,
+    filename: f.filename || "Document",
+    category: f.category!,
     mime_type: f.mime_type,
     url: f.storage_path
       ? signed.get(`${f.storage_bucket ?? "project-files"}:${f.storage_path}`) ?? null

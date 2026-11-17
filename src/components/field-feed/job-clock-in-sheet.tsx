@@ -107,6 +107,7 @@ export function JobClockInSheet({
   const [unlistedWork, setUnlistedWork] = useState("");
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
+  const [docsUnavailable, setDocsUnavailable] = useState(false);
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(intent === "punch");
   const [activityMentions, setActivityMentions] = useState<ActivityMention[]>([]);
@@ -297,6 +298,7 @@ export function JobClockInSheet({
     setLines([]);
     setDocs([]);
     setLoadingDocs(true);
+    setDocsUnavailable(false);
     setLineQuery("");
     setShowOtherTasks(false);
     setUnlistedWork("");
@@ -308,7 +310,7 @@ export function JobClockInSheet({
       .finally(() => { if (request === jobReqId.current) setLoadingLines(false); });
     getCrewJobDocuments(j.id)
       .then(dc => { if (request === jobReqId.current) setDocs(dc); })
-      .catch(() => { /* Documents can be retried by reopening the job folder. */ })
+      .catch(() => { if (request === jobReqId.current) setDocsUnavailable(true); })
       .finally(() => { if (request === jobReqId.current) setLoadingDocs(false); });
   }, [intent, selectTaskFirst]);
 
@@ -618,6 +620,8 @@ export function JobClockInSheet({
             >
               {loadingDocs ? (
                 <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>Loading documents…</div>
+              ) : docsUnavailable ? (
+                <p role="status" className="px-2 py-8 text-center text-[13px]">Current documents could not load. Reopen the job to try again.</p>
               ) : docGroups.length === 0 ? (
                 <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>
                   No drawings or documents on this job yet.

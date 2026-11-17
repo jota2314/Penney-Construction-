@@ -3,14 +3,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
-import { drawingRevision, fieldVisibleFiles, isInternalJob } from "@/lib/crew/crew-visibility";
+import { CREW_DOC_CATEGORIES, drawingRevision, isInternalJob } from "@/lib/crew/crew-visibility";
+import { loadFieldProjectFiles } from "@/lib/crew/field-project-files";
+import { loadApprovedFieldScope, type ScopeProject } from "@/lib/site-qr/guest-scope";
+import { priceFreeScopeText } from "@/lib/site-qr/scope-text";
 import { roundCents } from "@/lib/money";
 import { subDoesInspection, tradeForPhaseName } from "@/lib/schedule/trade-keywords";
 import { isParkedPlanStep } from "@/lib/schedule/parked";
 import { listSubAgreementSummaries, signAgreementNeededItems } from "@/lib/subs/agreements";
 import { fmtRange, fmtRelativeDay, fmtShort, fmtTime, fmtWeekday, fmtWeekdayRange, weekOf } from "@/lib/portal-kit/format";
 import { addDays, coversDay, etDate, etMonday, etParts, isAfterET, todayET } from "./et-day";
-import { countsTowardOwed, isAwaitingSubSignature, isAwardedQuoteStatus, subQuoteStage } from "./statuses";
+import { countsTowardOwed, isActiveProjectSub, isAwaitingSubSignature, isAwardedQuoteStatus, subQuoteStage } from "./statuses";
 import { subAgreementsEnabled, subBillsEnabled } from "./flags";
 import {
   SUB_BILL_COLUMNS,
@@ -92,9 +95,6 @@ const PHOTO_BUCKET = "daily-log-photos";
 const QUOTE_BUCKET = "email-attachments";
 const THUMB_BOX = 640;
 const POSTS_PAGE = 20;
-// What a sub may open from the project file cabinet (same list as v2). The
-// crew filter (fieldVisibleFiles) runs on top; never a second filter.
-const SUB_FILE_CATEGORIES = ["construction_drawings", "specs", "permits"];
 // The latest client Design Presentation and Fixture & Finish Selections sheet
 // (Jorge 10/16) file under drawings or specs; they read as their own group.
 const DESIGN_NAME = /design|selection|fixture|finish[\s_-]*schedule|rendering/i;
@@ -171,8 +171,12 @@ async function signAll(
   const out = new Map<string, string>();
   await Promise.all(
     Array.from(byBucket.entries()).map(async ([bucket, paths]) => {
-      const { data } = await cachedSignedUrls(supabase, bucket, paths, SIGN_TTL);
-      for (const s of data) out.set(`${bucket}/${s.path}`, s.signedUrl);
+      try {
+        const { data } = await cachedSignedUrls(supabase, bucket, paths, SIGN_TTL);
+        for (const s of data) out.set(`${bucket}/${s.path}`, s.signedUrl);
+      } catch {
+        console.error("[sub-portal] Document links could not be signed.");
+      }
     }),
   );
   return out;
@@ -257,11 +261,12 @@ function dateBucket(start: string | null, end: string | null, today: string): Su
   return "later";
 }
 
-/**
- * One timeline row. `assigned` is false for an inspection milestone on his
- * job that he's not on (shown so he knows the date, never asked to answer).
- * No notes ever leave here.
- */
+/** A paused, finished or declined phase stays on the timeline as history or context. */
+function isScheduledWork(p: { status: string | null; sub_response?: string | null }) {
+  return p.status !== "completed" && p.status !== "on_hold" && p.sub_response !== "declined";
+}
+
+/** Unassigned inspection milestones are visible but never request an answer. */
 function toDatePhase(
   p: Omit<SubPhaseRow, "sub_response" | "sub_responded_at" | "sub_response_note" | "created_by_sub_id"> &
     Partial<Pick<SubPhaseRow, "sub_response" | "sub_responded_at" | "sub_response_note" | "created_by_sub_id">>,
@@ -282,7 +287,7 @@ function toDatePhase(
     project_id: p.project_id,
     project_name: projectName,
     name: p.name,
-    description: p.description ?? null,
+    description: priceFreeScopeText(p.description) || null,
     start_date: parked ? null : p.start_date,
     end_date: parked ? null : p.end_date,
     status: (PHASE_STATUSES.includes(p.status ?? "") ? p.status : "not_started") as SubPhaseStatus,
@@ -294,7 +299,8 @@ function toDatePhase(
     sub_response_note: assigned ? (p.sub_response_note ?? null) : null,
     mine,
     // A finished date isn't worth answering; it would sit in the badge forever.
-    needs_answer: assigned && isConfirmed && !response && !mine && bucket !== "past",
+    needs_answer: assigned && isConfirmed && !response && !mine && !parked && !!p.start_date
+      && isScheduledWork(p) && bucket !== "past",
     bucket,
   };
 }
@@ -372,7 +378,7 @@ interface JobRowInput {
 
 function buildJobRow({ project, phases, visits, logs, awaitingAgreement, subId, today }: JobRowInput): SubJobRow {
   // A parked "From Estimate" step's placeholder day never makes a job Today or This week.
-  const dated = phases.filter((p) => !!p.start_date && !isParkedPlanStep(p));
+  const dated = phases.filter((p) => !!p.start_date && isScheduledWork(p) && !isParkedPlanStep(p));
   // Today's phase: confirmed before penciled, then the one that started last.
   const covering = dated
     .filter((p) => coversDay(p.start_date, p.end_date, today))
@@ -414,13 +420,14 @@ function buildJobRow({ project, phases, visits, logs, awaitingAgreement, subId, 
   } else if (awaitingAgreement) {
     summary = "Work order to review";
   } else {
-    summary = "No dates yet";
+    summary = "No upcoming work scheduled";
   }
 
   return {
     project_id: project.id,
     name: project.name,
     project_number: project.project_number ?? "",
+    project_type: project.project_type ?? null,
     town: project.city ?? null,
     address: oneLineAddress(project),
     status: project.status,
@@ -990,17 +997,88 @@ type PostRow = {
   client_hidden_at: string | null;
 };
 
-type FileRow = {
-  id: string;
-  project_id: string;
-  filename: string | null;
-  category: string | null;
-  mime_type: string | null;
-  size: number | null;
-  storage_path: string | null;
-  storage_bucket: string | null;
-  created_at: string | null;
-};
+const JOB_NOT_FOUND = { ok: false, status: 404, error: "That job isn't on your list." } as const;
+const BAD_POST_CURSOR = { ok: false, status: 400, error: "Couldn't load more posts. Pull down to refresh." } as const;
+
+async function readPostsPage(
+  supabase: SupabaseClient, subId: string, projectId: string, companyName: string,
+  cursor: ReturnType<typeof decodeCursor>, today: string,
+): Promise<SubPostsPage | null> {
+  const postsQuery = supabase
+    .from("daily_logs")
+    .select("id, project_id, kind, status, text, photo_storage_paths, started_at, client_hidden_at")
+    .eq("project_id", projectId)
+    .eq("subcontractor_id", subId)
+    .order("started_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(POSTS_PAGE + 1);
+  const result = await (cursor
+    ? postsQuery.or(
+        `and(started_at.lt."${cursor.ts}",or(${POST_CONTENT})),and(started_at.eq."${cursor.ts}",id.lt.${cursor.id},or(${POST_CONTENT}))`,
+      )
+    : postsQuery.or(POST_CONTENT));
+  if (result.error) return null;
+
+  // ── posts (his company's only), photos signed for this page alone
+  const fetched = (result.data ?? []) as PostRow[];
+  const pageRows = fetched.slice(0, POSTS_PAGE);
+  const nextCursor = fetched.length > POSTS_PAGE ? encodeCursor(pageRows[pageRows.length - 1].started_at, pageRows[pageRows.length - 1].id) : null;
+  const shown = pageRows.filter((r) => isPostLike(r));
+  const photoPaths = shown.flatMap((r) => r.photo_storage_paths ?? []);
+
+  const [thumbs, signedPhotos] = await Promise.all([
+    photoPaths.length ? signThumbUrls(supabase, PHOTO_BUCKET, photoPaths, SIGN_TTL, THUMB_BOX) : Promise.resolve(new Map<string, string>()),
+    photoPaths.length
+      ? cachedSignedUrls(supabase, PHOTO_BUCKET, photoPaths, SIGN_TTL)
+      : Promise.resolve({ data: [] as { path: string; signedUrl: string }[] }),
+  ]);
+  const fullByPath = new Map(signedPhotos.data.map((s) => [s.path, s.signedUrl]));
+  const posts: SubPost[] = shown.map((r) => {
+    const day = etDate(r.started_at) ?? today;
+    const paths = r.photo_storage_paths ?? [];
+    const photos: SubPhoto[] = paths.flatMap((p) => {
+      const full = fullByPath.get(p);
+      return full ? [{ thumb: thumbs.get(p) ?? full, full, date: day }] : [];
+    });
+    return {
+      id: r.id,
+      project_id: r.project_id,
+      posted_at: r.started_at,
+      day,
+      kind: r.kind === "shift" ? "shift" : "post",
+      text: r.text?.trim() || null,
+      author_label: companyName,
+      photos,
+      photo_count: paths.length,
+      client_hidden: !!r.client_hidden_at,
+    };
+  });
+  return { items: posts, next_cursor: nextCursor };
+}
+
+/** Older log posts only. The job route and read-only staff preview both check the same view entitlement. */
+export async function loadSubJobPosts(opts: LoadSubJobOptions): Promise<
+  { ok: true; data: SubPostsPage } | { ok: false; status: 400 | 404 | 503; error: string }
+> {
+  const { subId, projectId } = opts;
+  if (!UUID_RE.test(subId) || !UUID_RE.test(projectId)) return JOB_NOT_FOUND;
+  const cursor = opts.cursor && decodeCursor(opts.cursor);
+  if (!cursor) return BAD_POST_CURSOR;
+  const supabase = opts.supabase ?? createAdminClient();
+  const today = todayET(opts.now ?? new Date());
+  const unavailable = { ok: false, status: 503, error: "We couldn’t load the older posts. Try again." } as const;
+  try {
+    const access = await canSubViewJob(supabase, subId, projectId, { today });
+    if (!access.view) return JOB_NOT_FOUND;
+    const sub = await supabase.from("subcontractors").select("company_name").eq("id", subId).maybeSingle();
+    if (sub.error) return unavailable;
+    if (!sub.data) return JOB_NOT_FOUND;
+    const page = await readPostsPage(supabase, subId, projectId, sub.data.company_name, cursor, today);
+    return page ? { ok: true, data: page } : unavailable;
+  } catch {
+    return unavailable;
+  }
+}
 
 const FILE_GROUPS: { key: SubFileGroup; label: string }[] = [
   { key: "drawings", label: "Drawings" },
@@ -1024,43 +1102,30 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
   const now = opts.now ?? new Date();
   const today = todayET(now);
   const { subId, projectId } = opts;
-  const notFound = { ok: false as const, status: 404 as const, error: "That job isn't on your list." };
-  if (!UUID_RE.test(subId) || !UUID_RE.test(projectId)) return notFound;
+  if (!UUID_RE.test(subId) || !UUID_RE.test(projectId)) return JOB_NOT_FOUND;
 
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
-  if (opts.cursor && !cursor) return { ok: false, status: 400, error: "Couldn't load more posts. Pull down to refresh." };
+  if (opts.cursor && !cursor) return BAD_POST_CURSOR;
 
   const [jobAccess, assigned, projectRes, subRes] = await Promise.all([
     canSubViewJob(supabase, subId, projectId, { today }),
     // Put on the job by the office (not just a QR visit): only then can he mark inspections.
     isSubOnJob(supabase, subId, projectId, { today, assignedOnly: true }),
-    supabase.from("projects").select(SUB_JOB_PROJECT_COLUMNS).eq("id", projectId).maybeSingle(),
+    supabase.from("projects")
+      .select(`${SUB_JOB_PROJECT_COLUMNS}, contract_estimate_id, contract_client_signed_at, contract_locked_at`)
+      .eq("id", projectId).maybeSingle(),
     supabase.from("subcontractors").select("id, company_name, contact_name, trades").eq("id", subId).maybeSingle(),
   ]);
-  const project = projectRes.data as SubJobProject | null;
+  const project = projectRes.data as (SubJobProject & ScopeProject) | null;
   const sub = subRes.data as { id: string; company_name: string; contact_name: string | null; trades: unknown } | null;
-  if (!jobAccess.view || !project || !sub) return notFound;
+  if (!jobAccess.view || !project || !sub) return JOB_NOT_FOUND;
 
   const trades = normalizeTrades(sub.trades);
   const showMoney = true; // R1: every login is the company owner.
   const agreementsEnabled = subAgreementsEnabled();
 
-  let postsQuery = supabase
-    .from("daily_logs")
-    .select("id, project_id, kind, status, text, photo_storage_paths, started_at, client_hidden_at")
-    .eq("project_id", projectId)
-    .eq("subcontractor_id", subId)
-    .order("started_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(POSTS_PAGE + 1);
-  postsQuery = cursor
-    ? postsQuery.or(
-        `and(started_at.lt."${cursor.ts}",or(${POST_CONTENT})),and(started_at.eq."${cursor.ts}",id.lt.${cursor.id},or(${POST_CONTENT}))`,
-      )
-    : postsQuery.or(POST_CONTENT);
-
   const [
-    phasesRes, visitRes, postsRes, filesRes, dismissedRes, overridesRes, scopeRes, inspectionsRes,
+    phasesRes, visitRes, postsPage, fieldFiles, approvedScope, scopeRes, inspectionsRes,
     selectionsRes, quotesRes, bidsRes, billsRes, submissionsRes, agreementSummaries, projectSubRes, linesRes,
     pmRes, clock,
   ] = await Promise.all([
@@ -1080,15 +1145,17 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
       .order("last_seen_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    postsQuery,
-    supabase
-      .from("project_files")
-      .select("id, project_id, filename, category, mime_type, size, storage_path, storage_bucket, created_at")
-      .eq("project_id", projectId)
-      .in("category", SUB_FILE_CATEGORIES)
-      .order("created_at", { ascending: false }),
-    supabase.from("project_dismissed_files").select("file_key").eq("project_id", projectId),
-    supabase.from("project_file_overrides").select("file_key, category, display_name, superseded_at").eq("project_id", projectId),
+    readPostsPage(supabase, subId, projectId, sub.company_name, cursor, today),
+    loadFieldProjectFiles(supabase, projectId).catch(() => {
+      console.error("[sub-portal] Could not verify current field files.");
+      return null;
+    }),
+    jobAccess.post
+      ? loadApprovedFieldScope(supabase, project).catch(() => {
+          console.error("[sub-portal] Could not load approved field scope.");
+          return null;
+        })
+      : null,
     // His trades on the job's current estimate: scope text only; the function returns no prices.
     supabase.rpc("sub_portal_trade_scope", { p_sub_id: subId, p_project_ids: [projectId] }),
     supabase
@@ -1129,7 +1196,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
       : Promise.resolve([] as SubAgreementSummary[]),
     supabase
       .from("project_subcontractors")
-      .select("project_id, contract_amount, status, agreement_id, contract_locked_at, agreement:sub_agreements!agreement_id(number)")
+      .select("project_id, contract_amount, scope_summary, status, agreement_id, contract_locked_at, agreement:sub_agreements!agreement_id(number)")
       .eq("project_id", projectId)
       .eq("subcontractor_id", subId),
     supabase
@@ -1143,19 +1210,10 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
     loadOpenShift(supabase, subId),
   ]);
 
-  // ── posts (his company's only), photos signed for this page alone
-  const fetched = (postsRes.data ?? []) as PostRow[];
-  const pageRows = fetched.slice(0, POSTS_PAGE);
-  const nextCursor = fetched.length > POSTS_PAGE ? encodeCursor(pageRows[pageRows.length - 1].started_at, pageRows[pageRows.length - 1].id) : null;
-  const shown = pageRows.filter((r) => isPostLike(r));
-  const photoPaths = shown.flatMap((r) => r.photo_storage_paths ?? []);
-
-  // ── files: the crew Job Folder filter, then the sub categories
-  const files = fieldVisibleFiles(
-    (filesRes.data ?? []) as FileRow[],
-    ((dismissedRes.data ?? []) as { file_key: string }[]).map((d) => d.file_key),
-    (overridesRes.data ?? []) as { file_key: string; category: string | null; display_name: string | null; superseded_at: string | null }[],
-  ).filter((f) => !!f.storage_path && SUB_FILE_CATEGORIES.includes(f.category ?? ""));
+  // Only effective field-document categories after office moves, dismissals and revisions.
+  const files = (fieldFiles ?? [])
+    .filter((f) => CREW_DOC_CATEGORIES.some((category) => category === f.category))
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "") || (a.filename ?? "").localeCompare(b.filename ?? ""));
 
   // ── quotes and bids (his own prices)
   type BidRow = {
@@ -1186,7 +1244,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
   // Work orders and SCOs on this job (the MSA has no job; it lives in Papers).
   const jobAgreements = agreementSummaries.filter((a) => a.kind !== "master");
 
-  const [signedFiles, thumbs, signedPhotos, filedByPath] = await Promise.all([
+  const [signedFiles, filedByPath] = await Promise.all([
     signAll(
       supabase,
       [
@@ -1195,35 +1253,8 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
         ...bidRows.map((b) => ({ bucket: QUOTE_BUCKET, path: b.attachment_storage_path })),
       ],
     ),
-    photoPaths.length ? signThumbUrls(supabase, PHOTO_BUCKET, photoPaths, SIGN_TTL, THUMB_BOX) : Promise.resolve(new Map<string, string>()),
-    photoPaths.length
-      ? cachedSignedUrls(supabase, PHOTO_BUCKET, photoPaths, SIGN_TTL)
-      : Promise.resolve({ data: [] as { path: string; signedUrl: string }[] }),
     showMoney ? loadFiledBills(supabase, subId, jobSubmissions) : Promise.resolve(new Map<string, SubBillRow[]>()),
   ]);
-
-  const fullByPath = new Map(signedPhotos.data.map((s) => [s.path, s.signedUrl]));
-  const posts: SubPost[] = shown.map((r) => {
-    const day = etDate(r.started_at) ?? today;
-    const paths = r.photo_storage_paths ?? [];
-    const photos: SubPhoto[] = paths.flatMap((p) => {
-      const full = fullByPath.get(p);
-      return full ? [{ thumb: thumbs.get(p) ?? full, full, date: day }] : [];
-    });
-    return {
-      id: r.id,
-      project_id: r.project_id,
-      posted_at: r.started_at,
-      day,
-      kind: r.kind === "shift" ? "shift" : "post",
-      text: r.text?.trim() || null,
-      author_label: sub.company_name,
-      photos,
-      photo_count: paths.length,
-      client_hidden: !!r.client_hidden_at,
-    };
-  });
-  const postsPage: SubPostsPage = { items: posts, next_cursor: nextCursor };
 
   // Documents, newest first inside each group; empty groups left out.
   const docs: SubDocument[] = files.flatMap((f) => {
@@ -1247,14 +1278,17 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
   const fileGroups: SubDocumentGroup[] = FILE_GROUPS.map((g) => ({
     key: g.key,
     label: g.label,
-    docs: docs
-      .filter((d) => d.group === g.key)
-      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "") || a.title.localeCompare(b.title)),
+    docs: docs.filter((d) => d.group === g.key),
   })).filter((g) => g.docs.length > 0);
 
   const scope: SubScopeLine[] = ((scopeRes.data ?? []) as { project_id: string; trade: string | null; description: string | null; scope: string | null }[])
-    .filter((r) => r.project_id === projectId && (r.description || r.scope))
-    .map((r) => ({ trade: r.trade ?? "", description: r.description ?? "", scope: r.scope ?? null }));
+    .filter((r) => r.project_id === projectId)
+    .map((r) => ({
+      trade: priceFreeScopeText(r.trade),
+      description: priceFreeScopeText(r.description),
+      scope: priceFreeScopeText(r.scope) || null,
+    }))
+    .filter((r) => r.description || r.scope);
 
   const inspections: SubInspection[] = (
     (inspectionsRes.data ?? []) as {
@@ -1281,10 +1315,10 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
     (selectionsRes.data ?? []) as { id: string; category: string | null; description: string | null; status: string | null; selected_value: string | null }[]
   ).map((s) => ({
     id: s.id,
-    category: s.category ?? "",
-    description: s.description,
+    category: priceFreeScopeText(s.category),
+    description: priceFreeScopeText(s.description) || null,
     status: s.status ?? "pending",
-    selected_value: s.selected_value,
+    selected_value: priceFreeScopeText(s.selected_value) || null,
   }));
 
   // ── his dates on this job (read-only here)
@@ -1303,7 +1337,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
       .filter((l) => !one(l.estimates as { is_option: boolean | null } | { is_option: boolean | null }[])?.is_option)
       .map((l) => ({ source: "line" as const, id: l.id, project_id: projectId, amount: num(l.awarded_cost) })),
   ];
-  const projectSubs = ((projectSubRes.data ?? []) as unknown as (ProjectSubRow & { agreement: unknown })[]).map(
+  const projectSubs = ((projectSubRes.data ?? []) as unknown as (ProjectSubRow & { scope_summary: string | null; agreement: unknown })[]).map(
     ({ agreement, ...row }) => ({
       ...row,
       agreement_number: one(agreement as { number: string | null } | { number: string | null }[] | null)?.number ?? null,
@@ -1357,7 +1391,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
   }
 
   // ── composer: his phase covering today; its trade chip is pre-picked
-  const covering = phaseRows.filter((p) => !isParkedPlanStep(p) && coversDay(p.start_date, p.end_date, today));
+  const covering = phaseRows.filter((p) => isScheduledWork(p) && !isParkedPlanStep(p) && coversDay(p.start_date, p.end_date, today));
   let todayPhase: SubComposerContext["today_phase"] = null;
   if (covering.length) {
     const tradesOf = covering.map((p) => tradeForPhaseName(p.name));
@@ -1384,6 +1418,7 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
         project_id: project.id,
         name: project.name,
         project_number: project.project_number ?? "",
+        project_type: project.project_type ?? null,
         address,
         town: project.city ?? null,
         status: project.status,
@@ -1394,8 +1429,17 @@ export async function loadSubJob(opts: LoadSubJobOptions): Promise<SubJobResult>
         visit_today: visit && (visit.scans ?? 0) > 0 ? visitSummary(visit, project.name) : null,
       },
       can_post: jobAccess.post,
-      posts: postsPage,
+      posts: postsPage ?? { items: [], next_cursor: null },
       files: fileGroups,
+      files_unavailable: fieldFiles === null || docs.length < files.length,
+      assignment_summary: jobAccess.post
+        ? priceFreeScopeText(projectSubs.find((row) => isActiveProjectSub(row.status))?.scope_summary) || null
+        : null,
+      approved_scope: approvedScope ? {
+        source: approvedScope.source,
+        sections: approvedScope.sections,
+        unavailableReason: approvedScope.unavailableReason,
+      } : null,
       scope,
       inspections,
       selections,

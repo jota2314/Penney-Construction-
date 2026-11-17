@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSubAccessResult } from "@/lib/sub-portal/access";
 import { refuseStaffBrowser } from "@/lib/sub-portal/staff-guard";
-import { loadSubJob } from "@/lib/sub-portal/load-sub-portal-data";
+import { loadSubJob, loadSubJobPosts } from "@/lib/sub-portal/load-sub-portal-data";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 /**
  * GET /api/sub-portal/job/{projectId}[?cursor=] → SubJobPayload.
+ * With part=posts and cursor, returns only the older posts page.
  *
  * One job as the signed-in sub sees it, loaded when he opens it: his
  * company's posts 20 at a time (pass next_cursor back as ?cursor= for the
@@ -24,7 +25,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { supabase, subId } = resolved.access;
 
   const { id } = await params;
-  const result = await loadSubJob({
+  const load = request.nextUrl.searchParams.get("part") === "posts" ? loadSubJobPosts : loadSubJob;
+  const result = await load({
     subId,
     projectId: id,
     mode: "sub",

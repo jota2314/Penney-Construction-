@@ -1,7 +1,8 @@
 "use client";
 
-import { Empty } from "@/components/portal-kit";
-import { fmtTime } from "@/lib/portal-kit/format";
+import { Empty } from "@/components/portal-kit/empty";
+import { projectTypeLabel } from "@/lib/constants/project";
+import { fmtShort, fmtTime, fmtWeekday, telHref } from "@/lib/portal-kit/format";
 import type { SubHomePayload, SubJobRow, SubNeededItem, SubVisitSummary } from "@/lib/sub-portal/payload";
 import type { OpenJobOptions } from "./sub-portal-view";
 
@@ -19,6 +20,8 @@ import type { OpenJobOptions } from "./sub-portal-view";
  */
 export function TodayTab({
   data,
+  search,
+  onSearch,
   needed,
   preview,
   canFixBill,
@@ -28,6 +31,8 @@ export function TodayTab({
   onFixBill,
 }: {
   data: SubHomePayload;
+  search: string;
+  onSearch: (value: string) => void;
   /** data.needed, less rows for features that are switched off. */
   needed: SubNeededItem[];
   preview: boolean;
@@ -41,7 +46,19 @@ export function TodayTab({
   const here =
     data.here_now && data.here_now.visit_date === data.today && data.here_now.scans > 0 ? data.here_now : null;
   const { today, this_week, other } = data.jobs;
-  const noJobs = today.length + this_week.length + other.length === 0;
+  const jobCount = today.length + this_week.length + other.length;
+  const query = jobCount > 1 ? search.trim().toLowerCase() : "";
+  const sections = [
+    { label: "Today", rows: today },
+    { label: "Next 7 days", rows: this_week },
+    { label: "Other open jobs", rows: other },
+  ].map(({ label, rows }) => ({
+    label,
+    rows: query ? rows.filter((job) =>
+      [job.name, job.address, job.town, job.project_number, projectTypeLabel(job.project_type), job.phase?.name]
+        .some((value) => value?.toLowerCase().includes(query)),
+    ) : rows,
+  }));
 
   return (
     <>
@@ -73,14 +90,37 @@ export function TodayTab({
         </section>
       )}
 
-      {noJobs ? (
-        <Empty>No open jobs right now. When Penney books you on a job, it shows up here.</Empty>
+      <div className="flex items-end justify-between gap-3 px-1 pt-2">
+        <div>
+          <p className="text-[14px] font-bold text-[var(--accent-dark)]">{fmtWeekday(data.today)} · {fmtShort(data.today)}</p>
+          <h1 className="mt-0.5 text-[30px] font-extrabold leading-tight tracking-tight">Your jobs</h1>
+        </div>
+        {jobCount > 0 && <p className="pb-1 text-[15px] font-semibold text-[var(--muted)]">{jobCount} open</p>}
+      </div>
+      {jobCount === 0 ? (
+        <Empty action={<a href={telHref(data.flags.office_phone)} className="btn btn-ghost">Call the office</a>}>
+          No open jobs assigned. If you’re scheduled on site, call Penney to check your assignment.
+        </Empty>
       ) : (
         <>
-          <h2 className="px-1 pt-2 text-[19px] font-extrabold">Your jobs</h2>
-          <JobSection label="Today" rows={today} onOpenJob={onOpenJob} />
-          <JobSection label="This week" rows={this_week} onOpenJob={onOpenJob} />
-          <JobSection label="Other open jobs" rows={other} onOpenJob={onOpenJob} />
+          {jobCount > 1 && (
+            <input
+              aria-label="Find a job by name, address, number, type or phase"
+              type="search"
+              placeholder="Find a job by name or address"
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              className="min-h-12 w-full rounded-xl border border-[var(--line)] bg-[var(--card)] px-4 text-[16px] placeholder:text-[var(--muted)]"
+            />
+          )}
+          {sections.map(({ label, rows }) => (
+            <JobSection key={label} label={label} rows={rows} onOpenJob={onOpenJob} />
+          ))}
+          {query && sections.every(({ rows }) => rows.length === 0) && (
+            <Empty action={<button type="button" onClick={() => onSearch("")} className="btn btn-ghost">Show all jobs</button>}>
+              No jobs match your search.
+            </Empty>
+          )}
         </>
       )}
     </>
@@ -175,7 +215,7 @@ function NeededRow({
   );
 }
 
-/** A labelled card of 60px job rows; nothing at all when the section is empty. */
+/** Keep the office's job grouping and order as the list is filtered. */
 function JobSection({
   label,
   rows,
@@ -188,37 +228,26 @@ function JobSection({
   if (rows.length === 0) return null;
   return (
     <section>
-      <p className="label mb-2 px-1">{label}</p>
-      <ul className="card divide-y divide-[var(--line)] overflow-hidden">
+      <h2 className="mb-2 px-1 text-[17px] font-extrabold">{label}</h2>
+      <ul className="grid gap-3 sm:grid-cols-2">
         {rows.map((row) => (
-          <li key={row.project_id}>
-            <JobRowButton row={row} onOpen={() => onOpenJob(row.project_id)} />
+          <li key={row.project_id} className="card relative isolate flex min-w-0 flex-col">
+            <div className="flex flex-1 flex-col px-4 pb-3 pt-4">
+              <span className="flex w-full flex-wrap items-baseline justify-between gap-x-2 gap-y-1 text-[13px] font-bold">
+                <span className="text-[var(--accent-dark)]">{[row.project_number, projectTypeLabel(row.project_type)].filter(Boolean).join(" · ")}</span>
+                {row.here_now && <span className="text-[var(--ink)]">Checked in</span>}
+              </span>
+              <span className="mt-1 break-words text-[20px] font-extrabold leading-tight">{row.name}</span>
+              {(row.address || row.town) && <span className="mt-1 break-words text-[15px] text-[var(--muted)]">{row.address || row.town}</span>}
+              <span className="mt-3 border-l-2 border-[var(--accent)] pl-2.5 text-[15px] font-semibold">{row.summary}</span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-[var(--line)] border-t border-[var(--line)]">
+              <button type="button" aria-label={`Job brief for ${row.name}`} onClick={() => onOpenJob(row.project_id)} className="min-h-11 rounded-bl-2xl bg-[var(--paper)]/50 px-2 text-[15px] font-bold text-[var(--accent-dark)] after:absolute after:inset-0 after:rounded-2xl">Job brief <span aria-hidden>›</span></button>
+              <button type="button" aria-label={`Plans and files for ${row.name}`} onClick={() => onOpenJob(row.project_id, { view: "drawings" })} className="relative min-h-11 rounded-br-2xl px-2 text-[15px] font-bold">Plans &amp; files</button>
+            </div>
           </li>
         ))}
       </ul>
     </section>
-  );
-}
-
-/** Name (17px bold), then "Peabody · Demo · Mon–Tue (penciled in)", then ›. */
-function JobRowButton({ row, onOpen }: { row: SubJobRow; onOpen: () => void }) {
-  const line = [row.town, row.summary].filter(Boolean).join(" · ");
-  return (
-    <button type="button" onClick={onOpen} className="flex min-h-[60px] w-full items-center gap-3 px-4 py-2.5 text-left">
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-[17px] font-bold leading-snug">{row.name}</span>
-          {row.here_now && (
-            <span className="shrink-0 whitespace-nowrap rounded-full bg-[var(--accent-dark)] px-2.5 py-0.5 text-[13px] font-bold text-white">
-              Here now
-            </span>
-          )}
-        </span>
-        {line && <span className="block truncate text-[15px] text-[var(--muted)]">{line}</span>}
-      </span>
-      <span aria-hidden className="shrink-0 text-[24px] font-bold leading-none text-[var(--muted)]">
-        ›
-      </span>
-    </button>
   );
 }
