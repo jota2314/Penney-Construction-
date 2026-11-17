@@ -1,5 +1,6 @@
 "use server";
 
+import { notifyProjectManagerAssigned } from "@/lib/notifications/pm-assignment-notify";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushProjectToQuickBooks } from "@/lib/quickbooks/customers";
@@ -62,6 +63,11 @@ export async function createProject(input: ProjectInput) {
 
   if (error) return { error: error.message };
 
+  // Email the assigned PM a rundown of the job. Best-effort: never throws.
+  if (data?.id && input.assigned_pm) {
+    await notifyProjectManagerAssigned({ projectId: data.id, pmProfileId: input.assigned_pm, actorId: user.id });
+  }
+
   // Mirror the project into QuickBooks as a sub-customer (Job). Best-effort:
   // a QuickBooks outage or missing connection must never block project creation.
   if (data?.id) {
@@ -106,6 +112,12 @@ export async function updateProject(id: string, input: ProjectInput) {
 
   if (!user) return { error: "Not authenticated" };
 
+  const { data: before } = await supabase
+    .from("projects")
+    .select("assigned_pm")
+    .eq("id", id)
+    .maybeSingle();
+
   const { error } = await supabase
     .from("projects")
     .update({
@@ -133,6 +145,11 @@ export async function updateProject(id: string, input: ProjectInput) {
     .eq("id", id);
 
   if (error) return { error: error.message };
+
+  // Email a newly assigned PM a rundown of the job. Best-effort: never throws.
+  if (before && input.assigned_pm && input.assigned_pm !== before.assigned_pm) {
+    await notifyProjectManagerAssigned({ projectId: id, pmProfileId: input.assigned_pm, actorId: user.id });
+  }
 
   revalidatePath("/projects");
   revalidatePath(`/projects/${id}`);

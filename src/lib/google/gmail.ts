@@ -184,6 +184,46 @@ export async function sendEmailWithAccessToken(
 }
 
 /**
+ * The JSON send path (`raw` inside a JSON body) is rejected by Google once the
+ * message passes roughly 5 MB. Bigger messages have to go to the media upload
+ * endpoint as plain RFC 822 bytes.
+ */
+const GMAIL_UPLOAD_SEND = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media";
+const JSON_SEND_MAX_RAW_CHARS = 4 * 1024 * 1024;
+
+/**
+ * Same as sendEmailWithAccessToken, but safe for big attachments (drawing
+ * sets, photo batches): a small message goes the normal JSON way, a large one
+ * is uploaded as message/rfc822.
+ */
+export async function sendLargeEmailWithAccessToken(
+  input: SendEmailInput,
+  accessToken: string
+): Promise<SentMessage> {
+  const rawMessage = buildRawEmail(input);
+  if (rawMessage.length <= JSON_SEND_MAX_RAW_CHARS || input.threadId) {
+    return sendEmailWithAccessToken(input, accessToken);
+  }
+
+  const res = await fetch(GMAIL_UPLOAD_SEND, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "message/rfc822",
+    },
+    body: new Uint8Array(Buffer.from(rawMessage, "base64url")),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[gmail-send-upload] HTTP ${res.status} body=${errText}`);
+    throw new Error(`Failed to send email: ${errText}`);
+  }
+
+  return res.json();
+}
+
+/**
  * Send a workflow email using a template with variable replacement.
  */
 export async function sendTemplateEmail(
