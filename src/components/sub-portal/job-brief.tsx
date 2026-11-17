@@ -1,10 +1,12 @@
 import { TimelineList, TimelineRow, type TimelineChip } from "@/components/portal-kit/timeline-row";
+import { ArrowRight, ChevronDown, ClipboardCheck } from "lucide-react";
+import { FieldDocumentLink } from "@/components/sub-portal/job-drawings";
 import { fmtDate } from "@/lib/portal-kit/format";
 import { priceFreeScopeText } from "@/lib/site-qr/scope-text";
 import type { SubDatePhase, SubJobPayload, SubSelection } from "@/lib/sub-portal/payload";
 
-const heading = "mb-2 text-[19px] font-extrabold leading-tight";
-const disclosure = "cursor-pointer px-4 py-3 text-[16px] font-bold marker:text-[var(--accent-dark)]";
+const heading = "mb-3 text-[21px] font-extrabold leading-tight tracking-[-0.035em] sm:text-[24px]";
+const disclosure = "min-h-11 cursor-pointer px-4 py-3 text-[15px] font-bold marker:text-[var(--accent-dark)] sm:px-5";
 const cap = (s: string) => s.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 
 export function JobBrief({ data, onFiles, onAnswerDates }: {
@@ -13,6 +15,10 @@ export function JobBrief({ data, onFiles, onAnswerDates }: {
   onAnswerDates?: (phaseId: string) => void;
 }) {
   const overview = data.approved_scope;
+  const sections = overview?.sections.filter((section) => section.items.length > 0) ?? [];
+  const featured = sections.slice(0, 2);
+  const scopeCount = sections.reduce((total, section) => total + section.items.length, 0);
+  const hasFullScope = scopeCount > featured.length || featured.some((s) => s.items[0].description.length > 240);
   const commitments = [
     ...data.agreements.filter((a) => a.status === "signed").map((a) => ({
       key: a.id,
@@ -33,137 +39,136 @@ export function JobBrief({ data, onFiles, onAnswerDates }: {
   const document = data.files.find((g) => g.key === "drawings")?.docs[0] ?? files[0];
 
   return (
-    <div className="space-y-6 [overflow-wrap:anywhere]">
-      <section className="card overflow-hidden">
-        <div className="border-l-4 border-[var(--accent)] px-4 py-4">
-          <h3 className="text-[21px] font-extrabold leading-tight">What we’re building</h3>
-          {overview?.sections.length ? (
-            <p className="mt-1 text-[15px] text-[var(--muted)]">
-              {overview.source?.status === "signed" ? "Signed project scope" : "Approved project scope"}
-              {overview.source?.date && ` · ${fmtDate(overview.source.date)}`}
-            </p>
-          ) : (
-            <p className="mt-2 text-[16px] text-[var(--muted)]">
-              {overview?.unavailableReason || "The project scope is unavailable here. Contact Penney for the current scope."}
-            </p>
-          )}
-        </div>
-        {!!overview?.sections.length && (
-          <details className="group/scope border-t border-[var(--line)]">
-            <summary className={disclosure}>
-              Read the full project scope
-              <span className="mt-2 grid gap-1 font-normal text-[var(--muted)] group-open/scope:hidden">
-                {overview.sections.slice(0, 3).map((s) => (
-                  <span key={s.id} className="line-clamp-2">
-                    <strong className="font-semibold text-[var(--ink)]">{cap(s.label)}</strong> · {s.items[0]?.title}
-                  </span>
+    <div className="grid min-w-0 items-start gap-6 [overflow-wrap:anywhere] sm:gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(18rem,1fr)]">
+      <div className="min-w-0 space-y-5 sm:space-y-7">
+        <section aria-labelledby="job-scope-title" className="overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
+          <div className="px-5 pb-4 pt-5 sm:px-7 sm:pb-5 sm:pt-7">
+            <h2 id="job-scope-title" className="text-[25px] font-extrabold leading-tight tracking-[-0.04em] sm:text-[32px]">What we’re building</h2>
+            {featured.length > 0 && (
+              <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] font-semibold text-[var(--muted)]">
+                <ClipboardCheck aria-hidden size={15} className="text-[var(--accent-dark)]" />
+                {overview?.source?.status === "signed" ? "Signed project scope" : "Approved project scope"}
+                {overview?.source?.date && ` · ${fmtDate(overview.source.date)}`}
+              </p>
+            )}
+            {featured.length === 0 && <p className="mt-3 text-[16px] text-[var(--muted)]">{overview?.unavailableReason || "The project scope is unavailable here. Contact Penney for the current scope."}</p>}
+            {featured.length > 0 && (
+              <ul className="mt-5 space-y-4 border-t border-[var(--line)] pt-4 sm:mt-6 sm:pt-5">
+                {featured.map(({ id, label, items: [item] }) => (
+                  <li key={id} className="border-l-2 border-[var(--accent)] pl-3.5">
+                    <p className="text-[13px] font-extrabold text-[var(--accent-dark)]">{cap(label)}</p>
+                    <h3 className="mt-0.5 text-[18px] font-bold leading-snug tracking-tight sm:text-[20px]">{item.title}</h3>
+                    {item.description && <p className={`mt-1 max-w-[65ch] whitespace-pre-line text-[15px] leading-relaxed text-[var(--muted)] sm:text-base ${hasFullScope ? "line-clamp-3" : ""}`}>{item.description}</p>}
+                  </li>
                 ))}
-              </span>
-            </summary>
-            {overview.sections.map((section) => (
-              <details key={section.id} className="border-t border-[var(--line)]">
-                <summary className={disclosure}>
-                  {cap(section.label)}
-                  <span className="ml-2 text-[13px] font-semibold text-[var(--muted)]">{section.items.length} {section.items.length === 1 ? "item" : "items"}</span>
-                </summary>
-                <ul className="space-y-3 border-t border-[var(--line)] bg-[var(--paper)] px-4 py-3">
-                  {section.items.map((item, i) => (
+              </ul>
+            )}
+          </div>
+          {hasFullScope && (
+            <details className="group/scope border-t border-[var(--line)]">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 bg-[var(--paper)]/60 px-5 py-2.5 text-[15px] font-bold text-[var(--accent-dark)] sm:px-7 [&::-webkit-details-marker]:hidden">
+                View full project scope ({scopeCount} {scopeCount === 1 ? "item" : "items"})
+                <ChevronDown aria-hidden size={17} className="shrink-0 group-open/scope:rotate-180" />
+              </summary>
+              {sections.map((section) => (
+                <details key={section.id} className="border-t border-[var(--line)]">
+                  <summary className={disclosure}>
+                    {cap(section.label)}
+                    <span className="ml-2 text-[13px] font-semibold text-[var(--muted)]">{section.items.length} {section.items.length === 1 ? "item" : "items"}</span>
+                  </summary>
+                  <ul className="space-y-3 border-t border-[var(--line)] bg-[var(--paper)] px-4 py-3">
+                    {section.items.map((item, i) => (
+                      <li key={i}>
+                        <p className="font-bold">{item.title}</p>
+                        {item.description && <p className="mt-0.5 whitespace-pre-line text-[16px]">{item.description}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))}
+            </details>
+          )}
+        </section>
+
+        <section aria-labelledby="company-work-title" className="overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
+          <div className="border-b border-[var(--line)] bg-[#F4EDE5] px-5 py-4 sm:px-7">
+            <h2 id="company-work-title" className="text-[23px] font-extrabold leading-tight tracking-[-0.035em] sm:text-[26px]">Your company’s work</h2>
+          </div>
+          <div className="divide-y divide-[var(--line)]">
+            {data.assignment_summary && (
+              <div className="px-5 py-5 sm:px-7">
+                <p className="text-[13px] font-bold text-[var(--accent-dark)]">Job assignment</p>
+                <p className="mt-1.5 max-w-[65ch] whitespace-pre-line text-[17px] font-semibold leading-relaxed">{data.assignment_summary}</p>
+              </div>
+            )}
+            {commitments.map((work) => (
+              <div key={work.key} className="px-5 py-4 sm:px-7">
+                <p className="text-[13px] font-bold text-[var(--accent-dark)]">{work.source}</p>
+                {work.title && <p className="mt-1 font-bold">{work.title}</p>}
+                <p className="mt-1 whitespace-pre-line">{work.scope || "No scope details posted for this item. Check with Penney before starting."}</p>
+              </div>
+            ))}
+            {!data.assignment_summary && commitments.length === 0 && (
+              <p className="p-4 text-[16px] text-[var(--muted)]">Penney hasn’t posted a scope for your company here. Contact your project manager to confirm the work.</p>
+            )}
+            {data.scope.length > 0 && (
+              <details>
+                <summary className={disclosure}>Estimate reference for your trade</summary>
+                <ul className="space-y-3 px-4 pb-4">
+                  {data.scope.map((s, i) => (
                     <li key={i}>
-                      <p className="font-bold">{item.title}</p>
-                      {item.description && <p className="mt-0.5 whitespace-pre-line text-[16px]">{item.description}</p>}
+                      {s.trade && <p className="label">{cap(s.trade)}</p>}
+                      {s.description && <p className="font-bold">{s.description}</p>}
+                      {s.scope && <p className="whitespace-pre-line">{s.scope}</p>}
                     </li>
                   ))}
                 </ul>
               </details>
-            ))}
-          </details>
-        )}
-      </section>
+            )}
+          </div>
+        </section>
 
-      <section>
-        <h3 className={heading}>Your company’s work</h3>
-        <div className="card divide-y divide-[var(--line)]">
-          {data.assignment_summary && (
-            <div className="p-4">
-              <p className="text-[13px] font-bold text-[var(--accent-dark)]">Job assignment</p>
-              <p className="mt-1 whitespace-pre-line">{data.assignment_summary}</p>
-            </div>
+      </div>
+      <aside aria-label="Field references" className="grid min-w-0 items-start gap-6 sm:grid-cols-2 lg:grid-cols-1">
+        <section className="min-w-0">
+          <div className="overflow-hidden rounded-2xl bg-[var(--ink)] text-white">
+            <h2 className="px-5 pt-5 text-[22px] font-extrabold tracking-[-0.035em] sm:px-6">Plans &amp; files</h2>
+            {document && <FieldDocumentLink document={document} featured />}
+            {data.files_unavailable && <p className="px-5 py-4 text-white/85">Some files couldn’t load. Open Plans &amp; files to retry.</p>}
+            {!document && !data.files_unavailable && <p className="px-5 pb-5 pt-3 text-white/85">Penney hasn’t posted plans or files for this job yet.</p>}
+            {(document || data.files_unavailable) && (
+              <button type="button" onClick={onFiles} className="flex min-h-12 w-full items-center justify-between gap-3 border-t border-white/20 px-5 text-left text-[15px] font-bold text-white hover:bg-white/10 sm:px-6">
+                {data.files_unavailable ? "Open plans & files" : `All job files (${files.length})`}
+                <ArrowRight aria-hidden size={17} />
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <h2 className={heading}>Your dates on this job</h2>
+          {upcoming.length > 0 ? (
+            <TimelineList>{upcoming.map((p) => <DateRow key={p.id} phase={p} onAnswerDates={onAnswerDates} />)}</TimelineList>
+          ) : (
+            <p className="card p-4 text-[var(--muted)]">No upcoming dates posted for you.</p>
           )}
-          {commitments.map((work) => (
-            <div key={work.key} className="p-4">
-              <p className="text-[13px] font-bold text-[var(--accent-dark)]">{work.source}</p>
-              {work.title && <p className="mt-1 font-bold">{work.title}</p>}
-              <p className="mt-1 whitespace-pre-line">{work.scope || "No scope details posted for this item. Check with Penney before starting."}</p>
-            </div>
-          ))}
-          {!data.assignment_summary && commitments.length === 0 && (
-            <p className="p-4 text-[16px] text-[var(--muted)]">Penney hasn’t posted a scope for your company here. Contact your project manager to confirm the work.</p>
-          )}
-          {data.scope.length > 0 && (
-            <details>
-              <summary className={disclosure}>Estimate reference for your trade</summary>
-              <ul className="space-y-3 px-4 pb-4">
-                {data.scope.map((s, i) => (
-                  <li key={i}>
-                    {s.trade && <p className="label">{cap(s.trade)}</p>}
-                    {s.description && <p className="font-bold">{s.description}</p>}
-                    {s.scope && <p className="whitespace-pre-line">{s.scope}</p>}
-                  </li>
-                ))}
-              </ul>
+          {past.length > 0 && (
+            <details className="mt-2">
+              <summary className={disclosure}>Past dates ({past.length})</summary>
+              <TimelineList>{past.map((p) => <DateRow key={p.id} phase={p} />)}</TimelineList>
             </details>
           )}
-        </div>
-      </section>
+        </section>
 
-      <section>
-        <h3 className={heading}>Plans &amp; files</h3>
-        <div className="card overflow-hidden">
-          {document && (
-            <a href={document.url} target="_blank" rel="noreferrer" className="flex min-h-[60px] items-center justify-between gap-3 px-4 py-3">
-              <span className="min-w-0">
-                <span className="label block">{document.group === "drawings" ? "Current drawing" : "Job file"}</span>
-                <span className="block font-bold">{document.title}</span>
-                <span className="block text-[14px] text-[var(--muted)]">
-                  {[document.subtitle, document.date && fmtDate(document.date)].filter(Boolean).join(" · ")}
-                </span>
-              </span>
-              <span aria-hidden className="text-[var(--accent-dark)]">↗</span>
-            </a>
+        <section>
+          <h2 className={heading}>Fixtures &amp; selections</h2>
+          {data.selections.length > 0 ? (
+            <ul className="card divide-y divide-[var(--line)]">{data.selections.map((s) => <SelectionRow key={s.id} selection={s} />)}</ul>
+          ) : (
+            <p className="card p-4 text-[var(--muted)]">No selections posted for this job yet.</p>
           )}
-          {data.files_unavailable && <p className="px-4 py-3 text-[var(--muted)]">Some files couldn’t load. Open Plans &amp; files to retry.</p>}
-          {!document && !data.files_unavailable && <p className="p-4 text-[var(--muted)]">Penney hasn’t posted plans or files for this job yet.</p>}
-          {(document || data.files_unavailable) && (
-            <button type="button" onClick={onFiles} className="min-h-[48px] w-full border-t border-[var(--line)] px-4 text-left font-bold text-[var(--accent-dark)]">
-              {data.files_unavailable ? "Open plans & files" : `See all ${files.length} ${files.length === 1 ? "file" : "files"}`} ›
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h3 className={heading}>Your dates on this job</h3>
-        {upcoming.length > 0 ? (
-          <TimelineList>{upcoming.map((p) => <DateRow key={p.id} phase={p} onAnswerDates={onAnswerDates} />)}</TimelineList>
-        ) : (
-          <p className="card p-4 text-[var(--muted)]">No upcoming dates posted for you.</p>
-        )}
-        {past.length > 0 && (
-          <details className="mt-2">
-            <summary className={disclosure}>Past dates ({past.length})</summary>
-            <TimelineList>{past.map((p) => <DateRow key={p.id} phase={p} />)}</TimelineList>
-          </details>
-        )}
-      </section>
-
-      <section>
-        <h3 className={heading}>Fixtures &amp; selections</h3>
-        {data.selections.length > 0 ? (
-          <ul className="card divide-y divide-[var(--line)]">{data.selections.map((s) => <SelectionRow key={s.id} selection={s} />)}</ul>
-        ) : (
-          <p className="card p-4 text-[var(--muted)]">No selections posted for this job yet.</p>
-        )}
-      </section>
+        </section>
+      </aside>
     </div>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Empty, MoneySummary, PAID_GREEN } from "@/components/portal-kit";
+import { Banknote, CheckCheck, FileText } from "lucide-react";
+import { Empty, PAID_GREEN } from "@/components/portal-kit";
 import { fmtMoney, fmtShort } from "@/lib/portal-kit/format";
 import type {
   SubAgreedAmount,
@@ -75,76 +76,81 @@ export function MoneyTab({
 
   return (
     <>
-      <h1 className="text-[28px] font-extrabold leading-tight tracking-tight">Your billing</h1>
-      <MoneySummary
-        label="Your work on open jobs"
-        amount={summary.agreed_open_jobs}
-        note={summary.agreed_open_jobs > 0 ? undefined : "No agreed prices on file yet."}
-        stats={[
-          { label: "Paid this year", amount: summary.paid_this_year, tone: "paid" },
-          { label: "Owed to you", amount: summary.owed },
-        ]}
-      >
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-3">
-          <p className="label">Sent, waiting for Penney</p>
-          <p className="shrink-0 text-[18px] font-extrabold">
-            {waiting === 0 ? "None" : `${waiting} ${waiting === 1 ? "invoice" : "invoices"}`}
-          </p>
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--line)] pb-5">
+        <h1 className="text-[32px] font-extrabold leading-none tracking-tight sm:text-[42px]">Your billing</h1>
+        {canSendInvoice && <button type="button" onClick={onSendInvoice} className="btn btn-primary">Send an invoice</button>}
+      </div>
+      <dl className="grid grid-cols-2 gap-3 tabular-nums sm:grid-cols-3">
+        <div className="col-span-2 rounded-2xl bg-[var(--ink)] p-4 text-white sm:col-span-1 lg:p-6">
+          <dt className="flex items-center gap-2 text-sm font-bold"><Banknote aria-hidden className="size-[18px] text-[#EDAB86]" />Owed to you</dt>
+          <dd className="mt-2 break-words text-[28px] font-extrabold leading-tight tracking-tight lg:text-[34px]">{fmtMoney(summary.owed)}</dd>
         </div>
-      </MoneySummary>
+        <div className="card min-w-0 p-3 sm:p-4 lg:p-6">
+          <dt className="flex items-center gap-2 text-sm font-bold text-[var(--muted)]"><CheckCheck aria-hidden className="hidden size-[18px] shrink-0 sm:block" />Paid this year</dt>
+          <dd className="mt-2 break-words text-lg font-extrabold leading-tight sm:text-[24px] lg:text-[30px]" style={{ color: PAID_GREEN }}>{fmtMoney(summary.paid_this_year)}</dd>
+        </div>
+        <div className="card min-w-0 p-3 sm:p-4 lg:p-6">
+          <dt className="flex items-center gap-2 text-sm font-bold text-[var(--muted)]"><FileText aria-hidden className="hidden size-[18px] shrink-0 sm:block" />Your work on open jobs</dt>
+          <dd className="mt-2 break-words text-lg font-extrabold leading-tight sm:text-[24px] lg:text-[30px]">{fmtMoney(summary.agreed_open_jobs)}</dd>
+          {summary.agreed_open_jobs <= 0 && <dd className="mt-1 text-sm text-[var(--muted)]">No agreed prices on file yet.</dd>}
+        </div>
+      </dl>
 
-      {canSendInvoice && (
-        <button type="button" onClick={onSendInvoice} className="btn btn-primary btn-lg btn-block">
-          Send an invoice
-        </button>
-      )}
-
-      {money.invoices.length === 0 ? (
-        <Empty>Your invoices and payments show up here once Penney has them on file.</Empty>
-      ) : (
-        <section className="card px-4 pb-1 pt-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="label">Invoices</p>
-            <div role="group" aria-label="Which invoices" className="flex gap-2">
-              {(["open", "all"] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  aria-pressed={filter === f}
-                  onClick={() => setFilter(f)}
-                  className={`min-h-[44px] rounded-full px-4 text-[15px] font-bold ${
-                    filter === f ? "bg-[var(--ink)] text-white" : "border border-[var(--line)] text-[var(--muted)]"
-                  }`}
-                >
-                  {f === "open" ? `Open${openCount > 0 ? ` (${openCount})` : ""}` : "All"}
-                </button>
-              ))}
-            </div>
+      <div className={`grid items-start gap-5 ${byJob.length ? "lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]" : ""}`}>
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-1">
+            <h2 className="text-[20px] font-extrabold">Invoices</h2>
+            {waiting > 0 && <span className="text-sm font-semibold text-[var(--muted)]">{waiting} awaiting Penney review</span>}
           </div>
-          {shown.length === 0 ? (
-            <p className="py-5 text-[16px] text-[var(--muted)]">Nothing open. You&apos;re paid up.</p>
+
+          {money.invoices.length === 0 ? (
+            <Empty>Your invoices and payments show up here once Penney has them on file.</Empty>
           ) : (
-            <ul className="mt-1 divide-y divide-[var(--line)]">
-              {shown.map((g) => (
-                <InvoiceRow key={g.key} group={g} submission={submissionFor(g)} />
+            <section className="card px-4 pb-1 pt-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-bold text-[var(--muted)]">{shown.length} {shown.length === 1 ? "invoice" : "invoices"}</p>
+                <div role="group" aria-label="Which invoices" className="flex gap-2">
+                  {(["open", "all"] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={filter === f}
+                      onClick={() => setFilter(f)}
+                      className={`min-h-[44px] rounded-full px-4 text-[15px] font-bold ${
+                        filter === f ? "bg-[var(--ink)] text-white" : "border border-[var(--line)] text-[var(--muted)]"
+                      }`}
+                    >
+                      {f === "open" ? `Open${openCount > 0 ? ` (${openCount})` : ""}` : "All"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {shown.length === 0 ? (
+                <p className="py-5 text-[16px] text-[var(--muted)]">Nothing open. You&apos;re paid up.</p>
+              ) : (
+                <ul className="mt-1 divide-y divide-[var(--line)]">
+                  {shown.map((g) => (
+                    <InvoiceRow key={g.key} group={g} submission={submissionFor(g)} />
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </div>
+
+        {byJob.length > 0 && (
+          <section className="min-w-0">
+            <h2 className="mb-2 text-[20px] font-extrabold">By job</h2>
+            <ul className="card divide-y divide-[var(--line)] overflow-hidden">
+              {byJob.map((j) => (
+                <li key={j.project_id}>
+                  <JobMoneyRow job={j} onOpen={() => onOpenJob(j.project_id, { view: "paperwork" })} />
+                </li>
               ))}
             </ul>
-          )}
-        </section>
-      )}
-
-      {byJob.length > 0 && (
-        <section>
-          <p className="label mb-2 px-1">By job</p>
-          <ul className="card divide-y divide-[var(--line)] overflow-hidden">
-            {byJob.map((j) => (
-              <li key={j.project_id}>
-                <JobMoneyRow job={j} onOpen={() => onOpenJob(j.project_id, { view: "paperwork" })} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+          </section>
+        )}
+      </div>
     </>
   );
 }

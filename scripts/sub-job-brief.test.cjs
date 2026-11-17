@@ -23,12 +23,38 @@ function load(moduleName) {
 const { JobBrief } = load("@/components/sub-portal/job-brief");
 const { JobDrawings } = load("@/components/sub-portal/job-drawings");
 const { TodayTab } = load("@/components/sub-portal/today-tab");
+const { PortalNavigation } = load("@/components/sub-portal/portal-navigation");
+const { ScheduleCalendar, isConfirmedWorkday } = load("@/components/sub-portal/schedule-calendar");
 const { parseJobLink, jobLink } = load("@/lib/sub-portal/job-link");
 const empty = {
   approved_scope: null, assignment_summary: null, scope: [], agreements: [], quotes: [],
   dates: [], files: [], files_unavailable: false, selections: [],
 };
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
+
+test("shared navigation respects billing visibility at every width", () => {
+  const props = { company: "Sample company", officePhone: "555-0100", active: "dates", needed: 2, answers: 1, onNavigate() {} };
+  const markup = render(PortalNavigation, { ...props, showMoney: false });
+  assert.match(markup, /Portal navigation/);
+  assert.match(markup, /Sample company/);
+  assert.match(markup, /Schedule/);
+  assert.match(markup, /aria-current="page"/);
+  assert.doesNotMatch(markup, /Billing/);
+  assert.match(render(PortalNavigation, { ...props, showMoney: true }), /Billing/);
+});
+
+test("calendar shows the job-local month and only links firm work to an exact day", () => {
+  const phase = { firm: true, start_date: "2028-02-28", end_date: "2028-03-02", status: "not_started" };
+  assert.equal(isConfirmedWorkday(phase, "2028-02-29"), true);
+  for (const override of [{ firm: false }, { status: "on_hold" }, { sub_response: "declined" }, { start_date: null }]) {
+    assert.equal(isConfirmedWorkday({ ...phase, ...override }, "2028-02-29"), false);
+  }
+  const markup = render(ScheduleCalendar, { today: "2028-02-01", phases: [phase], selected: null, onSelect() {} });
+  assert.match(markup, /February 2028/);
+  assert.match(markup, /Feb 29, 2028, show confirmed work/);
+  assert.doesNotMatch(markup, /Feb 30/);
+  assert.match(markup, /Feb 27, 2028, no confirmed work/);
+});
 const brief = (fields) => render(JobBrief, { data: { ...empty, ...fields }, onFiles() {} });
 
 test("project-wide construction, assigned work and estimate reference retain their sources", () => {
@@ -65,6 +91,22 @@ test("empty brief distinguishes unpublished work, missing records and an unavail
   const broken = render(JobDrawings, { files: [], unavailable: true, onRetry() {} });
   assert.match(broken, /Try again/);
   assert.doesNotMatch(broken, /hasn’t posted/);
+});
+
+test("opens directly on real scope detail and keeps remaining approved items discoverable", () => {
+  const markup = brief({ approved_scope: { sections: [
+    { id: "m", label: "Millwork", items: [
+      { title: "Install panels", description: "Align exposed ends." },
+      { title: "Fit crown", description: "Scribe to the ceiling." },
+    ] },
+    { id: "e", label: "Electrical", items: [{ title: "Lighting", description: "Rough in undercabinet lights." }] },
+  ] } });
+  const disclosureAt = markup.indexOf("<details");
+  assert.ok(disclosureAt > 0);
+  assert.match(markup.slice(0, disclosureAt), /Align exposed ends/);
+  assert.match(markup.slice(0, disclosureAt), /Rough in undercabinet lights/);
+  assert.match(markup.slice(disclosureAt), /Scribe to the ceiling/);
+  assert.match(markup, /aria-label="Field references"/);
 });
 
 test("only actionable upcoming dates link to an answer", () => {

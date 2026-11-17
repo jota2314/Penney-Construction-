@@ -12,7 +12,8 @@ import {
   type PortalAction,
   type TimelineChip,
 } from "@/components/portal-kit";
-import { telHref } from "@/lib/portal-kit/format";
+import { fmtDate, telHref } from "@/lib/portal-kit/format";
+import { isConfirmedWorkday, ScheduleCalendar } from "./schedule-calendar";
 import { coversDay } from "@/lib/sub-portal/et-day";
 import type { DayString, SubDateBucket, SubDatePhase, SubDatesPayload, SubScheduleAction } from "@/lib/sub-portal/payload";
 
@@ -71,6 +72,7 @@ export function DatesTab({
   // when the phase goes away (dates he took off).
   const [noticeAt, setNoticeAt] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   useEffect(() => {
     if (!focusPhaseId) return;
@@ -86,6 +88,8 @@ export function DatesTab({
   }
   // Newest past work first.
   const past = [...(byBucket.get("past") ?? [])].reverse();
+  const selectedPhases = selectedDay ? dates.phases.filter((phase) => isConfirmedWorkday(phase, selectedDay)) : [];
+  const noticeMoved = selectedDay && !selectedPhases.some((phase) => phase.id === noticeAt);
 
   const send = (at: string, key: string, body: SubScheduleAction, success: string) => {
     setNoticeAt(at);
@@ -113,22 +117,23 @@ export function DatesTab({
 
   return (
     <>
-      <h1 className="text-[28px] font-extrabold leading-tight tracking-tight">Your schedule</h1>
-      {noticeAt === "top" && <PortalNotice notice={rowAction.notice} onDismiss={rowAction.clearNotice} />}
+      {(noticeAt === "top" || noticeMoved) && <PortalNotice notice={rowAction.notice} onDismiss={rowAction.clearNotice} />}
       {!adding && <PortalNotice notice={sheetAction.notice} onDismiss={sheetAction.clearNotice} />}
-
-      {dates.can_propose_on.length > 0 && (
-        <button
-          type="button"
-          onClick={() => {
-            sheetAction.clearNotice();
-            setAdding(true);
-          }}
-          className="btn btn-ghost btn-lg btn-block"
-        >
-          + Add my dates
-        </button>
-      )}
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--line)] pb-5">
+        <h1 className="text-[32px] font-extrabold leading-none tracking-tight sm:text-[42px]">Your schedule</h1>
+        {dates.can_propose_on.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              sheetAction.clearNotice();
+              setAdding(true);
+            }}
+            className="btn btn-primary"
+          >
+            + Add my dates
+          </button>
+        )}
+      </div>
 
       {dates.answers_needed > 0 && (
         <p className="px-1 text-[16px] font-bold text-[var(--accent-dark)]">
@@ -140,37 +145,56 @@ export function DatesTab({
         <Empty>{dates.can_propose_on.length ? "No work dates yet. Add your dates or check back when Penney schedules your work." : "No work dates yet. Scheduled work will appear here once Penney assigns you to a job."}</Empty>
       )}
 
-      {BUCKETS.map(({ key, label }) => {
-        const list = byBucket.get(key) ?? [];
-        if (list.length === 0) return null;
-        return (
-          <section key={key}>
-            <p className="label mb-2 px-1">{label}</p>
-            <TimelineList>
-              {list.map((p) => (
-                <PhaseRow key={p.id} {...rowProps(p)} />
-              ))}
-            </TimelineList>
-          </section>
-        );
-      })}
+      {dates.phases.length > 0 && (
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(245px,0.8fr)_minmax(0,2fr)] lg:gap-7">
+          <ScheduleCalendar today={today} phases={dates.phases} selected={selectedDay} onSelect={setSelectedDay} />
+          <div className="min-w-0 space-y-5">
+            {selectedDay ? (
+              <section>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-1">
+                  <h2 className="text-xl font-extrabold">{fmtDate(selectedDay)}</h2>
+                  <button type="button" className="min-h-11 text-sm font-bold text-[var(--accent-dark)] underline" onClick={() => setSelectedDay(null)}>Show all dates</button>
+                </div>
+                {selectedPhases.length > 0
+                  ? <TimelineList>{selectedPhases.map((p) => <PhaseRow key={p.id} {...rowProps(p)} />)}</TimelineList>
+                  : <Empty>No confirmed work on this day.</Empty>}
+              </section>
+            ) : <>
+                {BUCKETS.map(({ key, label }) => {
+                  const list = byBucket.get(key) ?? [];
+                  if (list.length === 0) return null;
+                  return (
+                    <section key={key}>
+                      <h2 className="mb-2 px-1 text-[19px] font-extrabold">{label}</h2>
+                      <TimelineList>
+                        {list.map((p) => (
+                          <PhaseRow key={p.id} {...rowProps(p)} />
+                        ))}
+                      </TimelineList>
+                    </section>
+                  );
+                })}
 
-      {past.length > 0 && (
-        <details className="group">
-          <summary className="flex min-h-[44px] cursor-pointer list-none items-center px-1 text-[16px] font-bold text-[var(--muted)] [&::-webkit-details-marker]:hidden">
-            <span aria-hidden className="mr-2 inline-block group-open:rotate-90">
-              ›
-            </span>
-            Past work ({past.length})
-          </summary>
-          <div className="mt-2">
-            <TimelineList>
-              {past.map((p) => (
-                <PhaseRow key={p.id} {...rowProps(p)} />
-              ))}
-            </TimelineList>
+                {past.length > 0 && (
+                  <details className="group">
+                    <summary className="flex min-h-[44px] cursor-pointer list-none items-center px-1 text-[16px] font-bold text-[var(--muted)] [&::-webkit-details-marker]:hidden">
+                      <span aria-hidden className="mr-2 inline-block group-open:rotate-90">
+                        ›
+                      </span>
+                      Past work ({past.length})
+                    </summary>
+                    <div className="mt-2">
+                      <TimelineList>
+                        {past.map((p) => (
+                          <PhaseRow key={p.id} {...rowProps(p)} />
+                        ))}
+                      </TimelineList>
+                    </div>
+                  </details>
+                )}
+            </>}
           </div>
-        </details>
+        </div>
       )}
 
       {dates.phases.some((p) => p.sub_response && !p.mine && p.bucket !== "past") && (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowUpRight, ClipboardList, FileText, FolderOpen, MapPin, NotebookPen, Phone } from "lucide-react";
 import { Empty, PortalNotice } from "@/components/portal-kit";
 import { projectTypeLabel } from "@/lib/constants/project";
 import type { JobView } from "@/lib/sub-portal/job-link";
@@ -30,12 +31,12 @@ const STALE_MS = 2 * 60_000;
 
 /** The job screen's segments. */
 type Segment = JobView;
-const SEGMENTS: { key: Segment; label: string }[] = [
-  { key: "info", label: "Job brief" },
-  { key: "drawings", label: "Plans & files" },
-  { key: "log", label: "Field log" },
-  { key: "paperwork", label: "Paperwork" },
-];
+const SEGMENTS = [
+  { key: "info", label: "Job brief", short: "Brief", icon: ClipboardList },
+  { key: "drawings", label: "Plans & files", short: "Files", icon: FolderOpen },
+  { key: "log", label: "Field log", short: "Log", icon: NotebookPen },
+  { key: "paperwork", label: "Paperwork", short: "Paperwork", icon: FileText },
+] as const;
 
 function jobUrl(projectId: string, previewSubId: string | null, cursor: string | null): string {
   const params = new URLSearchParams();
@@ -244,9 +245,9 @@ export function JobScreen({
 
   // Rendered in place of the tabs, so it brings its own page column.
   return (
-    <main className="mx-auto max-w-2xl space-y-4 px-4 pt-3 [overflow-wrap:anywhere]" style={{ paddingBottom: "max(48px, env(safe-area-inset-bottom))" }}>
-      <button type="button" onClick={onBack} className="inline-flex min-h-[44px] items-center gap-1.5 pr-3 text-[16px] font-bold">
-        <span aria-hidden className="text-[24px] leading-none">‹</span>
+    <main className="mx-auto w-full max-w-[76rem] px-4 pt-2 [overflow-wrap:anywhere] sm:px-6 sm:pt-4 lg:px-8" style={{ paddingBottom: "max(48px, env(safe-area-inset-bottom))" }}>
+      <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center gap-2 pr-4 text-[14px] font-bold text-[var(--muted)] hover:text-[var(--accent-dark)]">
+        <ArrowLeft aria-hidden size={16} />
         Back to portal
       </button>
 
@@ -271,7 +272,7 @@ export function JobScreen({
           <JobHeaderCard job={current.job} officePhone={officePhone} />
           {error && <PortalNotice notice={{ tone: "error", text: error }} onDismiss={() => setError(null)} />}
 
-          <div role="group" aria-label="Job sections" className={`grid gap-1 rounded-2xl border border-[var(--line)] bg-white p-1 ${showPaperwork ? "grid-cols-2 min-[400px]:grid-cols-4" : "grid-cols-3"}`}>
+          <div role="group" aria-label="Job sections" className="mb-5 flex border-b border-[var(--line)] sm:mb-7 sm:gap-2">
             {sections.map((s) => {
               const on = s.key === activeSection;
               return (
@@ -280,10 +281,12 @@ export function JobScreen({
                   ref={s.key === "drawings" ? filesButton : undefined}
                   type="button"
                   aria-pressed={on}
+                  aria-label={s.label}
                   onClick={() => pick(s.key)}
-                  className={`min-h-[44px] rounded-xl px-1 text-[15px] font-bold ${on ? "bg-[var(--ink)] text-white" : "text-[var(--muted)]"}`}
+                  className={`relative -mb-px flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-1 border-b-[3px] px-1 py-1.5 text-[13px] font-bold leading-tight min-[430px]:flex-row min-[430px]:gap-2 sm:min-h-14 sm:flex-none sm:px-4 sm:text-[16px] ${on ? "border-[var(--accent)] text-[var(--accent-dark)]" : "border-transparent text-[var(--muted)] hover:text-[var(--ink)]"}`}
                 >
-                  {s.label}
+                  <s.icon aria-hidden size={17} strokeWidth={1.8} />
+                  <span className="sm:hidden">{s.short}</span><span className="hidden sm:inline">{s.label}</span>
                 </button>
               );
             })}
@@ -291,7 +294,7 @@ export function JobScreen({
 
           {/* Always mounted: the composer's picked photos, chips, note and retry id
               live in its state, and switching segments must never drop them. */}
-          <div hidden={activeSection !== "log"}>
+          <div hidden={activeSection !== "log"} className="mx-auto max-w-3xl">
             <JobLog
               data={current}
               posts={posts}
@@ -335,46 +338,41 @@ function JobHeaderCard({ job, officePhone }: { job: SubJobHeader; officePhone: s
   const status = STATUS_PILL[job.status];
   const identifier = [job.project_number && `Job ${job.project_number}`, projectTypeLabel(job.project_type)].filter(Boolean).join(" · ");
   return (
-    <section className="card p-4">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        {identifier && <p className="text-[13px] font-bold text-[var(--accent-dark)]">{identifier}</p>}
-        {status && (
-          <span className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[13px] font-bold text-white" style={{ background: status.color }}>
-            {status.label}
-          </span>
-        )}
-      </div>
-      <h1 className="text-[25px] font-extrabold leading-tight sm:text-[28px]">{job.name}</h1>
-      {/* Only his own QR scan today says he's here; a post or clock-in doesn't. */}
-      {job.visit_today && job.visit_today.scans > 0 && (
-        <p className="mt-2 inline-flex items-center rounded-full px-3 py-1 text-[15px] font-bold text-white" style={{ background: "#2F6B4F" }}>
-          ✓ Checked in {fmtTime(job.visit_today.first_seen_at)}
-        </p>
-      )}
-      {job.address && (
-        <div className="mt-3 flex items-center gap-3">
-          <p className="min-w-0 flex-1 text-[16px] text-[var(--muted)]">{job.address}</p>
-          {job.directions_url && (
-            <a href={job.directions_url} target="_blank" rel="noreferrer" className="btn btn-ghost shrink-0">
-              Directions
-            </a>
+    <header className="mb-3 grid min-w-0 gap-3 pb-1 pt-2 sm:mb-5 sm:gap-6 sm:pt-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {identifier && <p className="text-[13px] font-extrabold tracking-wide text-[var(--accent-dark)]">{identifier}</p>}
+          {status && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-white px-2.5 py-1 text-[12px] font-bold leading-none">
+              <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+              {status.label}
+            </span>
+          )}
+          {job.visit_today && job.visit_today.scans > 0 && (
+            <span className="text-[13px] font-bold text-[#2F6B4F]">✓ Checked in {fmtTime(job.visit_today.first_seen_at)}</span>
           )}
         </div>
-      )}
-      <div className="mt-3 flex items-center gap-3 border-t border-[var(--line)] pt-3">
-        <p className="min-w-0 flex-1 text-[16px]">
-          {pmName ? (
-            <>
-              Penney contact · <span className="font-bold">{pmName}</span>
-            </>
-          ) : (
-            "Questions? Call the office."
-          )}
-        </p>
-        <a href={telHref(phone)} aria-label={`Call ${job.pm?.phone ? pmName || "your project manager" : "the office"}`} className="btn btn-ghost shrink-0">
-          {job.pm?.phone ? "Call PM" : "Call office"}
+        <h1 className="mt-2.5 text-[clamp(1.85rem,4vw,3.35rem)] font-extrabold leading-[1.06] tracking-[-0.045em]">{job.name}</h1>
+        {job.address && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3">
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-[15px] text-[var(--muted)] sm:text-[16px]">
+              <MapPin aria-hidden size={16} className="shrink-0" />{job.address}
+            </span>
+            {job.directions_url && (
+              <a href={job.directions_url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 text-[14px] font-bold text-[var(--accent-dark)] underline underline-offset-4">
+                Directions <ArrowUpRight aria-hidden size={14} />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--line)] pt-2 md:flex-col md:items-start md:gap-1 md:border-l md:border-t-0 md:py-1 md:pl-6">
+        <p className="text-[13px] font-bold text-[var(--muted)]">Penney contact</p>
+        {pmName && <p className="font-extrabold md:text-[19px]">{pmName}</p>}
+        <a href={telHref(phone)} aria-label={`Call ${job.pm?.phone ? pmName || "your project manager" : "the office"}`} className="ml-auto inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--line)] bg-white px-3 text-[14px] font-bold hover:border-[var(--accent)] md:ml-0 md:mt-1">
+          <Phone aria-hidden size={15} />{job.pm?.phone ? "Call PM" : "Call office"}
         </a>
       </div>
-    </section>
+    </header>
   );
 }

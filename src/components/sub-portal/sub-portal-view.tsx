@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  HeaderAction,
-  PortalHeader,
   PortalNotice,
-  PortalTabBar,
   PortalTheme,
   PreviewBanner,
   useHashTab,
@@ -22,6 +19,7 @@ import { SignSheet } from "./sign-sheet";
 import { TodayTab } from "./today-tab";
 import { DatesTab } from "./dates-tab";
 import { MoneyTab } from "./money-tab";
+import { PortalNavigation } from "./portal-navigation";
 
 /**
  * The sub portal v3, one screen for both doors in:
@@ -259,17 +257,28 @@ export function SubPortalView({
   }
 
   return (
-    <PortalTheme variant="field">
+    <PortalTheme variant="field" className="pc-sub-workspace">
       {preview && (
         <PreviewBanner
           title={`Staff preview of ${data.preview?.sub_name ?? data.sub.company_name}'s portal`}
           detail={data.preview?.detail ?? "Nothing you tap here is saved."}
         />
       )}
-      <PortalHeader
-        subtitle="Penney Construction · Sub portal"
-        title={data.sub.company_name}
-        right={<HeaderAction href={telHref(flags.office_phone)} label="Call" ariaLabel="Call the office" />}
+      <PortalNavigation
+        company={data.sub.company_name}
+        officePhone={flags.office_phone}
+        active={openJob ? "today" : tab}
+        needed={needed.length}
+        answers={data.dates.answers_needed}
+        showMoney={showMoney}
+        onNavigate={(key) => {
+          if (openJob) {
+            listScroll.current = null;
+            writeJobUrl("replace", null, null);
+            setOpenJob(null);
+          }
+          go(key);
+        }}
       />
       {openJob ? (
         // JobScreen is its own page column (<main>, gutters, safe-area bottom).
@@ -293,16 +302,7 @@ export function SubPortalView({
         <>
           {/* The job screen has its own sending line under the composer. */}
           {!preview && <OutboxBanner />}
-          <PortalTabBar
-            active={tab}
-            onChange={go}
-            tabs={[
-              { key: "today", label: "Today", badge: needed.length },
-              { key: "dates", label: "Dates", badge: data.dates.answers_needed },
-              { key: "money", label: "Money", hidden: !showMoney },
-            ]}
-          />
-          <main className="mx-auto max-w-2xl space-y-4 px-4 py-5">
+          <main className="mx-auto w-full max-w-[76rem] space-y-5 px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-9">
             {refreshError && (
               <div role="status" className="card flex flex-wrap items-center justify-between gap-3 p-4">
                 <p className="min-w-0 flex-1 basis-48 text-[15px] font-semibold">Showing your last loaded job list. {refreshError}</p>
@@ -408,7 +408,7 @@ function OutboxBanner() {
   const showRetry = sending === 0 || failed > 0;
   return (
     <div className="border-b border-[var(--line)] bg-[#F1F0EC]">
-      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-2">
+      <div className="mx-auto flex max-w-[76rem] items-center gap-3 px-4 py-2 sm:px-6 lg:px-8">
         <p role="status" className="min-w-0 flex-1 text-[15px] font-semibold">
           <span aria-hidden className="mr-1.5">●</span>
           {text}
@@ -446,24 +446,24 @@ function PortalFooter({
   onSignOut: () => void;
 }) {
   return (
-    <footer className="pc-safe-bottom mx-auto max-w-2xl space-y-3 px-4 pt-4">
+    <footer className="pc-safe-bottom mx-auto flex w-full max-w-[76rem] flex-wrap items-center gap-x-5 gap-y-1 border-t border-[var(--line)] px-4 py-3 text-sm sm:px-6 lg:px-8">
+      <p className="w-full text-[13px] font-semibold text-[var(--muted)] sm:mr-auto sm:w-auto">Penney Construction, Inc. · North Shore, MA</p>
       {loomUrl && (
-        <a href={loomUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-block">
+        <a href={loomUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center font-bold text-[var(--accent-dark)]">
           Watch how (1 min)
         </a>
       )}
-      <a href={telHref(officePhone)} className="btn btn-ghost btn-block">
-        Call the office · {officePhone}
+      <a href={telHref(officePhone)} aria-label={`Call the Penney office at ${officePhone}`} className="inline-flex min-h-11 items-center font-semibold">
+        Office · {officePhone}
       </a>
       {signOutWarning && (
         <p role="status" className="text-center text-[15px] font-semibold">
           {signOutWarning}
         </p>
       )}
-      <button type="button" onClick={onSignOut} disabled={preview || signingOut} className="btn btn-ghost btn-block">
+      <button type="button" onClick={onSignOut} disabled={preview || signingOut} className="inline-flex min-h-11 items-center font-bold underline underline-offset-4 disabled:opacity-60">
         {signingOut ? "Signing out…" : signOutWarning ? "Sign out anyway" : "Sign out"}
       </button>
-      <p className="pb-6 pt-2 text-center text-[13px] text-[var(--muted)]">Penney Construction, Inc. · North Shore, MA</p>
     </footer>
   );
 }

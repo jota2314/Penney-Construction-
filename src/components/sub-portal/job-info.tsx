@@ -62,66 +62,71 @@ export function JobPaperwork({
   const canSendInvoice = !!invoiceJobs;
 
   return (
-    <div className="space-y-6">
-      {data.agreements.length > 0 && (
-        <section>
-          <h3 className={SECTION_TITLE}>Your work order{data.agreements.length === 1 ? "" : "s"}</h3>
-          <ul className="space-y-3">
-            {data.agreements.map((a) => (
-              <AgreementCard
-                key={a.id}
-                agreement={a}
-                canSign={a.can_sign && !preview && agreementsEnabled !== false}
-                onSign={() => setSigning(a.id)}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <AgreedLine agreed={data.agreed} />
-
-      {data.quotes.length > 0 && (
-        <section>
-          <h3 className={SECTION_TITLE}>Your prices on this job</h3>
-          <ul className="card divide-y divide-[var(--line)]">
-            {data.quotes.map((q) => (
-              <QuoteRow key={`${q.source}-${q.id}`} quote={q} />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {data.billing && (
-        <section>
-          <h3 className={SECTION_TITLE}>Your billing on this job</h3>
-          <div className="space-y-3">
-            <MoneySummary
-              label="Open on this job"
-              amount={data.billing.summary.open}
-              stats={[
-                { label: "Billed", amount: data.billing.summary.billed },
-                { label: "Paid", amount: data.billing.summary.paid, tone: "paid" },
-              ]}
-            />
-            {data.billing.invoices.length === 0 ? (
-              <Empty>No invoices on this job yet.</Empty>
-            ) : (
-              <ul className="card divide-y divide-[var(--line)]">
-                {data.billing.invoices.map((inv) => (
-                  <InvoiceRow key={inv.key} invoice={inv} projectId={data.job.project_id} />
+    <div className="space-y-5">
+      <h2 className="text-[27px] font-extrabold tracking-[-0.04em] sm:text-[32px]">Paperwork</h2>
+      <div className="grid items-start gap-6 lg:grid-cols-2 lg:gap-8">
+        <div className="min-w-0 space-y-5">
+          {data.agreements.length > 0 && (
+            <section>
+              <h3 className={SECTION_TITLE}>Your work order{data.agreements.length === 1 ? "" : "s"}</h3>
+              <ul className="space-y-3">
+                {data.agreements.map((a) => (
+                  <AgreementCard
+                    key={a.id}
+                    agreement={a}
+                    canSign={a.can_sign && !preview && agreementsEnabled !== false}
+                    onSign={() => setSigning(a.id)}
+                  />
                 ))}
               </ul>
-            )}
-            {canSendInvoice && (
-              <button type="button" onClick={() => setInvoicing(true)} disabled={preview} className="btn btn-primary btn-lg btn-block">
-                Send an invoice for this job
-              </button>
-            )}
-          </div>
-        </section>
-      )}
+            </section>
+          )}
 
+          <AgreedLine agreed={data.agreed} />
+
+          {data.quotes.length > 0 && (
+            <section>
+              <h3 className={SECTION_TITLE}>Your prices on this job</h3>
+              <ul className="card divide-y divide-[var(--line)]">
+                {data.quotes.map((q) => (
+                  <QuoteRow key={`${q.source}-${q.id}`} quote={q} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+        </div>
+        {data.billing && (
+          <section>
+            <h3 className={SECTION_TITLE}>Your billing on this job</h3>
+            <div className="space-y-3">
+              <MoneySummary
+                label="Open on this job"
+                amount={data.billing.summary.open}
+                stats={[
+                  { label: "Billed", amount: data.billing.summary.billed },
+                  { label: "Paid", amount: data.billing.summary.paid, tone: "paid" },
+                ]}
+              />
+              {data.billing.invoices.length === 0 ? (
+                <Empty>No invoices on this job yet.</Empty>
+              ) : (
+                <ul className="card divide-y divide-[var(--line)]">
+                  {data.billing.invoices.map((inv) => (
+                    <InvoiceRow key={inv.key} invoice={inv} projectId={data.job.project_id} />
+                  ))}
+                </ul>
+              )}
+              {canSendInvoice && (
+                <button type="button" onClick={() => setInvoicing(true)} disabled={preview} className="btn btn-primary btn-lg btn-block">
+                  Send an invoice for this job
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+
+      </div>
       {signing && (
         <SignSheet
           agreementId={signing}

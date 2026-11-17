@@ -47,6 +47,11 @@ export const PORTAL_CSS = `
 .pc-portal.pc-field .btn-primary { background:var(--accent-dark); }
 .pc-portal.pc-field .btn-primary:active { background:#7F3E20; }
 .pc-portal.pc-field input, .pc-portal.pc-field textarea, .pc-portal.pc-field select { font-size:16px; }
+.pc-sub-workspace :is(button,a,input,summary,select,textarea):focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+.pc-sub-workspace { color-scheme:light; }
+@media (forced-colors: active) {
+  .pc-sub-workspace [aria-current="page"], .pc-sub-workspace [aria-pressed="true"] { outline:2px solid Highlight; outline-offset:-2px; }
+}
 `;
 
 const PortalVariantContext = createContext<PortalVariant>("client");
