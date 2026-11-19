@@ -106,10 +106,10 @@ export function isJorgeOnlyPath(pathname: string): boolean {
 }
 
 /**
- * Who can approve a vendor bill for payment: Jorge, Ryan, Howie, Bill and
+ * Who can approve a vendor bill for payment: Jorge, Ryan, Howie, Bill, Milton and
  * Nicole. Howie and Bill came on 9/24 (the PMs who run the jobs can clear
  * their bills); Nicole on 10/16, Jorge's call, so she can approve as well as
- * pay. That means one person can now both approve and pay a bill. Every
+ * pay. Milton (PM) on 11/19, Jorge's call. That means one person can now both approve and pay a bill. Every
  * approval still records who approved it, and Jorge + Ryan are CC'd on the
  * approval email. An email allowlist because `owner` also covers Shannon,
  * who stays out. Luis (office_admin) is deliberately NOT here: he can see
@@ -127,10 +127,11 @@ export const BILL_PAY_APPROVER_EMAILS: readonly string[] = [
   "hclick@penneyconstructioninc.com",
   "bcrowley@penneyconstructioninc.com",
   "nsmith@penneyconstructioninc.com",
+  "manderson@penneyconstructioninc.com",
 ];
 
 /** Who the "only X can approve" refusals name. */
-export const BILL_PAY_APPROVER_NAMES = "Jorge, Ryan, Howie, Bill or Nicole";
+export const BILL_PAY_APPROVER_NAMES = "Jorge, Ryan, Howie, Bill, Milton or Nicole";
 
 export function canApproveBillPay(email: string | null | undefined): boolean {
   if (!email) return false;

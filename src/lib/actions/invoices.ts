@@ -308,7 +308,7 @@ export async function approveInvoiceForPay(invoiceId: string) {
   // bill. Checked on the REAL account so View-as can't approve.
   const viewer = await getUser();
   if (!canApproveBillPay(viewer?.realProfile?.email ?? viewer?.email)) {
-    return { error: "Only Jorge, Ryan, Howie, Bill or Nicole can approve bills for pay" };
+    return { error: "Only Jorge, Ryan, Howie, Bill, Milton or Nicole can approve bills for pay" };
   }
 
   const { data: invoice, error: invoiceError } = await supabase
