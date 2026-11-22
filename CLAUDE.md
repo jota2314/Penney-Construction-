@@ -293,6 +293,57 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### November 22, 2026 — Quo webhook: team calls + texts stored on the job (no UI yet)
+- **What it is:** Quo (formerly OpenPhone) is a phone app the team calls and
+  texts clients from. Its webhook posts every text, finished call, recording,
+  AI summary, transcript and voicemail to **`POST /api/quo/webhook`**, which
+  stores them and files them on the job. The August Twilio field line is a
+  different thing (one allowlisted number, no phone app) and still lives only
+  on the unmerged branch `claude/twilio-number-penny-luis-tbiecz`.
+- **Storage:** the same two tables the Twilio migration created,
+  `sms_messages` + `phone_calls`, now with `provider` ('twilio' | 'quo') and
+  `external_id` (Quo's own id). Rows are keyed on `(provider, external_id)`, so
+  Quo's retries and out-of-order deliveries land on one row. Calls also get
+  `summary[]`, `next_steps[]`, `transcript_segments`, `recordings`,
+  `has_voicemail`, `answered_at`, `completed_at`.
+- **Matching** (`src/lib/quo/events.ts`, pure functions): the outside number is
+  matched on last-10 digits to an employee, then a client, then a sub. A
+  client or sub is filed on a job ONLY when there is exactly one candidate:
+  one open job (`single_open`), or one job in total (`single`). Two open jobs
+  = `project_id` null + `project_match = 'ambiguous'` for a person to place;
+  set `project_match = 'manual'` when someone does. Later events for a row
+  only update that event's own columns, so they never move a re-filed row.
+- **Files:** `src/app/api/quo/webhook/route.ts` (verify, parse, store),
+  `src/lib/quo/signature.ts` (HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`,
+  5-minute replay window, no SDK), `src/lib/quo/events.ts` (payload → rows,
+  API version `2026-03-30`), `src/lib/quo/ingest.ts` (lookups + writes via the
+  service role). Nothing here calls AI, replies, or notifies anyone.
+- **DB:** migration `20261122210000_quo_phone_log.sql`, additive. **NOT APPLIED
+  to prod yet** (it was dry-run against prod inside a block that rolls back).
+  Apply it BEFORE this code is deployed: without the new columns the route
+  answers 500 and Quo keeps retrying for about 27 hours.
+- **Config:** `QUO_WEBHOOK_KEY` in Vercel = the `whsec_...` signing key Quo
+  returns when the webhook is created (comma-separate two keys while
+  replacing a webhook). Unset = the route answers 503.
+- **NOT DONE YET (needs Jorge):**
+  1. Open the Quo workspace for Penney. Transcripts need the Business plan or
+     higher. MHR gets its own separate workspace and its own app; never share
+     a workspace, key or webhook between the two companies.
+  2. Create the webhook (the response's `data.key` is the signing key):
+     `curl -X POST https://api.quo.com/webhooks -H "Authorization: $QUO_API_KEY" -H "Quo-Api-Version: 2026-03-30" -H "Content-Type: application/json" -d '{"url":"https://penney-construction-mf6m.vercel.app/api/quo/webhook","label":"Penney app","events":["message.received","message.delivered","message.failed","message.undelivered","call.completed","call.recording.completed","call.summary.completed","call.transcript.completed","call.voicemail.completed"]}'`
+     Add `"resourceIds":["PN..."]` to capture only chosen company numbers.
+  3. Massachusetts requires every party's consent to record a call. Make sure
+     callers are told before recording, summaries or transcripts are turned on.
+  4. Put phones on the records: 112 of 215 clients, 105 of 179 subs and 9 of
+     20 employees have one. A number with no record is stored unmatched.
+  5. No screen reads these rows yet. The Phone Line UI on the Twilio branch
+     is the natural base (thread view, voicemail player); it needs a job
+     filter and a "place this on a job" action for unmatched rows.
+  6. Reads are the house posture (any signed-in teammate, crew included, can
+     select both tables). Client call transcripts are more sensitive than a
+     field line's texts; tighten the two select policies before go-live if
+     crew should not see them.
+
 ### November 5, 2026 — Finances: real cash flow statement + WIP job schedule
 - **Cash flow tab rebuilt** on the Eastern Bank checking import only
   (`src/lib/finance/cash-statement.ts`, UI `cash-flow-statement.tsx`). Monthly
