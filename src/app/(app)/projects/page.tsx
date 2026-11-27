@@ -196,7 +196,7 @@ export default function ProjectsPage() {
   return (
     <>
       <Header title="Projects" backHref="/command-center" backLabel="Command Center" />
-      <div className="flex flex-1 flex-col gap-4 overflow-auto p-4 pb-24 sm:gap-6 sm:p-6">
+      <div className="flex flex-1 flex-col gap-4 overflow-auto p-4 sm:gap-6 sm:p-6">
         {/* Stream the data in behind the shell — the header and nav paint
             immediately instead of the whole route blocking on the queries.
             The boundary also keeps useSearchParams() in ProjectsView from

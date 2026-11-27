@@ -233,10 +233,15 @@ body:has([data-browser-safe-viewport]) {
   margin: 12px 0 4px;
 }
 
-/* Mobile bottom nav padding — ensures scrollable content clears the fixed nav bar */
-@media (max-width: 767px) {
-  [data-slot="sidebar-inset"] {
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 8px));
+/* Keep the scrolling page and its tabs on the same iPhone viewport after a
+   relaunch or resize. The footer occupies its actual height in this column. */
+@media (width < 48rem) {
+  [data-browser-safe-viewport] {
+    position: fixed;
+    inset: 0;
+    height: auto;
+    flex-direction: column;
+    overflow: hidden;
   }
 }
 
